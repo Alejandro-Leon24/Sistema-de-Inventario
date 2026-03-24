@@ -1,0 +1,425 @@
+{% extends "layout.html" %}
+
+{% block title %}Ajustes{% endblock %}
+
+{% block body %}
+<section class="settings-page py-4">
+    <div class="row g-4">
+        <div class="col-lg-3">
+            <div class="card border-0 shadow-sm">
+                <div class="list-group list-group-flush">
+                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn active" data-target="ubicaciones" style="border-top-left-radius: 0.5rem; border-top-right-radius: 0.5rem;">
+                        <i class="bi bi-building me-2"></i>Áreas e Inmuebles
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="parametros">
+                        <i class="bi bi-gear me-2"></i>Parámetros
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="personal" style="border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem;">
+                        <i class="bi bi-people me-2"></i>Personal
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-9 overflow-y-auto" style="height: 80vh;">
+            <div id="section-ubicaciones" class="settings-section">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                    <h3 class="m-0 fw-bold text-primary">Áreas e Inmuebles</h3>
+                    <div class="d-flex gap-2">
+                        <button id="btn-importar-ubicaciones" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-file-earmark-arrow-up me-2"></i>Importar Ubicaciones
+                        </button>
+                        <button id="btn-agregar-bloque" class="btn btn-primary btn-sm">
+                            <i class="bi bi-plus-circle me-2"></i>Agregar Bloque
+                        </button>
+                    </div>
+                </div>
+
+                <div id="bloques-tabs" class="settings-tabs mb-4"></div>
+                <div id="sin-bloques-mensaje" class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>No hay ningún bloque registrado. Crea uno para comenzar.
+                </div>
+
+                <div id="bloques-content" class="d-none">
+                    <div class="card border-0 shadow-sm mb-3">
+                        <div class="card-body">
+                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                                <h5 class="m-0 fw-bold">Pisos del bloque</h5>
+                                <button id="btn-agregar-piso" class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-plus-lg me-1"></i>Agregar Piso
+                                </button>
+                            </div>
+                            <div id="pisos-container" class="row g-3"></div>
+                        </div>
+                    </div>
+
+                    <div id="areas-section" class="d-none">
+                        <div id="sin-pisos-mensaje" class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>No hay pisos en este bloque. Crea uno para gestionar áreas.
+                        </div>
+                        <div id="areas-container" class="floor-areas-grid"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-parametros" class="settings-section d-none">
+                <h3 class="fw-bold text-primary mb-4">Parámetros de la Universidad</h3>
+
+                <div class="row g-4 mb-4">
+                    <div>
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <h5 class="m-0 fw-bold small text-uppercase">Universidad</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label fw-semibold">Nombre de la Universidad</label>
+                                    <input type="text" id="param-universidad-nombre" class="form-control" maxlength="150" readonly>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button type="button" id="btn-edit-universidad" class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-pencil me-1"></i>Editar
+                                    </button>
+                                    <button type="button" id="btn-save-universidad" class="btn btn-success btn-sm d-none">
+                                        <i class="bi bi-check-lg me-1"></i>Guardar
+                                    </button>
+                                    <button type="button" id="btn-cancel-universidad" class="btn btn-outline-secondary btn-sm d-none">
+                                        <i class="bi bi-x-lg me-1"></i>Cancelar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Estados</h5>
+                                    <button type="button" id="btn-add-estado" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-estados-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Condiciones</h5>
+                                    <button type="button" id="btn-add-condicion" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-condiciones-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Cuentas</h5>
+                                    <button type="button" id="btn-add-cuenta" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-cuentas-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Opciones Sí / No</h5>
+                                    <button type="button" id="btn-add-si-no" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-si-no-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Estado de Puerta</h5>
+                                    <button type="button" id="btn-add-estado-puerta" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-estado-puerta-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Tipos de Cerradura</h5>
+                                    <button type="button" id="btn-add-cerradura" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-cerraduras-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-personal" class="settings-section d-none">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                    <h3 class="m-0 fw-bold text-primary">Personal</h3>
+                </div>
+
+                <div class="card border-0 shadow-sm mb-4 personal-form-card">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3"><i class="bi bi-pencil me-2"></i>Registrar personal</h5>
+                        <form id="form-personal" class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Nombre Completo</label>
+                                <input type="text" id="personal-nombre" class="form-control" maxlength="150" placeholder="Ej: Ing. Manuel Reyes">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Cargo</label>
+                                <input type="text" id="personal-cargo" class="form-control" maxlength="100" placeholder="Ej: Docente">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Facultad</label>
+                                <input type="text" id="personal-facultad" class="form-control" maxlength="150" placeholder="Ej: Facultad de Matemáticas">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Título académico</label>
+                                <input type="text" id="personal-titulo" class="form-control" maxlength="100" placeholder="Ej: Economista">
+                            </div>
+                            <div class="col-12 text-center mt-2">
+                                <button type="submit" class="btn btn-primary px-5 rounded-pill">Registrar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div id="administradores-container" class="row g-3"></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="modal fade" id="modalEntidad" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalEntidadLabel">Nueva entidad</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Nombre</label>
+                    <input type="text" id="entidad-nombre" class="form-control" maxlength="120">
+                </div>
+                <div>
+                    <label class="form-label fw-semibold">Descripción (opcional)</label>
+                    <textarea id="entidad-descripcion" class="form-control" rows="2" maxlength="220"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-guardar-entidad">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalDetalleUbicacion" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalDetalleUbicacionLabel">Detalle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modal-detalle-ubicacion-body"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="btn-detalle-cancelar" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-outline-danger" id="btn-detalle-eliminar">Eliminar</button>
+                <button type="button" class="btn btn-primary" id="btn-detalle-editar">Editar</button>
+                <button type="button" class="btn btn-success d-none" id="btn-detalle-guardar">Guardar</button>
+                <button type="button" class="btn btn-outline-secondary d-none" id="btn-detalle-cancelar-edicion">Cancelar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalConfirmarEliminacionUbicacion" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalConfirmarEliminacionUbicacionLabel">Confirmar eliminación</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modalConfirmarEliminacionUbicacionBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="btn-cancelar-eliminacion-ubicacion" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" id="btn-confirmar-eliminacion-ubicacion">Sí, eliminar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalArea" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalAreaLabel">Registrar Área</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3" id="form-area-detalle">
+                    <div class="col-md-4">
+                        <label class="form-label">Nombre del área</label>
+                        <input type="text" class="form-control" id="area-nombre" maxlength="120">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Responsable del ambiente</label>
+                        <select class="form-select" id="area-responsable-admin-id"></select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Descripción</label>
+                        <input type="text" class="form-control" id="area-descripcion" maxlength="220">
+                    </div>
+
+                    <div class="col-md-3"><label class="form-label">Estado paredes</label><select class="form-select" id="area-estado-paredes"></select></div>
+                    <div class="col-md-3"><label class="form-label">Estado techo</label><select class="form-select" id="area-estado-techo"></select></div>
+                    <div class="col-md-3"><label class="form-label">Estado puerta</label><select class="form-select" id="area-estado-puerta"></select></div>
+                    <div class="col-md-3"><label class="form-label">Cerradura</label><select class="form-select" id="area-cerradura"></select></div>
+
+                    <div class="col-md-3"><label class="form-label">Nivel seguridad</label><select class="form-select" id="area-nivel-seguridad"></select></div>
+                    <div class="col-md-3"><label class="form-label">Sitio profesor tiene mesa</label><select class="form-select" id="area-sitio-profesor-mesa"></select></div>
+                    <div class="col-md-3"><label class="form-label">Sitio profesor tiene silla</label><select class="form-select" id="area-sitio-profesor-silla"></select></div>
+                    <div class="col-md-3"><label class="form-label">PC en aula</label><select class="form-select" id="area-pc-aula"></select></div>
+
+                    <div class="col-md-3"><label class="form-label">Proyector</label><select class="form-select" id="area-proyector"></select></div>
+                    <div class="col-md-3"><label class="form-label">Pantalla interactiva</label><select class="form-select" id="area-pantalla-interactiva"></select></div>
+                    <div class="col-md-3"><label class="form-label">A/A (cantidad)</label><input type="number" class="form-control" id="area-aa-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">A/A funcionando</label><input type="number" class="form-control" id="area-aa-funcionan" min="0"></div>
+
+                    <div class="col-md-3"><label class="form-label">Ventiladores (cantidad)</label><input type="number" class="form-control" id="area-ventiladores-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Señal WIFI</label><select class="form-select" id="area-wifi"></select></div>
+                    <div class="col-md-3"><label class="form-label">Red LAN alámbrica</label><select class="form-select" id="area-red-lan"></select></div>
+                    <div class="col-md-3"><label class="form-label">LAN puntos funcionando</label><input type="number" class="form-control" id="area-red-lan-funcionan" min="0"></div>
+
+                    <div class="col-md-3"><label class="form-label">LAN puntos NO funcionando</label><input type="number" class="form-control" id="area-red-lan-no-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Red inalámbrica (cantidad)</label><input type="number" class="form-control" id="area-red-inalambrica-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Iluminación funcionando</label><input type="number" class="form-control" id="area-iluminacion-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Iluminación NO funcionando</label><input type="number" class="form-control" id="area-iluminacion-no-funcionan" min="0"></div>
+
+                    <div class="col-md-3"><label class="form-label">Luminarias (cantidad)</label><input type="number" class="form-control" id="area-luminarias-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Puntos eléctricos</label><select class="form-select" id="area-puntos-electricos"></select></div>
+                    <div class="col-md-3"><label class="form-label">Puntos eléctricos funcionando</label><input type="number" class="form-control" id="area-puntos-electricos-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Puntos eléctricos NO funcionando</label><input type="number" class="form-control" id="area-puntos-electricos-no-funcionan" min="0"></div>
+
+                    <div class="col-md-3"><label class="form-label">Puntos eléctricos (cantidad)</label><input type="number" class="form-control" id="area-puntos-electricos-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Capacidad aúlica</label><input type="number" class="form-control" id="area-capacidad-aulica" min="0"></div>
+                    <div class="col-md-6"><label class="form-label">Observaciones</label><textarea class="form-control" id="area-observaciones-detalle" rows="2" maxlength="500"></textarea></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-guardar-area-detalle">Guardar Área</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalImportarUbicaciones" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Importar Bloques y Pisos</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-2">
+                    Pega líneas como: <strong>BLOQUE "A" - PRINCIPAL, PLANTA BAJA</strong>.
+                    Se crearán bloques y pisos faltantes; las áreas quedan igual.
+                </p>
+                <textarea id="import-ubicaciones-texto" class="form-control" rows="12"
+                    placeholder="BLOQUE \"A\" - PRINCIPAL, PLANTA BAJA"></textarea>
+                <div id="import-ubicaciones-resumen" class="small text-muted mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-confirmar-import-ubicaciones">
+                    <i class="bi bi-check2-circle me-1"></i>Importar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalAdmin" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Registrar Administrador</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Nombre Completo</label>
+                    <input type="text" id="admin-nombre" class="form-control" maxlength="150">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Cargo</label>
+                    <input type="text" id="admin-cargo" class="form-control" maxlength="100">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Facultad</label>
+                    <input type="text" id="admin-facultad" class="form-control" maxlength="150">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Título Académico</label>
+                    <input type="text" id="admin-titulo" class="form-control" maxlength="100">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Email</label>
+                    <input type="email" id="admin-email" class="form-control" maxlength="100">
+                </div>
+                <div>
+                    <label class="form-label fw-semibold">Teléfono</label>
+                    <input type="tel" id="admin-telefono" class="form-control" maxlength="20">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-guardar-admin">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/funciones-configuracion.js') }}"></script>
+{% endblock %}

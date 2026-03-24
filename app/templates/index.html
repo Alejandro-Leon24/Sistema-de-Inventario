@@ -1,0 +1,53 @@
+{% extends "layout.html" %}
+
+{% block title %}Sistema de Inventario{% endblock %}
+
+{% block body %}
+    <div class="hero-section p-4">
+        <h1 class="fw-bold">Panel de Gestión Administrativa</h1>
+    </div>
+        
+    <div class="row g-4 mb-5">
+        <div class="col-md-4">
+            <div class="card card-custom p-4 text-center">
+                <div class="icon-circle"><i class="bi bi-file-earmark-text-fill"></i></div>
+                <h3 class="h5 fw-bold">Generar Actas</h3>
+                <p class="text-muted small">Creación de documentos oficiales para la asignación y retiro de bienes institucionales.</p>
+                <a href="" class="btn btn-link text-decoration-none fw-bold">Acceder →</a>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-custom p-4 text-center">
+                <div class="icon-circle"><i class="bi bi-list-ul"></i></div>
+                <h3 class="h5 fw-bold">Inventario</h3>
+                <p class="text-muted small">Registro, consulta y edición de todos los activos y mobiliario registrado.</p>
+                <a href="{{ url_for('inventario_list') }}" class="btn btn-link text-decoration-none fw-bold mt-auto">Gestionar Inventario →</a>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-custom p-4 text-center">
+                <div class="icon-circle"><i class="bi bi-gear-fill"></i></div>
+                <h3 class="h5 fw-bold">Configuración</h3>
+                <p class="text-muted small align-content-center">Gestión de usuarios, permisos del sistema y parámetros generales de la institución.</p>
+                <a href="{{ url_for('ajustes') }}" class="btn btn-link text-decoration-none fw-bold">Ajustes →</a>
+            </div>
+        </div>
+    </div>
+    <div class="row footer-stats text-uppercase small fw-bold text-muted" style="margin-top: 20px;">
+        <div class="col-md-3">
+            <div class="mb-1">Bienes Registrados</div>
+            <div class="h4 fw-bold text-dark">120 <i class="bi bi-graph-up-arrow text-success fs-6"></i></div>
+        </div>
+        <div class="col-md-3">
+            <div class="mb-1">Actas Generadas</div>
+            <div class="h4 fw-bold text-dark">45 <i class="bi bi-file-earmark-check text-primary fs-6"></i></div>
+        </div>
+        <div class="col-md-3">
+            <div class="mb-1">Actas Recibidas</div>
+            <div class="h4 fw-bold text-dark">38 <span class="badge bg-warning text-dark p-1 ms-1">●</span></div>
+        </div>
+        <div class="col-md-3 text-end text-capitalize opacity-50">
+            © {{ data.year }} Universidad de Guayaquil <br>Sistema de inventarios
+        </div>
+    </div>
+{% endblock %}

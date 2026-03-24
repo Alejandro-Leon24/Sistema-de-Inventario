@@ -1,0 +1,333 @@
+{% extends "layout.html" %}
+
+{% block title %}Lista de Inventario{% endblock %}
+{% block body %}
+<section class="inventory-page py-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <h3 class="m-0 fw-bold text-primary">Inventario General</h3>
+        <div class="d-flex flex-wrap gap-2">
+            <button id="btn-toggle-density" class="btn btn-outline-secondary" type="button">
+                <i class="bi bi-arrows-collapse me-2"></i>Modo: Compacta
+            </button>
+            <button id="btn-exportar-excel" class="btn btn-outline-primary" type="button">
+                <i class="bi bi-file-earmark-excel me-2"></i>Exportar a Excel
+            </button>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAgregarItem">
+                <i class="bi bi-plus-circle me-2"></i>Agregar nuevo ítem
+            </button>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Bloque</label>
+                    <select id="filtro-bloque" class="form-select">
+                        <option value="">Todos</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Piso</label>
+                    <select id="filtro-piso" class="form-select" disabled>
+                        <option value="">Seleccione un bloque primero</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Área</label>
+                    <select id="filtro-area" class="form-select" disabled>
+                        <option value="">Seleccione un piso primero</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Buscar</label>
+                    <input id="filtro-search" type="text" class="form-control"
+                        placeholder="Descripción, código, marca...">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 align-items-end pb-2">
+        <div class="col-md-3 ms-md-auto">
+            <select id="filtro-order" class="form-select"
+                style="width: 80%; margin-left: auto; font-size: 0.8rem; padding-top: 0.3rem; padding-bottom: 0.3rem;">
+                <option value="asc">Menor a mayor</option>
+                <option value="desc">Mayor a menor</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="inventory-grid-wrapper"
+        class="inventory-grid-wrapper table-compact card shadow-sm border-0 position-relative">
+        <div class="inventory-grid-scroll">
+            <table id="tabla-inventario" class="table table-hover mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th data-field="item_numero">ITEM</th>
+                        <th data-field="cod_inventario">CÓD. INVENTARIO</th>
+                        <th data-field="cod_esbye">CÓD. ESBYE</th>
+                        <th data-field="cuenta">CUENTA</th>
+                        <th data-field="cantidad">CANTIDAD</th>
+                        <th data-field="descripcion">DESCRIPCIÓN</th>
+                        <th data-field="marca">MARCA</th>
+                        <th data-field="modelo">MODELO</th>
+                        <th data-field="serie">SERIE</th>
+                        <th data-field="estado">ESTADO</th>
+                        <th data-field="ubicacion">UBICACIÓN</th>
+                        <th data-field="fecha_adquisicion">FECHA DE ADQUISICIÓN</th>
+                        <th data-field="valor">VALOR</th>
+                        <th data-field="usuario_final">USUARIO FINAL</th>
+                        <th data-field="observacion">OBSERVACIÓN</th>
+                        <th data-field="descripcion_esbye">DESCRIPCIÓN ESBYE</th>
+                        <th data-field="marca_esbye">MARCA ESBYE</th>
+                        <th data-field="modelo_esbye">MODELO ESBYE</th>
+                        <th data-field="serie_esbye">SERIE ESBYE</th>
+                        <th data-field="fecha_adquisicion_esbye">FECHA ESBYE</th>
+                        <th data-field="valor_esbye">VALOR ESBYE</th>
+                        <th data-field="ubicacion_esbye">UBICACIÓN ESBYE</th>
+                        <th data-field="observacion_esbye">OBSERVACIÓN ESBYE</th>
+                    </tr>
+                </thead>
+                <tbody id="inventario-body"></tbody>
+            </table>
+        </div>
+        <button id="add-inline-row" type="button" class="btn btn-primary btn-sm floating-plus"
+            title="Agregar fila al final">
+            <i class="bi bi-plus-lg"></i>
+        </button>
+    </div>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 px-1">
+        <div id="inventory-pagination-info" class="small text-muted">Mostrando 0 - 0 de 0</div>
+        <div class="d-flex align-items-center gap-2">
+            <label for="inventory-page-size" class="small text-muted m-0">Filas:</label>
+            <select id="inventory-page-size" class="form-select form-select-sm" style="width: 88px;">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+            </select>
+            <button id="inventory-page-prev" type="button" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-chevron-left"></i>
+            </button>
+            <span id="inventory-page-indicator" class="small text-muted" style="min-width: 84px; text-align: center;">1 / 1</span>
+            <button id="inventory-page-next" type="button" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-chevron-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="context-menu" class="context-menu shadow d-none">
+        <button type="button" class="dropdown-item" data-action="view">
+            <i class="bi bi-eye me-2 p-2"></i>Ver información
+        </button>
+        <button type="button" class="dropdown-item text-danger" data-action="delete">
+            <i class="bi bi-trash me-2 p-2"></i>Borrar
+        </button>
+    </div>
+</section>
+
+<div class="modal fade" id="modalDetalle" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Detalle del bien</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="detalle-contenido"></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalDuplicadosInventario" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-warning-subtle">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2 text-warning-emphasis"></i>
+                    Códigos repetidos detectados
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="duplicados-resumen" class="small text-muted mb-2"></p>
+                <div id="duplicados-lista" class="d-grid gap-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-duplicados-cancelar">
+                    Cancelar
+                </button>
+                <button type="button" class="btn btn-warning btn-sm" id="btn-duplicados-continuar">
+                    <i class="bi bi-check2-circle me-1"></i>Agregar de todas formas
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalAgregarItem" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Agregar nuevo ítem</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <p class="text-muted small">Completa los campos o pega una fila copiada directamente desde Excel en
+                        el área de abajo.</p>
+                    <textarea id="excel-single-row" class="form-control form-control-sm mb-3" rows="2"
+                        placeholder="Pegado rápido desde Excel (selecciona y pega directo)"></textarea>
+                </div>
+
+                <div class="row g-3" id="form-agregar-item">
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Cód. Inventario</label>
+                        <input type="text" class="form-control form-control-sm" data-field="cod_inventario"
+                            placeholder="Ej: 1519847">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Cód. ESBYE</label>
+                        <input type="text" class="form-control form-control-sm" data-field="cod_esbye"
+                            placeholder="Ej: 35344704">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">Cuenta</label>
+                        <select class="form-select form-select-sm" data-field="cuenta"
+                            id="modal-cuenta-select"></select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold small">Cantidad</label>
+                        <input type="number" class="form-control form-control-sm" data-field="cantidad" value="1"
+                            min="1" step="1" inputmode="numeric" oninput="validarEnteros(this)">
+                    </div>
+                    <div class="col-md-12">
+                        <label class="form-label fw-semibold small">Descripción</label>
+                        <textarea name="descripcion" id="modal-descripcion" class="form-control form-control-sm" data-field="descripcion"
+                            placeholder="Ej: Proyector"></textarea>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Marca</label>
+                        <input type="text" class="form-control form-control-sm" data-field="marca"
+                            placeholder="Ej: RUCKUS">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Modelo</label>
+                        <input type="text" class="form-control form-control-sm" data-field="modelo"
+                            placeholder="Ej: R320">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Serie</label>
+                        <input type="text" class="form-control form-control-sm" data-field="serie"
+                            placeholder="Ej: 6463727474">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Estado</label>
+                        <select class="form-select form-select-sm" data-field="estado"></select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold small">Área (relación)</label>
+                        <select class="form-select form-select-sm" data-field="area_id" id="modal-area-select"></select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold small">Ubicación</label>
+                        <input type="text" class="form-control form-control-sm" data-field="ubicacion"
+                            id="modal-ubicacion" placeholder="Bloque / Piso / Área" readonly>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Fecha Adquisición</label>
+                        <input type="date" class="form-control form-control-sm" data-field="fecha_adquisicion">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Valor ($)</label>
+                        <input type="text" class="form-control form-control-sm" inputmode="decimal" data-field="valor"
+                            placeholder="0,00" oninput="validarNumerosComas(this)">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold small">Usuario Final</label>
+                        <select class="form-select form-select-sm" data-field="usuario_final"
+                            id="modal-usuario-final-select">
+                            <option value="">-- Seleccionar personal --</option>
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold small">Observación</label>
+                        <textarea class="form-control form-control-sm" rows="2" data-field="observacion"
+                            placeholder="Notas adicionales..."></textarea>
+                    </div>
+
+                    <hr class="my-2">
+                    <h6 class="fw-bold text-uppercase text-primary mt-1" style="text-align: center;">Sistema ESBYE</h6>
+
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Descripción ESBYE</label>
+                        <textarea class="form-control form-control-sm" rows="2" data-field="descripcion_esbye"
+                            placeholder="Descripción"></textarea>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold small">Marca ESBYE</label>
+                        <input type="text" class="form-control form-control-sm" data-field="marca_esbye"
+                            placeholder="Marca">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold small">Modelo ESBYE</label>
+                        <input type="text" class="form-control form-control-sm" data-field="modelo_esbye"
+                            placeholder="Modelo">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold small">Serie ESBYE</label>
+                        <input type="text" class="form-control form-control-sm" data-field="serie_esbye"
+                            placeholder="Serie">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">Fecha Adq. ESBYE</label>
+                        <input type="date" class="form-control form-control-sm" data-field="fecha_adquisicion_esbye">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold small">Valor ESBYE</label>
+                        <input type="text" class="form-control form-control-sm" inputmode="decimal" data-field="valor_esbye"
+                            placeholder="0,00" oninput="validarNumerosComas(this)">
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label fw-semibold small">Ubicación ESBYE</label>
+                        <textarea class="form-control form-control-sm" rows="2" data-field="ubicacion_esbye"
+                            placeholder="Ubicación ESBYE"></textarea>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label fw-semibold small">Observación ESBYE</label>
+                        <textarea class="form-control form-control-sm" rows="2" data-field="observacion_esbye"
+                            placeholder="Observación ESBYE"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-guardar-item">
+                    <i class="bi bi-check-circle me-1"></i>Guardar ítem
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+
+function validarEnteros(input) {
+    let value = String(input.value || "").replace(/[^0-9]/g, "");
+    if (value.length > 1) {
+        value = value.replace(/^0+/, "") || "0";
+    }
+    input.value = value;
+}
+
+function validarNumerosComas(input) {
+    let value = String(input.value || "").replace(/[^0-9,]/g, "");
+    const firstComma = value.indexOf(",");
+    if (firstComma !== -1) {
+        value = value.slice(0, firstComma + 1) + value.slice(firstComma + 1).replace(/,/g, "");
+    }
+    input.value = value;
+}
+</script>
+<script src="{{ url_for('static', filename='js/funciones-inventario.js') }}"></script>
+{% endblock %}

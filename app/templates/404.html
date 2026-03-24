@@ -1,0 +1,33 @@
+{% extends "layout.html" %}
+
+{% block title %}Página no encontrada{% endblock %}
+
+{% block body %}
+    <div class="container">
+        <div class="row m-auto align-items-center" style="height: 90vh;">
+            <div class="col-12 text-center">
+                <h1 class="display-1 text-muted">404</h1>
+                <h2 class="fw-bold">Página no encontrada</h2>
+                <p class="text-muted">La página que estás buscando no existe o ha sido movida.</p>
+                <p class="text-muted">Serás redirigido al inicio en <span id="countdown">5</span> segundos.</p>
+                <a href="{{ url_for('index') }}" class="btn btn-primary">Volver al inicio</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var secondsLeft = 5;
+        var countdown = document.getElementById("countdown");
+        var targetUrl = "{{ url_for('index') }}";
+
+        var timer = setInterval(function () {
+            secondsLeft -= 1;
+            countdown.textContent = String(secondsLeft);
+
+            if (secondsLeft <= 0) {
+                clearInterval(timer);
+                window.location.href = targetUrl;
+            }
+        }, 1000);
+    </script>
+{% endblock %}
