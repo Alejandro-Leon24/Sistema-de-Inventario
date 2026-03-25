@@ -1,4 +1,5 @@
 import sqlite3
+import uuid
 import shutil
 from io import BytesIO
 
@@ -210,20 +211,30 @@ def api_create_piso():
 def api_create_area():
     payload = request.get_json(silent=True) or {}
     nombre = (payload.get("nombre") or "").strip()
+    identificacion_ambiente = (payload.get("identificacion_ambiente") or "").strip()
     piso_id = payload.get("piso_id")
     if not piso_id:
         return jsonify({"error": "El piso es obligatorio."}), 400
     if not nombre:
-        return jsonify({"error": "El nombre del área es obligatorio."}), 400
+        if identificacion_ambiente:
+            nombre = identificacion_ambiente
+        else:
+            # Evita conflictos de unicidad por piso sin alterar el esquema.
+            nombre = f"AREA SIN NOMBRE {uuid.uuid4().hex[:8].upper()}"
 
     details_keys = [
+        "identificacion_ambiente", "metros_cuadrados", "alto", "senaletica", "cod_senaletica",
+        "infraestructura_fisica", "estado_piso", "material_techo", "puerta", "material_puerta",
         "responsable_admin_id", "estado_paredes", "estado_techo", "estado_puerta", "cerradura",
         "nivel_seguridad", "sitio_profesor_mesa", "sitio_profesor_silla", "pc_aula", "proyector",
-        "pantalla_interactiva", "aa_cantidad", "aa_funcionan", "ventiladores_cantidad", "wifi",
+        "pantalla_interactiva", "pupitres_cantidad", "pupitres_funcionan", "pupitres_no_funcionan",
+        "pizarra", "pizarra_estado", "ventanas_cantidad", "ventanas_funcionan", "ventanas_no_funcionan",
+        "aa_cantidad", "aa_funcionan", "aa_no_funcionan", "ventiladores_cantidad",
+        "ventiladores_funcionan", "ventiladores_no_funcionan", "wifi",
         "red_lan", "red_lan_funcionan", "red_lan_no_funcionan", "red_inalambrica_cantidad",
         "iluminacion_funcionan", "iluminacion_no_funcionan", "luminarias_cantidad", "puntos_electricos",
         "puntos_electricos_funcionan", "puntos_electricos_no_funcionan", "puntos_electricos_cantidad",
-        "capacidad_aulica", "observaciones_detalle",
+        "capacidad_aulica", "capacidad_distanciamiento", "ambiente_apto_retorno", "observaciones_detalle",
     ]
     details = {key: payload.get(key) for key in details_keys if key in payload}
 
@@ -263,16 +274,21 @@ def api_update_area(area_id):
     payload = request.get_json(silent=True) or {}
     nombre = payload.get("nombre")
     descripcion = payload.get("descripcion")
-    if nombre is not None and not str(nombre).strip():
-        return jsonify({"error": "El nombre del área no puede estar vacío."}), 400
+    if nombre is not None:
+        nombre = str(nombre).strip() or None
     details_keys = [
+        "identificacion_ambiente", "metros_cuadrados", "alto", "senaletica", "cod_senaletica",
+        "infraestructura_fisica", "estado_piso", "material_techo", "puerta", "material_puerta",
         "responsable_admin_id", "estado_paredes", "estado_techo", "estado_puerta", "cerradura",
         "nivel_seguridad", "sitio_profesor_mesa", "sitio_profesor_silla", "pc_aula", "proyector",
-        "pantalla_interactiva", "aa_cantidad", "aa_funcionan", "ventiladores_cantidad", "wifi",
+        "pantalla_interactiva", "pupitres_cantidad", "pupitres_funcionan", "pupitres_no_funcionan",
+        "pizarra", "pizarra_estado", "ventanas_cantidad", "ventanas_funcionan", "ventanas_no_funcionan",
+        "aa_cantidad", "aa_funcionan", "aa_no_funcionan", "ventiladores_cantidad",
+        "ventiladores_funcionan", "ventiladores_no_funcionan", "wifi",
         "red_lan", "red_lan_funcionan", "red_lan_no_funcionan", "red_inalambrica_cantidad",
         "iluminacion_funcionan", "iluminacion_no_funcionan", "luminarias_cantidad", "puntos_electricos",
         "puntos_electricos_funcionan", "puntos_electricos_no_funcionan", "puntos_electricos_cantidad",
-        "capacidad_aulica", "observaciones_detalle",
+        "capacidad_aulica", "capacidad_distanciamiento", "ambiente_apto_retorno", "observaciones_detalle",
     ]
     details = {key: payload.get(key) for key in details_keys if key in payload}
 
@@ -527,14 +543,14 @@ def api_put_column_mappings():
 
 @app.get('/api/parametros/<tipo>')
 def api_get_parametros(tipo):
-    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras"]:
+    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta", "estado_pizarra"]:
         return jsonify({"error": "Tipo de parámetro no válido."}), 400
     return jsonify({"data": get_param(tipo)})
 
 
 @app.post('/api/parametros/<tipo>')
 def api_create_parametro(tipo):
-    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras"]:
+    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta", "estado_pizarra"]:
         return jsonify({"error": "Tipo de parámetro no válido."}), 400
     payload = request.get_json(silent=True) or {}
     nombre = (payload.get("nombre") or "").strip()
@@ -549,7 +565,7 @@ def api_create_parametro(tipo):
 
 @app.patch('/api/parametros/<tipo>/<int:param_id>')
 def api_update_parametro(tipo, param_id):
-    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras"]:
+    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta", "estado_pizarra"]:
         return jsonify({"error": "Tipo de parámetro no válido."}), 400
     payload = request.get_json(silent=True) or {}
     nombre = (payload.get("nombre") or "").strip()
@@ -566,7 +582,7 @@ def api_update_parametro(tipo, param_id):
 
 @app.delete('/api/parametros/<tipo>/<int:param_id>')
 def api_delete_parametro(tipo, param_id):
-    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras"]:
+    if tipo not in ["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta", "estado_pizarra"]:
         return jsonify({"error": "Tipo de parámetro no válido."}), 400
     try:
         delete_param(tipo, param_id)

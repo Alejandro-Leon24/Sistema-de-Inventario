@@ -99,6 +99,17 @@ async function initSettingsPage() {
 		const areaFields = {
 			nombre: document.getElementById("area-nombre"),
 			descripcion: document.getElementById("area-descripcion"),
+			identificacion_ambiente: document.getElementById("area-identificacion-ambiente"),
+			metros_cuadrados: document.getElementById("area-metros-cuadrados"),
+			alto: document.getElementById("area-alto"),
+			senaletica: document.getElementById("area-senaletica"),
+			cod_senaletica: document.getElementById("area-cod-senaletica"),
+			infraestructura_fisica: document.getElementById("area-infraestructura-fisica"),
+			piso_nombre: document.getElementById("area-piso-nombre"),
+			estado_piso: document.getElementById("area-estado-piso"),
+			material_techo: document.getElementById("area-material-techo"),
+			puerta: document.getElementById("area-puerta"),
+			material_puerta: document.getElementById("area-material-puerta"),
 			responsable_admin_id: document.getElementById("area-responsable-admin-id"),
 			estado_paredes: document.getElementById("area-estado-paredes"),
 			estado_techo: document.getElementById("area-estado-techo"),
@@ -110,9 +121,20 @@ async function initSettingsPage() {
 			pc_aula: document.getElementById("area-pc-aula"),
 			proyector: document.getElementById("area-proyector"),
 			pantalla_interactiva: document.getElementById("area-pantalla-interactiva"),
+			pupitres_cantidad: document.getElementById("area-pupitres-cantidad"),
+			pupitres_funcionan: document.getElementById("area-pupitres-funcionan"),
+			pupitres_no_funcionan: document.getElementById("area-pupitres-no-funcionan"),
+			pizarra: document.getElementById("area-pizarra"),
+			pizarra_estado: document.getElementById("area-pizarra-estado"),
+			ventanas_cantidad: document.getElementById("area-ventanas-cantidad"),
+			ventanas_funcionan: document.getElementById("area-ventanas-funcionan"),
+			ventanas_no_funcionan: document.getElementById("area-ventanas-no-funcionan"),
 			aa_cantidad: document.getElementById("area-aa-cantidad"),
 			aa_funcionan: document.getElementById("area-aa-funcionan"),
+			aa_no_funcionan: document.getElementById("area-aa-no-funcionan"),
 			ventiladores_cantidad: document.getElementById("area-ventiladores-cantidad"),
+			ventiladores_funcionan: document.getElementById("area-ventiladores-funcionan"),
+			ventiladores_no_funcionan: document.getElementById("area-ventiladores-no-funcionan"),
 			wifi: document.getElementById("area-wifi"),
 			red_lan: document.getElementById("area-red-lan"),
 			red_lan_funcionan: document.getElementById("area-red-lan-funcionan"),
@@ -126,6 +148,8 @@ async function initSettingsPage() {
 			puntos_electricos_no_funcionan: document.getElementById("area-puntos-electricos-no-funcionan"),
 			puntos_electricos_cantidad: document.getElementById("area-puntos-electricos-cantidad"),
 			capacidad_aulica: document.getElementById("area-capacidad-aulica"),
+			capacidad_distanciamiento: document.getElementById("area-capacidad-distanciamiento"),
+			ambiente_apto_retorno: document.getElementById("area-ambiente-apto-retorno"),
 			observaciones_detalle: document.getElementById("area-observaciones-detalle"),
 		};
 		const btnDetalleCerrar = document.getElementById("btn-detalle-cancelar");
@@ -157,11 +181,15 @@ async function initSettingsPage() {
 		async function loadAreaFormOptions() {
 			if (!modalArea) return;
 			try {
-				const [adminsRes, siNoRes, puertaRes, cerradurasRes] = await Promise.all([
+				const [adminsRes, siNoRes, puertaRes, cerradurasRes, estadoPisoRes, materialTechoRes, materialPuertaRes, estadoPizarraRes] = await Promise.all([
 					api.get("/api/administradores"),
 					api.get("/api/parametros/si_no"),
 					api.get("/api/parametros/estado_puerta"),
 					api.get("/api/parametros/cerraduras"),
+					api.get("/api/parametros/estado_piso"),
+					api.get("/api/parametros/material_techo"),
+					api.get("/api/parametros/material_puerta"),
+					api.get("/api/parametros/estado_pizarra"),
 				]);
 
 				const adminSelect = areaFields.responsable_admin_id;
@@ -178,18 +206,31 @@ async function initSettingsPage() {
 				const yesNoValues = (siNoRes.data || []).map((item) => item.nombre);
 				fillSelectWithText(areaFields.estado_paredes, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.estado_techo, yesNoValues, "Seleccionar");
+				fillSelectWithText(areaFields.senaletica, yesNoValues, "Seleccionar");
+				fillSelectWithText(areaFields.puerta, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.nivel_seguridad, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.sitio_profesor_mesa, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.sitio_profesor_silla, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.pc_aula, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.proyector, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.pantalla_interactiva, yesNoValues, "Seleccionar");
+				fillSelectWithText(areaFields.pizarra, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.wifi, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.red_lan, yesNoValues, "Seleccionar");
 				fillSelectWithText(areaFields.puntos_electricos, yesNoValues, "Seleccionar");
+				fillSelectWithText(areaFields.ambiente_apto_retorno, yesNoValues, "Seleccionar");
 
 				fillSelectWithText(areaFields.estado_puerta, (puertaRes.data || []).map((item) => item.nombre), "Seleccionar");
 				fillSelectWithText(areaFields.cerradura, (cerradurasRes.data || []).map((item) => item.nombre), "Seleccionar");
+				fillSelectWithText(areaFields.estado_piso, (estadoPisoRes.data || []).map((item) => item.nombre), "Seleccionar");
+				fillSelectWithText(areaFields.material_techo, (materialTechoRes.data || []).map((item) => item.nombre), "Seleccionar");
+				fillSelectWithText(areaFields.material_puerta, (materialPuertaRes.data || []).map((item) => item.nombre), "Seleccionar");
+				fillSelectWithText(areaFields.pizarra_estado, (estadoPizarraRes.data || []).map((item) => item.nombre), "Seleccionar");
+
+				const activeFloor = getActiveFloor();
+				if (areaFields.piso_nombre) {
+					areaFields.piso_nombre.value = activeFloor?.nombre || "";
+				}
 			} catch (error) {
 				console.error("Error cargando opciones de área:", error);
 			}
@@ -453,17 +494,25 @@ async function initSettingsPage() {
 		}
 
 		async function loadAreaDetailOptions() {
-			const [adminsRes, siNoRes, puertaRes, cerradurasRes] = await Promise.all([
+			const [adminsRes, siNoRes, puertaRes, cerradurasRes, estadoPisoRes, materialTechoRes, materialPuertaRes, estadoPizarraRes] = await Promise.all([
 				api.get("/api/administradores"),
 				api.get("/api/parametros/si_no"),
 				api.get("/api/parametros/estado_puerta"),
 				api.get("/api/parametros/cerraduras"),
+				api.get("/api/parametros/estado_piso"),
+				api.get("/api/parametros/material_techo"),
+				api.get("/api/parametros/material_puerta"),
+				api.get("/api/parametros/estado_pizarra"),
 			]);
 			return {
 				admins: adminsRes.data || [],
 				yesNo: (siNoRes.data || []).map((entry) => entry.nombre),
 				estadoPuerta: (puertaRes.data || []).map((entry) => entry.nombre),
 				cerraduras: (cerradurasRes.data || []).map((entry) => entry.nombre),
+				estadoPiso: (estadoPisoRes.data || []).map((entry) => entry.nombre),
+				materialTecho: (materialTechoRes.data || []).map((entry) => entry.nombre),
+				materialPuerta: (materialPuertaRes.data || []).map((entry) => entry.nombre),
+				estadoPizarra: (estadoPizarraRes.data || []).map((entry) => entry.nombre),
 			};
 		}
 
@@ -473,6 +522,16 @@ async function initSettingsPage() {
 				["Bloque", block.nombre],
 				["Piso", piso.nombre],
 				["Área", area.nombre],
+				["Identificación ambiente", area.identificacion_ambiente || "-"],
+				["Metros cuadrados", area.metros_cuadrados || "-"],
+				["Alto", area.alto ?? "-"],
+				["Señalética", area.senaletica || "-"],
+				["Código señalética", area.cod_senaletica || "-"],
+				["Infraestructura física", area.infraestructura_fisica || "-"],
+				["Estado piso", area.estado_piso || "-"],
+				["Material techo", area.material_techo || "-"],
+				["Puerta", area.puerta || "-"],
+				["Material puerta", area.material_puerta || "-"],
 				["Descripción", area.descripcion || "Sin descripción"],
 				["Estado paredes", area.estado_paredes || "-"],
 				["Estado techo", area.estado_techo || "-"],
@@ -484,9 +543,20 @@ async function initSettingsPage() {
 				["PC en aula", area.pc_aula || "-"],
 				["Proyector", area.proyector || "-"],
 				["Pantalla interactiva", area.pantalla_interactiva || "-"],
+				["Pupitres", area.pupitres_cantidad ?? "-"],
+				["Pupitres funcionando", area.pupitres_funcionan ?? "-"],
+				["Pupitres no funcionando", area.pupitres_no_funcionan ?? "-"],
+				["Pizarra", area.pizarra || "-"],
+				["Estado pizarra", area.pizarra_estado || "-"],
+				["Ventanas", area.ventanas_cantidad ?? "-"],
+				["Ventanas funcionando", area.ventanas_funcionan ?? "-"],
+				["Ventanas no funcionando", area.ventanas_no_funcionan ?? "-"],
 				["A/A cantidad", area.aa_cantidad ?? "-"],
 				["A/A funcionando", area.aa_funcionan ?? "-"],
+				["A/A no funcionando", area.aa_no_funcionan ?? "-"],
 				["Ventiladores", area.ventiladores_cantidad ?? "-"],
+				["Ventiladores funcionando", area.ventiladores_funcionan ?? "-"],
+				["Ventiladores no funcionando", area.ventiladores_no_funcionan ?? "-"],
 				["WIFI", area.wifi || "-"],
 				["Red LAN", area.red_lan || "-"],
 				["LAN funcionando", area.red_lan_funcionan ?? "-"],
@@ -500,6 +570,8 @@ async function initSettingsPage() {
 				["Ptos. eléctricos no funcionando", area.puntos_electricos_no_funcionan ?? "-"],
 				["Puntos eléctricos cantidad", area.puntos_electricos_cantidad ?? "-"],
 				["Capacidad áulica", area.capacidad_aulica ?? "-"],
+				["Capacidad con distanciamiento", area.capacidad_distanciamiento ?? "-"],
+				["Apto retorno presencial", area.ambiente_apto_retorno || "-"],
 				["Observaciones", area.observaciones_detalle || "-"],
 			];
 			showLocationDetail(
@@ -520,6 +592,7 @@ async function initSettingsPage() {
 
 		function renderAreaDetailEditForm(context, options) {
 			const { area } = context;
+			const ADD_ADMIN_OPTION = "__add_new_admin__";
 			const makeOptions = (values, selected) =>
 				[`<option value="">Seleccionar</option>`]
 					.concat(
@@ -529,20 +602,38 @@ async function initSettingsPage() {
 						)
 					)
 					.join("");
-			const adminOptions = [`<option value="">Sin asignar</option>`]
-				.concat(
-					(options.admins || []).map(
-						(admin) =>
-							`<option value="${admin.id}" ${String(area.responsable_admin_id || "") === String(admin.id) ? "selected" : ""}>${escapeHtml(admin.nombre)}</option>`
+			const buildAdminOptions = (admins, selectedId) =>
+				[`<option value="">Sin asignar</option>`]
+					.concat(
+						(admins || []).map(
+							(admin) =>
+								`<option value="${admin.id}" ${String(selectedId || "") === String(admin.id) ? "selected" : ""}>${escapeHtml(admin.nombre)}</option>`
+						)
 					)
-				)
-				.join("");
+					.concat([`<option value="${ADD_ADMIN_OPTION}">+ Agregar responsable...</option>`])
+					.join("");
+			const adminOptions = buildAdminOptions(options.admins || [], area.responsable_admin_id || "");
 
 			detalleUbicacionTitle.textContent = `Editar área: ${area.nombre}`;
 			detalleUbicacionBody.innerHTML = `
 				<div class="row g-2" id="detalle-area-edit-form">
 					<div class="col-md-6"><label class="form-label small">Nombre</label><input type="text" class="form-control form-control-sm" data-field="nombre" value="${escapeHtml(area.nombre || "")}"></div>
-					<div class="col-md-6"><label class="form-label small">Responsable</label><select class="form-select form-select-sm" data-field="responsable_admin_id">${adminOptions}</select></div>
+					<div class="col-md-6"><label class="form-label small">Identificación ambiente</label><input type="text" class="form-control form-control-sm" data-field="identificacion_ambiente" value="${escapeHtml(area.identificacion_ambiente || "")}"></div>
+					<div class="col-md-4"><label class="form-label small">Metros cuadrados</label><input type="text" class="form-control form-control-sm" data-field="metros_cuadrados" value="${escapeHtml(area.metros_cuadrados || "")}"></div>
+					<div class="col-md-4"><label class="form-label small">Alto</label><input type="number" min="0" step="0.01" class="form-control form-control-sm" data-field="alto" value="${area.alto ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Señalética</label><select class="form-select form-select-sm" data-field="senaletica">${makeOptions(options.yesNo, area.senaletica)}</select></div>
+					<div class="col-md-6"><label class="form-label small">Codificación señalética</label><input type="text" class="form-control form-control-sm" data-field="cod_senaletica" value="${escapeHtml(area.cod_senaletica || "")}"></div>
+					<div class="col-md-6"><label class="form-label small">Estado piso</label><select class="form-select form-select-sm" data-field="estado_piso">${makeOptions(options.estadoPiso, area.estado_piso)}</select></div>
+					<div class="col-md-6"><label class="form-label small">Material techo</label><select class="form-select form-select-sm" data-field="material_techo">${makeOptions(options.materialTecho, area.material_techo)}</select></div>
+					<div class="col-md-6"><label class="form-label small">Puerta (Si/No)</label><select class="form-select form-select-sm" data-field="puerta">${makeOptions(options.yesNo, area.puerta)}</select></div>
+					<div class="col-md-6"><label class="form-label small">Material puerta</label><select class="form-select form-select-sm" data-field="material_puerta">${makeOptions(options.materialPuerta, area.material_puerta)}</select></div>
+					<div class="col-md-6">
+						<label class="form-label small">Responsable</label>
+						<div class="input-group input-group-sm">
+							<select class="form-select form-select-sm" data-field="responsable_admin_id">${adminOptions}</select>
+						</div>
+					</div>
+					<div class="col-12"><label class="form-label small">Infraestructura física</label><textarea rows="2" class="form-control form-control-sm" data-field="infraestructura_fisica">${escapeHtml(area.infraestructura_fisica || "")}</textarea></div>
 					<div class="col-12"><label class="form-label small">Descripción</label><input type="text" class="form-control form-control-sm" data-field="descripcion" value="${escapeHtml(area.descripcion || "")}"></div>
 
 					<div class="col-md-4"><label class="form-label small">Estado paredes</label><select class="form-select form-select-sm" data-field="estado_paredes">${makeOptions(options.yesNo, area.estado_paredes)}</select></div>
@@ -555,13 +646,24 @@ async function initSettingsPage() {
 					<div class="col-md-4"><label class="form-label small">PC aula</label><select class="form-select form-select-sm" data-field="pc_aula">${makeOptions(options.yesNo, area.pc_aula)}</select></div>
 					<div class="col-md-4"><label class="form-label small">Proyector</label><select class="form-select form-select-sm" data-field="proyector">${makeOptions(options.yesNo, area.proyector)}</select></div>
 					<div class="col-md-4"><label class="form-label small">Pantalla interactiva</label><select class="form-select form-select-sm" data-field="pantalla_interactiva">${makeOptions(options.yesNo, area.pantalla_interactiva)}</select></div>
+					<div class="col-md-4"><label class="form-label small">Pupitres cantidad</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_cantidad" value="${area.pupitres_cantidad ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Pupitres funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_funcionan" value="${area.pupitres_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Pupitres no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_no_funcionan" value="${area.pupitres_no_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Pizarra</label><select class="form-select form-select-sm" data-field="pizarra">${makeOptions(options.yesNo, area.pizarra)}</select></div>
+					<div class="col-md-4"><label class="form-label small">Estado pizarra</label><select class="form-select form-select-sm" data-field="pizarra_estado">${makeOptions(options.estadoPizarra, area.pizarra_estado)}</select></div>
+					<div class="col-md-4"><label class="form-label small">Ventanas cantidad</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventanas_cantidad" value="${area.ventanas_cantidad ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ventanas funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventanas_funcionan" value="${area.ventanas_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ventanas no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventanas_no_funcionan" value="${area.ventanas_no_funcionan ?? ""}"></div>
 					<div class="col-md-4"><label class="form-label small">WIFI</label><select class="form-select form-select-sm" data-field="wifi">${makeOptions(options.yesNo, area.wifi)}</select></div>
 					<div class="col-md-4"><label class="form-label small">Red LAN</label><select class="form-select form-select-sm" data-field="red_lan">${makeOptions(options.yesNo, area.red_lan)}</select></div>
 					<div class="col-md-4"><label class="form-label small">Puntos eléctricos</label><select class="form-select form-select-sm" data-field="puntos_electricos">${makeOptions(options.yesNo, area.puntos_electricos)}</select></div>
 
 					<div class="col-md-3"><label class="form-label small">A/A cantidad</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_cantidad" value="${area.aa_cantidad ?? ""}"></div>
 					<div class="col-md-3"><label class="form-label small">A/A funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_funcionan" value="${area.aa_funcionan ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">A/A no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_no_funcionan" value="${area.aa_no_funcionan ?? ""}"></div>
 					<div class="col-md-3"><label class="form-label small">Ventiladores</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_cantidad" value="${area.ventiladores_cantidad ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Ventiladores func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_funcionan" value="${area.ventiladores_funcionan ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Ventiladores no func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_no_funcionan" value="${area.ventiladores_no_funcionan ?? ""}"></div>
 					<div class="col-md-3"><label class="form-label small">LAN funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_lan_funcionan" value="${area.red_lan_funcionan ?? ""}"></div>
 					<div class="col-md-3"><label class="form-label small">LAN no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_lan_no_funcionan" value="${area.red_lan_no_funcionan ?? ""}"></div>
 					<div class="col-md-3"><label class="form-label small">Red inalámbrica</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_inalambrica_cantidad" value="${area.red_inalambrica_cantidad ?? ""}"></div>
@@ -572,10 +674,66 @@ async function initSettingsPage() {
 					<div class="col-md-3"><label class="form-label small">Ptos eléctricos no func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_no_funcionan" value="${area.puntos_electricos_no_funcionan ?? ""}"></div>
 					<div class="col-md-3"><label class="form-label small">Ptos eléctricos total</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_cantidad" value="${area.puntos_electricos_cantidad ?? ""}"></div>
 					<div class="col-md-3"><label class="form-label small">Capacidad áulica</label><input type="number" min="0" class="form-control form-control-sm" data-field="capacidad_aulica" value="${area.capacidad_aulica ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Capacidad distanciamiento</label><input type="number" min="0" class="form-control form-control-sm" data-field="capacidad_distanciamiento" value="${area.capacidad_distanciamiento ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Apto retorno</label><select class="form-select form-select-sm" data-field="ambiente_apto_retorno">${makeOptions(options.yesNo, area.ambiente_apto_retorno)}</select></div>
 
 					<div class="col-12"><label class="form-label small">Observaciones</label><textarea rows="2" class="form-control form-control-sm" data-field="observaciones_detalle">${escapeHtml(area.observaciones_detalle || "")}</textarea></div>
 				</div>
 			`;
+
+			const responsableSelect = detalleUbicacionBody.querySelector('[data-field="responsable_admin_id"]');
+			const addResponsableBtn = detalleUbicacionBody.querySelector('[data-action="add-responsable"]');
+
+			const handleQuickCreateResponsable = async () => {
+				const nombre = window.prompt("Nombre del responsable:");
+				if (nombre === null) {
+					if (responsableSelect && responsableSelect.value === ADD_ADMIN_OPTION) {
+						responsableSelect.value = String(area.responsable_admin_id || "");
+					}
+					return;
+				}
+				const trimmedName = nombre.trim();
+				if (!trimmedName) {
+					notify("El nombre es obligatorio.", true);
+					if (responsableSelect && responsableSelect.value === ADD_ADMIN_OPTION) {
+						responsableSelect.value = String(area.responsable_admin_id || "");
+					}
+					return;
+				}
+
+				try {
+					const created = await api.send("/api/administradores", "POST", {
+						nombre: trimmedName,
+						cargo: "",
+						facultad: "",
+						titulo_academico: "",
+						email: null,
+						telefono: null,
+					});
+					const newAdminId = Number(created?.id);
+					const adminsRes = await api.get("/api/administradores");
+					const admins = adminsRes.data || [];
+					if (responsableSelect) {
+						responsableSelect.innerHTML = buildAdminOptions(admins, Number.isFinite(newAdminId) ? newAdminId : "");
+						if (Number.isFinite(newAdminId)) {
+							responsableSelect.value = String(newAdminId);
+						}
+					}
+					await loadAdministradores();
+					notify("Responsable agregado correctamente.");
+				} catch (error) {
+					notify(error.message, true);
+					if (responsableSelect && responsableSelect.value === ADD_ADMIN_OPTION) {
+						responsableSelect.value = String(area.responsable_admin_id || "");
+					}
+				}
+			};
+
+			addResponsableBtn?.addEventListener("click", handleQuickCreateResponsable);
+			responsableSelect?.addEventListener("change", async () => {
+				if (responsableSelect.value !== ADD_ADMIN_OPTION) return;
+				await handleQuickCreateResponsable();
+			});
 			setDetailButtonsMode("edit", true);
 		}
 
@@ -591,10 +749,15 @@ async function initSettingsPage() {
 			});
 
 			const numberFields = [
-				"aa_cantidad", "aa_funcionan", "ventiladores_cantidad", "red_lan_funcionan",
+				"alto",
+				"pupitres_cantidad", "pupitres_funcionan", "pupitres_no_funcionan",
+				"ventanas_cantidad", "ventanas_funcionan", "ventanas_no_funcionan",
+				"aa_cantidad", "aa_funcionan", "aa_no_funcionan", "ventiladores_cantidad",
+				"ventiladores_funcionan", "ventiladores_no_funcionan", "red_lan_funcionan",
 				"red_lan_no_funcionan", "red_inalambrica_cantidad", "iluminacion_funcionan",
 				"iluminacion_no_funcionan", "luminarias_cantidad", "puntos_electricos_funcionan",
 				"puntos_electricos_no_funcionan", "puntos_electricos_cantidad", "capacidad_aulica",
+				"capacidad_distanciamiento",
 				"responsable_admin_id",
 			];
 			numberFields.forEach((field) => {
@@ -746,12 +909,18 @@ async function initSettingsPage() {
 				}
 
 				const fieldsToCompare = [
-					"nombre", "descripcion", "responsable_admin_id", "estado_paredes", "estado_techo", "estado_puerta",
+					"nombre", "descripcion", "identificacion_ambiente", "metros_cuadrados", "alto", "senaletica",
+					"cod_senaletica", "infraestructura_fisica", "estado_piso", "material_techo", "puerta", "material_puerta",
+					"responsable_admin_id", "estado_paredes", "estado_techo", "estado_puerta",
 					"cerradura", "nivel_seguridad", "sitio_profesor_mesa", "sitio_profesor_silla", "pc_aula", "proyector",
-					"pantalla_interactiva", "aa_cantidad", "aa_funcionan", "ventiladores_cantidad", "wifi", "red_lan",
+					"pantalla_interactiva", "pupitres_cantidad", "pupitres_funcionan", "pupitres_no_funcionan",
+					"pizarra", "pizarra_estado", "ventanas_cantidad", "ventanas_funcionan", "ventanas_no_funcionan",
+					"aa_cantidad", "aa_funcionan", "aa_no_funcionan", "ventiladores_cantidad",
+					"ventiladores_funcionan", "ventiladores_no_funcionan", "wifi", "red_lan",
 					"red_lan_funcionan", "red_lan_no_funcionan", "red_inalambrica_cantidad", "iluminacion_funcionan",
 					"iluminacion_no_funcionan", "luminarias_cantidad", "puntos_electricos", "puntos_electricos_funcionan",
-					"puntos_electricos_no_funcionan", "puntos_electricos_cantidad", "capacidad_aulica", "observaciones_detalle",
+					"puntos_electricos_no_funcionan", "puntos_electricos_cantidad", "capacidad_aulica",
+					"capacidad_distanciamiento", "ambiente_apto_retorno", "observaciones_detalle",
 				];
 
 				const normalize = (value) => (value === "" || value === undefined ? null : value);
@@ -861,7 +1030,6 @@ async function initSettingsPage() {
 							<span class="floor-title-text" title="${escapeHtml(piso.descripcion || piso.nombre)}">${escapeHtml(piso.nombre)}</span>
 						</div>
 						<div class="floor-actions">
-							<button type="button" class="icon-action-btn floor-expand-btn" title="Expandir/ocultar"><i class="bi bi-chevron-down"></i></button>
 							<button type="button" class="icon-action-btn floor-edit-btn" title="Editar piso"><i class="bi bi-pencil"></i></button>
 							<button type="button" class="icon-action-btn floor-delete-btn" title="Eliminar piso"><i class="bi bi-trash"></i></button>
 						</div>
@@ -879,18 +1047,26 @@ async function initSettingsPage() {
 				pisosContainer.appendChild(floorCard);
 
 				const titleText = floorCard.querySelector(".floor-title-text");
-				const expandBtn = floorCard.querySelector(".floor-expand-btn");
+				const floorHead = floorCard.querySelector(".floor-compact-head");
 				const editBtn = floorCard.querySelector(".floor-edit-btn");
 				const deleteBtn = floorCard.querySelector(".floor-delete-btn");
 				const collapse = floorCard.querySelector(".floor-collapse");
 				const addAreaBtn = floorCard.querySelector(".add-area-floor-btn");
 
-				titleText.addEventListener("click", () => openFloorDetail(block, piso));
-				expandBtn.addEventListener("click", () => {
+				const toggleCollapse = () => {
 					const hidden = collapse.classList.toggle("d-none");
-					expandBtn.innerHTML = hidden
-						? '<i class="bi bi-chevron-down"></i>'
-						: '<i class="bi bi-chevron-up"></i>';
+					titleText.classList.toggle("text-primary", !hidden);
+				};
+				const isActionClick = (event) =>
+					Boolean(event.target.closest(".floor-edit-btn, .floor-delete-btn"));
+
+				floorHead?.addEventListener("click", (event) => {
+					if (isActionClick(event)) return;
+					toggleCollapse();
+				});
+				floorHead?.addEventListener("dblclick", (event) => {
+					if (isActionClick(event)) return;
+					openFloorDetail(block, piso);
 				});
 				editBtn.addEventListener("click", () => openLocationModal("piso", piso));
 				deleteBtn.addEventListener("click", async () => {
@@ -1062,7 +1238,7 @@ async function initSettingsPage() {
 					await api.send(`/api/pisos/${locationEditContext.id}`, "PATCH", { nombre, descripcion });
 				}
 				// Parameter modes
-				if (["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras"].includes(modalMode)) {
+				if (["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta"].includes(modalMode)) {
 					await api.send(`/api/parametros/${modalMode}`, "POST", {
 						nombre,
 						descripcion: descripcion || null,
@@ -1074,7 +1250,7 @@ async function initSettingsPage() {
 				// Reload appropriate data
 				if (["bloque", "bloque-edit", "piso", "piso-edit"].includes(modalMode)) {
 					await loadStructure();
-				} else if (["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras"].includes(modalMode)) {
+				} else if (["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta", "estado_pizarra"].includes(modalMode)) {
 					await loadParametros();
 				}
 			} catch (error) {
@@ -1085,22 +1261,31 @@ async function initSettingsPage() {
 		if (btnGuardarAreaDetalle) {
 			btnGuardarAreaDetalle.addEventListener("click", async () => {
 				const nombreArea = (areaFields.nombre?.value || "").trim();
-				if (!nombreArea) {
-					notify("El nombre del área es obligatorio.", true);
-					return;
-				}
 
 				const numericKeys = [
-					"aa_cantidad", "aa_funcionan", "ventiladores_cantidad", "red_lan_funcionan",
+					"alto",
+					"pupitres_cantidad", "pupitres_funcionan", "pupitres_no_funcionan",
+					"ventanas_cantidad", "ventanas_funcionan", "ventanas_no_funcionan",
+					"aa_cantidad", "aa_funcionan", "aa_no_funcionan", "ventiladores_cantidad",
+					"ventiladores_funcionan", "ventiladores_no_funcionan", "red_lan_funcionan",
 					"red_lan_no_funcionan", "red_inalambrica_cantidad", "iluminacion_funcionan",
 					"iluminacion_no_funcionan", "luminarias_cantidad", "puntos_electricos_funcionan",
 					"puntos_electricos_no_funcionan", "puntos_electricos_cantidad", "capacidad_aulica",
+					"capacidad_distanciamiento",
 				];
 
 				const payload = {
 					piso_id: state.activeFloorId,
-					nombre: nombreArea,
 					descripcion: areaFields.descripcion?.value?.trim() || null,
+					identificacion_ambiente: areaFields.identificacion_ambiente?.value?.trim() || null,
+					metros_cuadrados: areaFields.metros_cuadrados?.value?.trim() || null,
+					senaletica: areaFields.senaletica?.value || null,
+					cod_senaletica: areaFields.cod_senaletica?.value?.trim() || null,
+					infraestructura_fisica: areaFields.infraestructura_fisica?.value?.trim() || null,
+					estado_piso: areaFields.estado_piso?.value || null,
+					material_techo: areaFields.material_techo?.value || null,
+					puerta: areaFields.puerta?.value || null,
+					material_puerta: areaFields.material_puerta?.value || null,
 					responsable_admin_id: areaFields.responsable_admin_id?.value ? Number(areaFields.responsable_admin_id.value) : null,
 					estado_paredes: areaFields.estado_paredes?.value || null,
 					estado_techo: areaFields.estado_techo?.value || null,
@@ -1112,9 +1297,12 @@ async function initSettingsPage() {
 					pc_aula: areaFields.pc_aula?.value || null,
 					proyector: areaFields.proyector?.value || null,
 					pantalla_interactiva: areaFields.pantalla_interactiva?.value || null,
+					pizarra: areaFields.pizarra?.value || null,
+					pizarra_estado: areaFields.pizarra_estado?.value || null,
 					wifi: areaFields.wifi?.value || null,
 					red_lan: areaFields.red_lan?.value || null,
 					puntos_electricos: areaFields.puntos_electricos?.value || null,
+					ambiente_apto_retorno: areaFields.ambiente_apto_retorno?.value || null,
 					observaciones_detalle: areaFields.observaciones_detalle?.value?.trim() || null,
 				};
 
@@ -1122,6 +1310,10 @@ async function initSettingsPage() {
 					const value = areaFields[key]?.value;
 					payload[key] = value === "" || value === undefined ? null : Number(value);
 				});
+
+				if (nombreArea) {
+					payload.nombre = nombreArea;
+				}
 
 				try {
 					await api.send("/api/areas", "POST", payload);
@@ -1151,6 +1343,10 @@ async function initSettingsPage() {
 	const btnAddSiNo = document.getElementById("btn-add-si-no");
 	const btnAddEstadoPuerta = document.getElementById("btn-add-estado-puerta");
 	const btnAddCerradura = document.getElementById("btn-add-cerradura");
+	const btnAddEstadoPiso = document.getElementById("btn-add-estado-piso");
+	const btnAddMaterialTecho = document.getElementById("btn-add-material-techo");
+	const btnAddMaterialPuerta = document.getElementById("btn-add-material-puerta");
+	const btnAddEstadoPizarra = document.getElementById("btn-add-estado-pizarra");
 	const btnSaveUniversidad = document.getElementById("btn-save-universidad");
 	const btnEditUniversidad = document.getElementById("btn-edit-universidad");
 	const btnCancelUniversidad = document.getElementById("btn-cancel-universidad");
@@ -1162,6 +1358,10 @@ async function initSettingsPage() {
 	const listSiNo = document.getElementById("param-si-no-list");
 	const listEstadoPuerta = document.getElementById("param-estado-puerta-list");
 	const listCerraduras = document.getElementById("param-cerraduras-list");
+	const listEstadoPiso = document.getElementById("param-estado-piso-list");
+	const listMaterialTecho = document.getElementById("param-material-techo-list");
+	const listMaterialPuerta = document.getElementById("param-material-puerta-list");
+	const listEstadoPizarra = document.getElementById("param-estado-pizarra-list");
 
 	const universidadState = {
 		isEditing: false,
@@ -1191,13 +1391,17 @@ async function initSettingsPage() {
 
 	async function loadParametros() {
 		try {
-			const [estadosRes, condicionesRes, cuentasRes, siNoRes, estadoPuertaRes, cerradurasRes, universidadRes] = await Promise.all([
+			const [estadosRes, condicionesRes, cuentasRes, siNoRes, estadoPuertaRes, cerradurasRes, estadoPisoRes, materialTechoRes, materialPuertaRes, estadoPizarraRes, universidadRes] = await Promise.all([
 				api.get("/api/parametros/estados"),
 				api.get("/api/parametros/condiciones"),
 				api.get("/api/parametros/cuentas"),
 				api.get("/api/parametros/si_no"),
 				api.get("/api/parametros/estado_puerta"),
 				api.get("/api/parametros/cerraduras"),
+				api.get("/api/parametros/estado_piso"),
+				api.get("/api/parametros/material_techo"),
+				api.get("/api/parametros/material_puerta"),
+				api.get("/api/parametros/estado_pizarra"),
 				api.get("/api/universidad"),
 			]);
 
@@ -1207,6 +1411,10 @@ async function initSettingsPage() {
 			renderParamList(listSiNo, siNoRes.data || [], "si_no");
 			renderParamList(listEstadoPuerta, estadoPuertaRes.data || [], "estado_puerta");
 			renderParamList(listCerraduras, cerradurasRes.data || [], "cerraduras");
+			renderParamList(listEstadoPiso, estadoPisoRes.data || [], "estado_piso");
+			renderParamList(listMaterialTecho, materialTechoRes.data || [], "material_techo");
+			renderParamList(listMaterialPuerta, materialPuertaRes.data || [], "material_puerta");
+			renderParamList(listEstadoPizarra, estadoPizarraRes.data || [], "estado_pizarra");
 			
 			const universidadNombre = (universidadRes.data || {})["nombre_universidad"] || "";
 			applyUniversidadValue(universidadNombre);
@@ -1289,6 +1497,10 @@ async function initSettingsPage() {
 			si_no: "Agregar opción Sí/No",
 			estado_puerta: "Agregar estado de puerta",
 			cerraduras: "Agregar tipo de cerradura",
+			estado_piso: "Agregar estado de piso",
+			material_techo: "Agregar material de techo",
+			material_puerta: "Agregar material de puerta",
+			estado_pizarra: "Agregar estado de pizarra",
 		};
 		modalTitle.textContent = mapTitle[tipo] || "Nuevo parámetro";
 		inputNombre.value = "";
@@ -1302,6 +1514,10 @@ async function initSettingsPage() {
 	if (btnAddSiNo) btnAddSiNo.addEventListener("click", () => openParamModal("si_no"));
 	if (btnAddEstadoPuerta) btnAddEstadoPuerta.addEventListener("click", () => openParamModal("estado_puerta"));
 	if (btnAddCerradura) btnAddCerradura.addEventListener("click", () => openParamModal("cerraduras"));
+	if (btnAddEstadoPiso) btnAddEstadoPiso.addEventListener("click", () => openParamModal("estado_piso"));
+	if (btnAddMaterialTecho) btnAddMaterialTecho.addEventListener("click", () => openParamModal("material_techo"));
+	if (btnAddMaterialPuerta) btnAddMaterialPuerta.addEventListener("click", () => openParamModal("material_puerta"));
+	if (btnAddEstadoPizarra) btnAddEstadoPizarra.addEventListener("click", () => openParamModal("estado_pizarra"));
 
 	if (btnEditUniversidad) {
 		btnEditUniversidad.addEventListener("click", () => {

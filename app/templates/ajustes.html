@@ -188,6 +188,70 @@
                             </div>
                         </div>
                     </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Estado de Piso</h5>
+                                    <button type="button" id="btn-add-estado-piso" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-estado-piso-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Material de Techo</h5>
+                                    <button type="button" id="btn-add-material-techo" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-material-techo-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Material de Puerta</h5>
+                                    <button type="button" id="btn-add-material-puerta" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-material-puerta-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-header bg-light border-bottom">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Estado de Pizarra</h5>
+                                    <button type="button" id="btn-add-estado-pizarra" class="btn btn-link btn-sm p-0">
+                                        <i class="bi bi-plus-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="param-estado-pizarra-list" class="list-group list-group-sm"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -298,52 +362,77 @@
             </div>
             <div class="modal-body">
                 <div class="row g-3" id="form-area-detalle">
-                    <div class="col-md-4">
-                        <label class="form-label">Nombre del área</label>
-                        <input type="text" class="form-control" id="area-nombre" maxlength="120">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Responsable del ambiente</label>
-                        <select class="form-select" id="area-responsable-admin-id"></select>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Descripción</label>
-                        <input type="text" class="form-control" id="area-descripcion" maxlength="220">
-                    </div>
+                    <div class="col-md-4"><label class="form-label">Ambiente de aprendizaje</label><input type="text" class="form-control" id="area-nombre" maxlength="120"></div>
+                    <div class="col-md-4"><label class="form-label">Responsable del ambiente de aprendizaje</label><select class="form-select" id="area-responsable-admin-id"></select></div>
+                    <div class="col-md-4"><label class="form-label">Identificación ambiente</label><input type="text" class="form-control" id="area-identificacion-ambiente" maxlength="120"></div>
 
-                    <div class="col-md-3"><label class="form-label">Estado paredes</label><select class="form-select" id="area-estado-paredes"></select></div>
-                    <div class="col-md-3"><label class="form-label">Estado techo</label><select class="form-select" id="area-estado-techo"></select></div>
-                    <div class="col-md-3"><label class="form-label">Estado puerta</label><select class="form-select" id="area-estado-puerta"></select></div>
-                    <div class="col-md-3"><label class="form-label">Cerradura</label><select class="form-select" id="area-cerradura"></select></div>
+                    <div class="col-md-4"><label class="form-label">Metros cuadrados (Largo x ancho)</label><input type="text" class="form-control" id="area-metros-cuadrados" maxlength="120"></div>
 
-                    <div class="col-md-3"><label class="form-label">Nivel seguridad</label><select class="form-select" id="area-nivel-seguridad"></select></div>
-                    <div class="col-md-3"><label class="form-label">Sitio profesor tiene mesa</label><select class="form-select" id="area-sitio-profesor-mesa"></select></div>
-                    <div class="col-md-3"><label class="form-label">Sitio profesor tiene silla</label><select class="form-select" id="area-sitio-profesor-silla"></select></div>
-                    <div class="col-md-3"><label class="form-label">PC en aula</label><select class="form-select" id="area-pc-aula"></select></div>
+                    <div class="col-md-4"><label class="form-label">Alto</label><input type="number" step="0.01" min="0" class="form-control" id="area-alto"></div>
+                    <div class="col-md-4"><label class="form-label">Señalética (Si/No)</label><select class="form-select" id="area-senaletica"></select></div>
+                    <div class="col-md-4"><label class="form-label">Codificación de la señalética</label><input type="text" class="form-control" id="area-cod-senaletica" maxlength="120"></div>
 
-                    <div class="col-md-3"><label class="form-label">Proyector</label><select class="form-select" id="area-proyector"></select></div>
-                    <div class="col-md-3"><label class="form-label">Pantalla interactiva</label><select class="form-select" id="area-pantalla-interactiva"></select></div>
-                    <div class="col-md-3"><label class="form-label">A/A (cantidad)</label><input type="number" class="form-control" id="area-aa-cantidad" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">A/A funcionando</label><input type="number" class="form-control" id="area-aa-funcionan" min="0"></div>
+                    <div class="col-12"><label class="form-label">Infraestructura física (estado general, pintura, paredes, techo)</label><textarea class="form-control" id="area-infraestructura-fisica" rows="2" maxlength="500"></textarea></div>
+                    <div class="col-md-4"><label class="form-label">Piso (Planta baja, primer piso, etc.)</label><input type="text" class="form-control" id="area-piso-nombre" readonly></div>
+                    <div class="col-md-4"><label class="form-label">Estado del piso</label><select class="form-select" id="area-estado-piso"></select></div>
+                    <div class="col-md-4"><label class="form-label">Estado de las paredes (Buen estado) Si/No</label><select class="form-select" id="area-estado-paredes"></select></div>
 
-                    <div class="col-md-3"><label class="form-label">Ventiladores (cantidad)</label><input type="number" class="form-control" id="area-ventiladores-cantidad" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">Señal WIFI</label><select class="form-select" id="area-wifi"></select></div>
-                    <div class="col-md-3"><label class="form-label">Red LAN alámbrica</label><select class="form-select" id="area-red-lan"></select></div>
-                    <div class="col-md-3"><label class="form-label">LAN puntos funcionando</label><input type="number" class="form-control" id="area-red-lan-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Estado del techo (Buen estado) Si/No</label><select class="form-select" id="area-estado-techo"></select></div>
+                    <div class="col-md-4"><label class="form-label">Material del techo</label><select class="form-select" id="area-material-techo"></select></div>
+                    <div class="col-md-4"><label class="form-label">Puerta (Si/No)</label><select class="form-select" id="area-puerta"></select></div>
 
-                    <div class="col-md-3"><label class="form-label">LAN puntos NO funcionando</label><input type="number" class="form-control" id="area-red-lan-no-funcionan" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">Red inalámbrica (cantidad)</label><input type="number" class="form-control" id="area-red-inalambrica-cantidad" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">Iluminación funcionando</label><input type="number" class="form-control" id="area-iluminacion-funcionan" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">Iluminación NO funcionando</label><input type="number" class="form-control" id="area-iluminacion-no-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Material de la puerta</label><select class="form-select" id="area-material-puerta"></select></div>
+                    <div class="col-md-4"><label class="form-label">Estado de la puerta</label><select class="form-select" id="area-estado-puerta"></select></div>
+                    <div class="col-md-4"><label class="form-label">Cerradura</label><select class="form-select" id="area-cerradura"></select></div>
 
-                    <div class="col-md-3"><label class="form-label">Luminarias (cantidad)</label><input type="number" class="form-control" id="area-luminarias-cantidad" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">Puntos eléctricos</label><select class="form-select" id="area-puntos-electricos"></select></div>
-                    <div class="col-md-3"><label class="form-label">Puntos eléctricos funcionando</label><input type="number" class="form-control" id="area-puntos-electricos-funcionan" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">Puntos eléctricos NO funcionando</label><input type="number" class="form-control" id="area-puntos-electricos-no-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Nivel seguridad (Si/No)</label><select class="form-select" id="area-nivel-seguridad"></select></div>
+                    <div class="col-md-3"><label class="form-label">Sitio profesor tiene mesa (Si/No)</label><select class="form-select" id="area-sitio-profesor-mesa"></select></div>
+                    <div class="col-md-3"><label class="form-label">Sitio profesor tiene silla (Si/No)</label><select class="form-select" id="area-sitio-profesor-silla"></select></div>
+                    <div class="col-md-3"><label class="form-label">PC en el aula (Si/No)</label><select class="form-select" id="area-pc-aula"></select></div>
 
-                    <div class="col-md-3"><label class="form-label">Puntos eléctricos (cantidad)</label><input type="number" class="form-control" id="area-puntos-electricos-cantidad" min="0"></div>
-                    <div class="col-md-3"><label class="form-label">Capacidad aúlica</label><input type="number" class="form-control" id="area-capacidad-aulica" min="0"></div>
-                    <div class="col-md-6"><label class="form-label">Observaciones</label><textarea class="form-control" id="area-observaciones-detalle" rows="2" maxlength="500"></textarea></div>
+                    <div class="col-md-6"><label class="form-label">Proyector (Si/No)</label><select class="form-select" id="area-proyector"></select></div>
+                    <div class="col-md-6"><label class="form-label">Pantalla interactiva (Si/No)</label><select class="form-select" id="area-pantalla-interactiva"></select></div>
+
+                    <div class="col-md-4"><label class="form-label">Pupitres (Cantidad)</label><input type="number" class="form-control" id="area-pupitres-cantidad" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Pupitres que sí funcionan</label><input type="number" class="form-control" id="area-pupitres-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Pupitres que NO funcionan</label><input type="number" class="form-control" id="area-pupitres-no-funcionan" min="0"></div>
+
+                    <div class="col-md-6"><label class="form-label">Pizarra (Si/No)</label><select class="form-select" id="area-pizarra"></select></div>
+                    <div class="col-md-6"><label class="form-label">Pizarra estado (Bueno, Regular, Dañado)</label><select class="form-select" id="area-pizarra-estado"></select></div>
+
+                    <div class="col-md-4"><label class="form-label">Ventanas (Cantidad)</label><input type="number" class="form-control" id="area-ventanas-cantidad" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Ventanas que sí funcionan</label><input type="number" class="form-control" id="area-ventanas-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Ventanas que NO funcionan</label><input type="number" class="form-control" id="area-ventanas-no-funcionan" min="0"></div>
+
+                    <div class="col-md-4"><label class="form-label">A/A (Cantidad)</label><input type="number" class="form-control" id="area-aa-cantidad" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">A/A (Cantidad que sí funcionan)</label><input type="number" class="form-control" id="area-aa-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">A/A (Cantidad que NO funcionan)</label><input type="number" class="form-control" id="area-aa-no-funcionan" min="0"></div>
+
+                    <div class="col-md-4"><label class="form-label">Ventiladores (Cantidad)</label><input type="number" class="form-control" id="area-ventiladores-cantidad" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Ventiladores que sí funcionan</label><input type="number" class="form-control" id="area-ventiladores-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Ventiladores que NO funcionan</label><input type="number" class="form-control" id="area-ventiladores-no-funcionan" min="0"></div>
+
+                    <div class="col-md-4"><label class="form-label">Señal WIFI (Si/No)</label><select class="form-select" id="area-wifi"></select></div>
+                    <div class="col-md-4"><label class="form-label">Red LAN alámbrica (Si/No)</label><select class="form-select" id="area-red-lan"></select></div>
+                    <div class="col-md-4"><label class="form-label">Red LAN alámbrica (Puntos que funcionan)</label><input type="number" class="form-control" id="area-red-lan-funcionan" min="0"></div>
+
+                    <div class="col-md-4"><label class="form-label">Red LAN alámbrica (Puntos que NO funcionan)</label><input type="number" class="form-control" id="area-red-lan-no-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Red inalámbrica (Cantidad)</label><input type="number" class="form-control" id="area-red-inalambrica-cantidad" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Iluminación (Lámparas que funcionan)</label><input type="number" class="form-control" id="area-iluminacion-funcionan" min="0"></div>
+
+                    <div class="col-md-4"><label class="form-label">Iluminación (Lámparas que NO funcionan)</label><input type="number" class="form-control" id="area-iluminacion-no-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Luminarias (Cantidad)</label><input type="number" class="form-control" id="area-luminarias-cantidad" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Puntos eléctricos (Si/No)</label><select class="form-select" id="area-puntos-electricos"></select></div>
+
+                    <div class="col-md-4"><label class="form-label">Puntos eléctricos (Puntos que funcionan)</label><input type="number" class="form-control" id="area-puntos-electricos-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Puntos eléctricos (Puntos que NO funcionan)</label><input type="number" class="form-control" id="area-puntos-electricos-no-funcionan" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Puntos eléctricos (Cantidad)</label><input type="number" class="form-control" id="area-puntos-electricos-cantidad" min="0"></div>
+
+                    <div class="col-md-4"><label class="form-label">Capacidad áulica (estudiantes)</label><input type="number" class="form-control" id="area-capacidad-aulica" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Capacidad considerando distanciamiento</label><input type="number" class="form-control" id="area-capacidad-distanciamiento" min="0"></div>
+                    <div class="col-md-4"><label class="form-label">Ambiente apto para retorno presencial (Si/No)</label><select class="form-select" id="area-ambiente-apto-retorno"></select></div>
+
+                    <div class="col-12"><label class="form-label">Observaciones (detalle opcional)</label><textarea class="form-control" id="area-observaciones-detalle" rows="2" maxlength="500"></textarea></div>
                 </div>
             </div>
             <div class="modal-footer">

@@ -60,7 +60,7 @@
 
     <div id="inventory-grid-wrapper"
         class="inventory-grid-wrapper table-compact card shadow-sm border-0 position-relative">
-        <div class="inventory-grid-scroll">
+        <div class="inventory-grid-scroll" style="height: 40vh;">
             <table id="tabla-inventario" class="table table-hover mb-0 align-middle">
                 <thead>
                     <tr>
@@ -122,6 +122,9 @@
         <button type="button" class="dropdown-item" data-action="view">
             <i class="bi bi-eye me-2 p-2"></i>Ver información
         </button>
+        <button type="button" class="dropdown-item" data-action="edit">
+            <i class="bi bi-pencil-square me-2 p-2"></i>Editar
+        </button>
         <button type="button" class="dropdown-item text-danger" data-action="delete">
             <i class="bi bi-trash me-2 p-2"></i>Borrar
         </button>
@@ -140,8 +143,8 @@
     </div>
 </div>
 
-<div class="modal fade" id="modalDuplicadosInventario" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+<div class="modal fade" id="modalDuplicadosInventario" tabindex="-1" aria-hidden="true" style="z-index: 9999 !important;">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable" style="z-index: 10000 !important;">
         <div class="modal-content border-warning-subtle">
             <div class="modal-header bg-warning-subtle">
                 <h5 class="modal-title">
@@ -306,6 +309,31 @@
                 <button type="button" class="btn btn-primary btn-sm" id="btn-guardar-item">
                     <i class="bi bi-check-circle me-1"></i>Guardar ítem
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalAgregarParametroRapido" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalAgregarParametroRapidoLabel">Nuevo elemento</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold" id="quick-add-name-label">Nombre</label>
+                    <input type="text" id="quick-add-name" class="form-control" maxlength="120">
+                </div>
+                <div id="quick-add-description-wrapper">
+                    <label class="form-label fw-semibold" id="quick-add-description-label">Descripcion (opcional)</label>
+                    <textarea id="quick-add-description" class="form-control" rows="2" maxlength="220"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="quick-add-save">Guardar</button>
             </div>
         </div>
     </div>

@@ -24,6 +24,14 @@
 	{ field: "observacion_esbye", label: "OBSERVACIÓN ESBYE", editable: true },
 ];
 
+const INLINE_ADD_OPTION_VALUE = "__add_new_option__";
+const INLINE_SELECT_FIELDS = new Set(["estado", "cuenta", "usuario_final"]);
+const INLINE_INPUT_CONFIG = {
+	cantidad: { type: "number", min: "1", step: "1" },
+	fecha_adquisicion: { type: "date" },
+	fecha_adquisicion_esbye: { type: "date" },
+};
+
 const api = {
 	async get(url) {
 		const response = await fetch(url);
@@ -121,7 +129,7 @@ function buildDuplicateWarningMessage(duplicates = [], payload = {}) {
 			? `(${item.matches.map((m) => (m === "cod_inventario" ? "INV" : "ESBYE")).join(" + ")})`
 			: "";
 		return [
-			`${index + 1}. Ítem #${item.item_numero || "-"} ${matchLabel}`,
+			`${index + 1}. ítem #${item.item_numero || "-"} ${matchLabel}`,
 			`   Nombre: ${item.descripcion || "-"}`,
 			`   Modelo: ${item.modelo || "-"}`,
 			`   Ubicación: ${item.ubicacion || "-"}`,
@@ -152,9 +160,15 @@ async function initInventoryPage() {
 		perPage: 50,
 		totalItems: 0,
 		totalPages: 1,
+		editingItemId: null,
 		tableDensity: "compact",
 		columnOrder: INVENTORY_COLUMNS.map((column) => column.field),
 		columnWidths: {},
+		modalOptions: {
+			estados: [],
+			cuentas: [],
+			administradores: [],
+		},
 		headerDrag: {
 			active: false,
 			field: null,
@@ -195,12 +209,26 @@ async function initInventoryPage() {
 		duplicateList: document.getElementById("duplicados-lista"),
 		duplicateCancelBtn: document.getElementById("btn-duplicados-cancelar"),
 		duplicateContinueBtn: document.getElementById("btn-duplicados-continuar"),
+		quickAddModalEl: document.getElementById("modalAgregarParametroRapido"),
+		quickAddTitle: document.getElementById("modalAgregarParametroRapidoLabel"),
+		quickAddNameLabel: document.getElementById("quick-add-name-label"),
+		quickAddNameInput: document.getElementById("quick-add-name"),
+		quickAddDescriptionWrap: document.getElementById("quick-add-description-wrapper"),
+		quickAddDescriptionLabel: document.getElementById("quick-add-description-label"),
+		quickAddDescriptionInput: document.getElementById("quick-add-description"),
+		quickAddSaveButton: document.getElementById("quick-add-save"),
 	};
 
 	const detailModal = new bootstrap.Modal(document.getElementById("modalDetalle"));
 	const addModalElement = document.getElementById("modalAgregarItem");
 	const addModal = new bootstrap.Modal(addModalElement);
+	const addModalTitle = addModalElement?.querySelector(".modal-title");
 	const duplicateModal = nodes.duplicateModalEl ? new bootstrap.Modal(nodes.duplicateModalEl) : null;
+	const quickAddModal = nodes.quickAddModalEl ? new bootstrap.Modal(nodes.quickAddModalEl) : null;
+	const quickAddState = {
+		mode: null,
+		resolver: null,
+	};
 
 	function buildDuplicateRowsHtml(duplicates = []) {
 		if (!duplicates.length) {
@@ -217,7 +245,7 @@ async function initInventoryPage() {
 					<div class="card border-warning-subtle shadow-sm">
 						<div class="card-body py-2 px-3">
 							<div class="d-flex justify-content-between align-items-start gap-2 mb-1">
-								<div class="fw-semibold">Ítem #${escapeHtmlText(item.item_numero || "-")}</div>
+								<div class="fw-semibold">ítem #${escapeHtmlText(item.item_numero || "-")}</div>
 								<div>${matchBadge}</div>
 							</div>
 							<div class="small"><strong>Nombre:</strong> ${escapeHtmlText(item.descripcion || "-")}</div>
@@ -279,6 +307,36 @@ async function initInventoryPage() {
 	function getColumn(field) {
 		return INVENTORY_COLUMNS.find((column) => column.field === field);
 	}
+
+	nodes.quickAddSaveButton?.addEventListener("click", async () => {
+		const mode = quickAddState.mode;
+		const config = resolveQuickAddConfig(mode);
+		if (!config) return;
+
+		const name = String(nodes.quickAddNameInput?.value || "").trim();
+		const description = String(nodes.quickAddDescriptionInput?.value || "").trim();
+		if (!name) {
+			notify("El nombre es obligatorio.", true);
+			return;
+		}
+
+		try {
+			const createdValue = await config.save(name, description);
+			quickAddModal?.hide();
+			if (quickAddState.resolver) quickAddState.resolver(createdValue);
+			quickAddState.resolver = null;
+		} catch (error) {
+			notify(error.message, true);
+		}
+	});
+
+	nodes.quickAddModalEl?.addEventListener("hidden.bs.modal", () => {
+		if (quickAddState.resolver) {
+			quickAddState.resolver(null);
+			quickAddState.resolver = null;
+		}
+		quickAddState.mode = null;
+	});
 
 	function applyDensityMode() {
 		if (!nodes.gridWrapper || !nodes.toggleDensityBtn) return;
@@ -424,6 +482,170 @@ async function initInventoryPage() {
 		}
 	}
 
+	function getModalSelectConfig(field) {
+		if (field === "estado") {
+			return {
+				placeholder: "-- Seleccionar estado --",
+				items: state.modalOptions.estados,
+				optionValue: (item) => item.nombre,
+				optionLabel: (item) => item.nombre,
+				quickMode: "estados",
+				quickLabel: "+ Agregar Estado",
+			};
+		}
+		if (field === "cuenta") {
+			return {
+				placeholder: "-- Seleccionar cuenta --",
+				items: state.modalOptions.cuentas,
+				optionValue: (item) => item.nombre,
+				optionLabel: (item) => (item.codigo ? `${item.codigo} - ${item.nombre}` : item.nombre),
+				quickMode: "cuentas",
+				quickLabel: "+ Agregar Cuenta",
+			};
+		}
+		if (field === "usuario_final") {
+			return {
+				placeholder: "-- Seleccionar personal --",
+				items: state.modalOptions.administradores,
+				optionValue: (item) => item.nombre,
+				optionLabel: (item) => item.nombre,
+				quickMode: "administrador",
+				quickLabel: "+ Agregar Personal",
+			};
+		}
+		return null;
+	}
+
+	function renderSelectWithQuickAdd(select, config, selectedValue = "") {
+		if (!select || !config) return;
+		select.innerHTML = `<option value="">${config.placeholder}</option>`;
+		(config.items || []).forEach((item) => {
+			const option = document.createElement("option");
+			option.value = config.optionValue(item);
+			option.textContent = config.optionLabel(item);
+			select.appendChild(option);
+		});
+		const addOption = document.createElement("option");
+		addOption.value = INLINE_ADD_OPTION_VALUE;
+		addOption.textContent = config.quickLabel;
+		select.appendChild(addOption);
+		if (selectedValue && Array.from(select.options).some((opt) => opt.value === selectedValue)) {
+			select.value = selectedValue;
+		} else {
+			select.value = "";
+		}
+	}
+
+	function refreshAddItemSelects() {
+		const estadoSelect = document.querySelector("#form-agregar-item [data-field='estado']");
+		const cuentaSelect = document.querySelector("#form-agregar-item [data-field='cuenta']");
+		const usuarioFinalSelect = document.querySelector("#form-agregar-item [data-field='usuario_final']");
+
+		const estadoCurrent = estadoSelect?.value || "";
+		renderSelectWithQuickAdd(estadoSelect, getModalSelectConfig("estado"), estadoCurrent);
+
+		const cuentaCurrent = cuentaSelect?.value || "";
+		renderSelectWithQuickAdd(cuentaSelect, getModalSelectConfig("cuenta"), cuentaCurrent);
+
+		const usuarioCurrent = usuarioFinalSelect?.value || "";
+		renderSelectWithQuickAdd(usuarioFinalSelect, getModalSelectConfig("usuario_final"), usuarioCurrent);
+	}
+
+	function updateLocalItemValue(id, field, value) {
+		const item = state.items.find((entry) => String(entry.id) === String(id));
+		if (item) item[field] = value;
+	}
+
+	function getRowFieldValue(id, field) {
+		const item = state.items.find((entry) => String(entry.id) === String(id));
+		return item ? item[field] : "";
+	}
+
+	function resolveQuickAddConfig(mode) {
+		const modalConfigs = {
+			estados: {
+				title: "Agregar Estado",
+				nameLabel: "Nombre",
+				descriptionLabel: "Descripcion (opcional)",
+				descriptionVisible: true,
+				save: async (name, description) => {
+					await api.send("/api/parametros/estados", "POST", { nombre: name, descripcion: description || null });
+					return name;
+				},
+			},
+			cuentas: {
+				title: "Agregar Cuenta",
+				nameLabel: "Nombre",
+				descriptionLabel: "Descripcion (opcional)",
+				descriptionVisible: true,
+				save: async (name, description) => {
+					await api.send("/api/parametros/cuentas", "POST", { nombre: name, descripcion: description || null });
+					return name;
+				},
+			},
+			administrador: {
+				title: "Agregar Personal",
+				nameLabel: "Nombre completo",
+				descriptionLabel: "Cargo (opcional)",
+				descriptionVisible: true,
+				save: async (name, cargo) => {
+					await api.send("/api/administradores", "POST", {
+						nombre: name,
+						cargo: cargo || null,
+						facultad: null,
+						titulo_academico: null,
+						email: null,
+						telefono: null,
+					});
+					return name;
+				},
+			},
+		};
+		return modalConfigs[mode] || null;
+	}
+
+	function openQuickAddModal(mode) {
+		const config = resolveQuickAddConfig(mode);
+		if (!config || !quickAddModal || !nodes.quickAddSaveButton) return Promise.resolve(null);
+
+		quickAddState.mode = mode;
+		nodes.quickAddTitle.textContent = config.title;
+		nodes.quickAddNameLabel.textContent = config.nameLabel;
+		nodes.quickAddDescriptionLabel.textContent = config.descriptionLabel;
+		nodes.quickAddDescriptionWrap.classList.toggle("d-none", !config.descriptionVisible);
+		nodes.quickAddNameInput.value = "";
+		nodes.quickAddDescriptionInput.value = "";
+
+		return new Promise((resolve) => {
+			quickAddState.resolver = resolve;
+			quickAddModal.show();
+			setTimeout(() => nodes.quickAddNameInput.focus(), 120);
+		});
+	}
+
+	async function ensureModalOptions() {
+		if (!state.modalOptions.estados.length && !state.modalOptions.cuentas.length && !state.modalOptions.administradores.length) {
+			await loadModalParams();
+		}
+	}
+
+	function attachQuickAddToSelect(select, field) {
+		if (!select || select.dataset.quickAddBound === "1") return;
+		select.dataset.quickAddBound = "1";
+		select.addEventListener("change", async () => {
+			if (select.value !== INLINE_ADD_OPTION_VALUE) return;
+			const selectConfig = getModalSelectConfig(field);
+			if (!selectConfig) return;
+			const createdValue = await openQuickAddModal(selectConfig.quickMode);
+			if (!createdValue) {
+				select.value = "";
+				return;
+			}
+			await loadModalParams();
+			select.value = createdValue;
+		});
+	}
+
 	function getFloorsByBlock(blockId) {
 		const block = state.structure.find((entry) => String(entry.id) === String(blockId));
 		return block ? block.pisos : [];
@@ -535,6 +757,37 @@ async function initInventoryPage() {
 	function assignPastedValue(input, rawValue) {
 		if (!input) return;
 		const value = String(rawValue ?? "").trim();
+		const field = String(input.dataset?.field || "");
+
+		if (field === "valor" || field === "valor_esbye") {
+			let normalizedMoney = value.replace(/[^\d,.-]/g, "");
+			const lastComma = normalizedMoney.lastIndexOf(",");
+			const lastDot = normalizedMoney.lastIndexOf(".");
+
+			if (lastComma >= 0 && lastDot >= 0) {
+				if (lastComma > lastDot) {
+					normalizedMoney = normalizedMoney.replace(/\./g, "");
+				} else {
+					normalizedMoney = normalizedMoney.replace(/,/g, "");
+					const parts = normalizedMoney.split(".");
+					const decimal = parts.pop();
+					normalizedMoney = `${parts.join("")}${decimal !== undefined ? `,${decimal}` : ""}`;
+				}
+			} else if (lastDot >= 0) {
+				const parts = normalizedMoney.split(".");
+				const decimal = parts.pop();
+				normalizedMoney = `${parts.join("")}${decimal !== undefined ? `,${decimal}` : ""}`;
+			}
+
+			normalizedMoney = normalizedMoney.replace(/-/g, "");
+			const firstComma = normalizedMoney.indexOf(",");
+			if (firstComma !== -1) {
+				normalizedMoney = normalizedMoney.slice(0, firstComma + 1) + normalizedMoney.slice(firstComma + 1).replace(/,/g, "");
+			}
+
+			input.value = normalizedMoney;
+			return;
+		}
 
 		if (input.tagName === "SELECT") {
 			const options = Array.from(input.options || []);
@@ -702,6 +955,112 @@ async function initInventoryPage() {
 		await loadItems();
 	}
 
+	function resetAddItemForm() {
+		const inputs = document.querySelectorAll("#form-agregar-item [data-field]");
+		inputs.forEach((input) => {
+			if (input.dataset.field === "cantidad") {
+				input.value = "1";
+				return;
+			}
+			input.value = "";
+		});
+		if (nodes.excelSingleRow) nodes.excelSingleRow.value = "";
+		if (state.activeAreaId && nodes.modalAreaSelect) {
+			nodes.modalAreaSelect.value = String(state.activeAreaId);
+		}
+		syncModalLocationFromSelection();
+	}
+
+	function setAddModalMode({ editing = false, itemId = null } = {}) {
+		state.editingItemId = editing ? itemId : null;
+		if (addModalTitle) {
+			addModalTitle.textContent = editing ? "Editar ítem" : "Agregar nuevo ítem";
+		}
+		if (nodes.modalAddButton) {
+			nodes.modalAddButton.innerHTML = editing
+				? '<i class="bi bi-check-circle me-1"></i>Guardar cambios'
+				: '<i class="bi bi-check-circle me-1"></i>Guardar ítem';
+		}
+	}
+
+	function collectFormPayload() {
+		const payload = {};
+		const inputs = document.querySelectorAll("#form-agregar-item [data-field]");
+		inputs.forEach((input) => {
+			let value = input.value.trim();
+			if (input.dataset.field === "cantidad") {
+				const quantity = Number(value);
+				value = Number.isInteger(quantity) && quantity > 0 ? quantity : null;
+			}
+			if (input.dataset.field === "valor") {
+				value = parseDecimalWithComma(value);
+			}
+			if (input.dataset.field === "valor_esbye") {
+				value = parseDecimalWithComma(value);
+			}
+			if (input.dataset.field === "area_id") {
+				value = value === "" ? null : parseInt(value, 10);
+			}
+			if (value !== "" && value !== null) {
+				payload[input.dataset.field] = value;
+			}
+		});
+		if (!payload.cantidad) {
+			throw new Error("La cantidad debe ser un entero mayor que 0.");
+		}
+		if (!payload.area_id && state.activeAreaId) {
+			payload.area_id = parseInt(state.activeAreaId, 10);
+		}
+		if (!payload.ubicacion) {
+			payload.ubicacion = composeSelectedLocation() || "";
+		}
+		return payload;
+	}
+
+	async function openEditModal(itemId) {
+		await loadModalParams();
+		const response = await api.get(`/api/inventario/${itemId}`);
+		const item = response.data || {};
+		const inputs = document.querySelectorAll("#form-agregar-item [data-field]");
+		inputs.forEach((input) => {
+			const field = input.dataset.field;
+			const rawValue = item[field];
+			if (field === "cantidad") {
+				input.value = rawValue ?? 1;
+				return;
+			}
+			if (field === "valor" || field === "valor_esbye") {
+				if (rawValue === null || rawValue === undefined || rawValue === "") {
+					input.value = "";
+					return;
+				}
+				input.value = Number(rawValue).toLocaleString("es-EC", {
+					minimumFractionDigits: 2,
+					maximumFractionDigits: 2,
+				});
+				return;
+			}
+			if (field === "fecha_adquisicion" || field === "fecha_adquisicion_esbye") {
+				input.value = toInputDate(rawValue);
+				return;
+			}
+			if (field === "area_id") {
+				input.value = rawValue ? String(rawValue) : "";
+				return;
+			}
+			input.value = rawValue ?? "";
+		});
+
+		if (item.area_id && nodes.modalAreaSelect) {
+			nodes.modalAreaSelect.value = String(item.area_id);
+		}
+		if (nodes.modalUbicacion) {
+			nodes.modalUbicacion.value = String(item.ubicacion || "");
+		}
+		setAddModalMode({ editing: true, itemId });
+		addModal.show();
+	}
+
 	function renderDetail(item) {
 		nodes.detailContainer.innerHTML = `
 			<div class="row g-3">
@@ -731,26 +1090,24 @@ async function initInventoryPage() {
 		`;
 	}
 
-	function startEdit(cell) {
+	async function startEdit(cell) {
 		if (!cell.classList.contains("editable-cell")) return;
-		if (cell.querySelector("input")) return;
-		const oldValue = cell.textContent.trim();
-		const input = document.createElement("input");
-		input.type = "text";
-		input.className = "form-control form-control-sm";
-		input.value = oldValue;
-		cell.innerHTML = "";
-		cell.appendChild(input);
-		input.focus();
-		input.select();
+		if (cell.querySelector("input, select, textarea")) return;
 
-		const commit = async () => {
-			const id = cell.dataset.id;
-			const field = cell.dataset.field;
-			const newValue = input.value.trim();
-			cell.textContent = newValue;
+		const id = cell.dataset.id;
+		const field = cell.dataset.field;
+		const oldRawValue = String(getRowFieldValue(id, field) ?? "");
+		const setCellDisplay = (value) => {
+			const displayValue = formatValue(field, value);
+			cell.textContent = displayValue;
+			cell.title = String(displayValue || "");
+		};
+
+		const trySaveValue = async (newValue) => {
+			setCellDisplay(newValue);
 			try {
 				await saveCell(id, field, newValue);
+				updateLocalItemValue(id, field, newValue);
 			} catch (error) {
 				const duplicateList = error?.payload?.duplicates;
 				if (error?.status === 409 && Array.isArray(duplicateList) && duplicateList.length) {
@@ -763,31 +1120,120 @@ async function initInventoryPage() {
 						mode: "update",
 					});
 					if (!confirmed) {
-						cell.textContent = oldValue;
+						setCellDisplay(oldRawValue);
 						return;
 					}
 					try {
 						await saveCell(id, field, newValue, { forceDuplicate: true });
+						updateLocalItemValue(id, field, newValue);
 						return;
 					} catch (forcedError) {
-						cell.textContent = oldValue;
+						setCellDisplay(oldRawValue);
 						notify(forcedError.message, true);
 						return;
 					}
 				}
-				cell.textContent = oldValue;
+				setCellDisplay(oldRawValue);
 				notify(error.message, true);
 			}
 		};
 
+		if (INLINE_SELECT_FIELDS.has(field)) {
+			await ensureModalOptions();
+			const selectConfig = getModalSelectConfig(field);
+			if (!selectConfig) return;
+
+			const select = document.createElement("select");
+			select.className = "form-select form-select-sm";
+			renderSelectWithQuickAdd(select, selectConfig, oldRawValue);
+			cell.innerHTML = "";
+			cell.appendChild(select);
+			select.focus();
+
+			let finished = false;
+			let openingQuickModal = false;
+
+			const finish = async (value) => {
+				if (finished) return;
+				finished = true;
+				await trySaveValue(String(value || "").trim());
+			};
+
+			select.addEventListener("change", async () => {
+				if (select.value === INLINE_ADD_OPTION_VALUE) {
+					openingQuickModal = true;
+					const createdValue = await openQuickAddModal(selectConfig.quickMode);
+					openingQuickModal = false;
+					if (!createdValue) {
+						setCellDisplay(oldRawValue);
+						finished = true;
+						return;
+					}
+					await loadModalParams();
+					await finish(createdValue);
+					return;
+				}
+				await finish(select.value);
+			});
+
+			select.addEventListener("blur", async () => {
+				if (finished || openingQuickModal) return;
+				await finish(select.value);
+			});
+
+			select.addEventListener("keydown", async (event) => {
+				if (event.key === "Escape") {
+					event.preventDefault();
+					finished = true;
+					setCellDisplay(oldRawValue);
+				}
+				if (event.key === "Enter") {
+					event.preventDefault();
+					await finish(select.value);
+				}
+			});
+			return;
+		}
+
+		const inputConfig = INLINE_INPUT_CONFIG[field] || { type: "text" };
+		const input = document.createElement("input");
+		input.type = inputConfig.type;
+		input.className = "form-control form-control-sm";
+		if (inputConfig.min) input.min = inputConfig.min;
+		if (inputConfig.step) input.step = inputConfig.step;
+		input.value = input.type === "date" ? toInputDate(oldRawValue) : oldRawValue;
+		cell.innerHTML = "";
+		cell.appendChild(input);
+		input.focus();
+		if (input.type !== "date") input.select();
+
+		let done = false;
+		const commit = async () => {
+			if (done) return;
+			done = true;
+			let newValue = String(input.value || "").trim();
+			if (field === "cantidad") {
+				const quantity = Number(newValue);
+				if (!Number.isInteger(quantity) || quantity <= 0) {
+					setCellDisplay(oldRawValue);
+					notify("La cantidad debe ser un entero mayor que 0.", true);
+					return;
+				}
+				newValue = String(quantity);
+			}
+			await trySaveValue(newValue);
+		};
+
 		input.addEventListener("blur", commit);
-		input.addEventListener("keydown", (event) => {
+		input.addEventListener("keydown", async (event) => {
 			if (event.key === "Enter") {
 				event.preventDefault();
-				input.blur();
+				await commit();
 			}
 			if (event.key === "Escape") {
-				cell.textContent = oldValue;
+				event.preventDefault();
+				done = true;
+				setCellDisplay(oldRawValue);
 			}
 		});
 	}
@@ -932,7 +1378,7 @@ async function initInventoryPage() {
 			}
 			return;
 		}
-		startEdit(cell);
+		await startEdit(cell);
 	});
 
 	body.addEventListener("contextmenu", (event) => {
@@ -956,6 +1402,9 @@ async function initInventoryPage() {
 		try {
 			if (action === "view") {
 				await viewItem(state.selectedRowId);
+			}
+			if (action === "edit") {
+				await openEditModal(state.selectedRowId);
 			}
 			if (action === "delete") {
 				const confirmed = window.confirm("¿Seguro que deseas borrar este registro?");
@@ -1123,69 +1572,54 @@ if (nodes.excelSingleRow) {
 	});
 
 	nodes.modalAddButton.addEventListener("click", async () => {
-		const payload = {};
-			const inputs = document.querySelectorAll("#form-agregar-item [data-field]");
-			inputs.forEach((input) => {
-				let value = input.value.trim();
-				if (input.dataset.field === "cantidad") {
-					const quantity = Number(value);
-					value = Number.isInteger(quantity) && quantity > 0 ? quantity : null;
-				}
-				if (input.dataset.field === "valor") {
-					value = parseDecimalWithComma(value);
-				}
-				if (input.dataset.field === "valor_esbye") {
-					value = parseDecimalWithComma(value);
-				}
-				if (input.dataset.field === "area_id") {
-					value = value === "" ? null : parseInt(value, 10);
-				}
-				if (value !== "" && value !== null) {
-					payload[input.dataset.field] = value;
-				}
-			});
-			if (!payload.cantidad) {
-				notify("La cantidad debe ser un entero mayor que 0.", true);
-				return;
-			}
-			if (!payload.area_id && state.activeAreaId) {
-				payload.area_id = parseInt(state.activeAreaId, 10);
-			}
-			if (!payload.ubicacion) {
-				payload.ubicacion = composeSelectedLocation() || "";
-			}
+		const isEditing = Boolean(state.editingItemId);
+		let payload;
+		try {
+			payload = collectFormPayload();
+		} catch (validationError) {
+			notify(validationError.message, true);
+			return;
+		}
 			try {
-				await api.send("/api/inventario", "POST", payload);
+				if (isEditing) {
+					await api.send(`/api/inventario/${state.editingItemId}`, "PATCH", payload);
+				} else {
+					await api.send("/api/inventario", "POST", payload);
+				}
 				addModal.hide();
-				inputs.forEach((input) => {
-					input.value = input.dataset.field === "cantidad" ? "1" : "";
-				});
-				if (nodes.excelSingleRow) nodes.excelSingleRow.value = "";
+				resetAddItemForm();
+				setAddModalMode({ editing: false });
 				await refreshItemsTable();
-				notify("Ítem guardado correctamente.");
+				notify(isEditing ? "ítem actualizado correctamente." : "ítem guardado correctamente.");
 			} catch (error) {
 				const duplicateList = error?.payload?.duplicates;
 				if (error?.status === 409 && Array.isArray(duplicateList) && duplicateList.length) {
+					const modeText = isEditing ? "update" : "create";
 					const confirmed = await openDuplicateModal({
 						duplicates: duplicateList,
 						payload,
-						mode: "create",
+						mode: modeText,
 					});
 					if (!confirmed) {
 						return;
 					}
 					try {
-						await api.send("/api/inventario", "POST", {
-							...payload,
-							force_duplicate: true,
-						});
+						if (isEditing) {
+							await api.send(`/api/inventario/${state.editingItemId}`, "PATCH", {
+								...payload,
+								force_duplicate: true,
+							});
+						} else {
+							await api.send("/api/inventario", "POST", {
+								...payload,
+								force_duplicate: true,
+							});
+						}
 						addModal.hide();
-						inputs.forEach((input) => {
-							input.value = input.dataset.field === "cantidad" ? "1" : "";
-						});
-						if (nodes.excelSingleRow) nodes.excelSingleRow.value = "";
+						resetAddItemForm();
+						setAddModalMode({ editing: false });
 						await refreshItemsTable();
-						notify("Ítem guardado correctamente (código repetido autorizado).");
+						notify(isEditing ? "ítem actualizado correctamente (código repetido autorizado)." : "ítem guardado correctamente (código repetido autorizado).");
 					} catch (forceError) {
 						notify(forceError.message, true);
 					}
@@ -1202,42 +1636,14 @@ if (nodes.excelSingleRow) {
 				api.get("/api/parametros/cuentas"),
 				api.get("/api/administradores"),
 			]);
+			state.modalOptions.estados = estadosRes.data || [];
+			state.modalOptions.cuentas = cuentasRes.data || [];
+			state.modalOptions.administradores = adminsRes.data || [];
 
-			const estadoSelect = document.querySelector("#form-agregar-item [data-field='estado']");
-			const cuentaSelect = document.querySelector("#form-agregar-item [data-field='cuenta']");
-			const usuarioFinalSelect = document.querySelector("#form-agregar-item [data-field='usuario_final']");
-
-			if (estadoSelect) {
-				estadoSelect.innerHTML = '<option value="">-- Seleccionar estado --</option>';
-				(estadosRes.data || []).forEach((estado) => {
-					const opt = document.createElement("option");
-					opt.value = estado.nombre;
-					opt.textContent = estado.nombre;
-					estadoSelect.appendChild(opt);
-				});
-			}
-
-			if (cuentaSelect) {
-				cuentaSelect.innerHTML = '<option value="">-- Seleccionar cuenta --</option>';
-				(cuentasRes.data || []).forEach((cuenta) => {
-					const opt = document.createElement("option");
-					opt.value = cuenta.nombre;
-					opt.textContent = cuenta.codigo ? `${cuenta.codigo} - ${cuenta.nombre}` : cuenta.nombre;
-					cuentaSelect.appendChild(opt);
-				});
-			}
-
-			if (usuarioFinalSelect) {
-				const currentValue = usuarioFinalSelect.value;
-				usuarioFinalSelect.innerHTML = '<option value="">-- Seleccionar personal --</option>';
-				(adminsRes.data || []).forEach((admin) => {
-					const opt = document.createElement("option");
-					opt.value = admin.nombre;
-					opt.textContent = admin.nombre;
-					usuarioFinalSelect.appendChild(opt);
-				});
-				if (currentValue) usuarioFinalSelect.value = currentValue;
-			}
+			refreshAddItemSelects();
+			attachQuickAddToSelect(document.querySelector("#form-agregar-item [data-field='estado']"), "estado");
+			attachQuickAddToSelect(document.querySelector("#form-agregar-item [data-field='cuenta']"), "cuenta");
+			attachQuickAddToSelect(document.querySelector("#form-agregar-item [data-field='usuario_final']"), "usuario_final");
 
 			renderAreaModalSelect();
 		} catch (error) {
@@ -1247,10 +1653,17 @@ if (nodes.excelSingleRow) {
 
 	addModalElement.addEventListener("shown.bs.modal", async () => {
 		await loadModalParams();
-		if (state.activeAreaId) {
+		if (!state.editingItemId && state.activeAreaId) {
 			nodes.modalAreaSelect.value = String(state.activeAreaId);
 		}
-		syncModalLocationFromSelection();
+		if (!state.editingItemId) {
+			syncModalLocationFromSelection();
+		}
+	});
+
+	addModalElement.addEventListener("hidden.bs.modal", () => {
+		setAddModalMode({ editing: false });
+		resetAddItemForm();
 	});
 
 	nodes.modalAreaSelect?.addEventListener("change", () => {

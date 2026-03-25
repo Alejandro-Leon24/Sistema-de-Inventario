@@ -179,6 +179,12 @@ body.inventory-column-dragging * {
     gap: 0.7rem;
     overflow-x: auto;
     padding-bottom: 0.3rem;
+    align-items: flex-start;
+}
+
+.settings-tabs .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .settings-menu-btn.active {
@@ -219,6 +225,7 @@ body.inventory-column-dragging * {
     align-items: center;
     justify-content: space-between;
     gap: 0.6rem;
+    cursor: pointer;
 }
 
 .floor-title-wrap {
@@ -227,6 +234,7 @@ body.inventory-column-dragging * {
     gap: 0.4rem;
     min-width: 0;
     flex: 1;
+    cursor: pointer;
 }
 
 .floor-title-text {

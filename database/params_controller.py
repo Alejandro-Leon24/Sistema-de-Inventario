@@ -10,6 +10,10 @@ PARAM_TABLES = {
     "si_no": "param_si_no",
     "estado_puerta": "param_estado_puerta",
     "cerraduras": "param_cerraduras",
+    "estado_piso": "param_estado_piso",
+    "material_techo": "param_material_techo",
+    "material_puerta": "param_material_puerta",
+    "estado_pizarra": "param_estado_pizarra",
 }
 
 
@@ -89,6 +93,30 @@ def can_delete_param(tipo, nombre):
     if tipo == "cerraduras":
         row = db.execute(
             "SELECT COUNT(1) AS total FROM areas WHERE cerradura = ?",
+            (nombre,),
+        ).fetchone()
+        return (row["total"] or 0) == 0
+    if tipo == "estado_piso":
+        row = db.execute(
+            "SELECT COUNT(1) AS total FROM areas WHERE estado_piso = ?",
+            (nombre,),
+        ).fetchone()
+        return (row["total"] or 0) == 0
+    if tipo == "material_techo":
+        row = db.execute(
+            "SELECT COUNT(1) AS total FROM areas WHERE material_techo = ?",
+            (nombre,),
+        ).fetchone()
+        return (row["total"] or 0) == 0
+    if tipo == "material_puerta":
+        row = db.execute(
+            "SELECT COUNT(1) AS total FROM areas WHERE material_puerta = ?",
+            (nombre,),
+        ).fetchone()
+        return (row["total"] or 0) == 0
+    if tipo == "estado_pizarra":
+        row = db.execute(
+            "SELECT COUNT(1) AS total FROM areas WHERE pizarra_estado = ?",
             (nombre,),
         ).fetchone()
         return (row["total"] or 0) == 0

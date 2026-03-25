@@ -1,6 +1,8 @@
 import sqlite3
-conn = sqlite3.connect('inventario.db')
-conn.execute('UPDATE administradores SET activo = 1 WHERE id = 1')
-conn.commit()
-conn.close()
-print('✓ Registro actualizado')
+
+
+with sqlite3.connect("inventario.db") as conn:
+	conn.execute("DELETE FROM inventario_items")
+	conn.execute("DELETE FROM sqlite_sequence WHERE name='inventario_items'")
+
+print("Registro actualizado")
