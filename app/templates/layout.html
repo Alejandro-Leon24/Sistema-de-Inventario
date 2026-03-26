@@ -7,7 +7,7 @@
     <title>{% block title %}{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css', v=1.1) }}">
 </head>
 
 <body>
@@ -49,6 +49,24 @@
         {% block body %}
 
         {% endblock %}
+    </div>
+
+    <!-- Modal de Notificación Global -->
+    <div class="modal fade" id="modalGlobalNotificacion" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="modalGlobalNotificacionLabel" aria-hidden="true" style="z-index: 1080;">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow-lg border-0">
+                <div class="modal-header text-white" id="modalGlobalNotificacionHeader">
+                    <h5 class="modal-title fw-semibold" id="modalGlobalNotificacionLabel">Notificación</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body fs-5 text-center py-4" id="modalGlobalNotificacionBody">
+                    <!-- Mensaje dinámico -->
+                </div>
+                <div class="modal-footer bg-light justify-content-center">
+                    <button type="button" class="btn px-4" id="modalGlobalNotificacionBtn" data-bs-dismiss="modal">Aceptar</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>

@@ -9,7 +9,7 @@
             <div class="card border-0 shadow-sm">
                 <div class="list-group list-group-flush">
                     <button type="button" class="list-group-item list-group-item-action settings-menu-btn active" data-target="ubicaciones" style="border-top-left-radius: 0.5rem; border-top-right-radius: 0.5rem;">
-                        <i class="bi bi-building me-2"></i>Pisos e Áreas
+                        <i class="bi bi-building me-2"></i>Pisos y Áreas
                     </button>
                     <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="parametros">
                         <i class="bi bi-gear me-2"></i>Parámetros
@@ -24,7 +24,7 @@
         <div class="col-lg-10 overflow-y-auto" style="height: 80vh;">
             <div id="section-ubicaciones" class="settings-section">
                 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-                    <h3 class="m-0 fw-bold text-primary">Pisos e Áreas</h3>
+                    <h3 class="m-0 fw-bold text-primary">Pisos y Áreas</h3>
                     <div class="d-flex gap-2">
                         <button id="btn-importar-ubicaciones" class="btn btn-outline-primary btn-sm">
                             <i class="bi bi-file-earmark-arrow-up me-2"></i>Importar Ubicaciones
@@ -318,7 +318,7 @@
     </div>
 </div>
 
-<div class="modal fade" id="modalDetalleUbicacion" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="modalDetalleUbicacion" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
@@ -353,7 +353,7 @@
     </div>
 </div>
 
-<div class="modal fade" id="modalArea" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="modalArea" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
@@ -368,8 +368,8 @@
 
                     <div class="col-md-4"><label class="form-label">Metros cuadrados (Largo x ancho)</label><input type="text" class="form-control" id="area-metros-cuadrados" maxlength="120"></div>
 
-                    <div class="col-md-4"><label class="form-label">Alto</label><input type="number" step="0.01" min="0" class="form-control" id="area-alto"></div>
-                    <div class="col-md-4"><label class="form-label">Señalética (Si/No)</label><select class="form-select" id="area-senaletica"></select></div>
+                    <div class="col-md-2"><label class="form-label">Alto</label><input type="number" step="0.01" min="0" class="form-control" id="area-alto"></div>
+                    <div class="col-md-2"><label class="form-label">Señalética (Si/No)</label><select class="form-select" id="area-senaletica"></select></div>
                     <div class="col-md-4"><label class="form-label">Codificación de la señalética</label><input type="text" class="form-control" id="area-cod-senaletica" maxlength="120"></div>
 
                     <div class="col-12"><label class="form-label">Infraestructura física (estado general, pintura, paredes, techo)</label><textarea class="form-control" id="area-infraestructura-fisica" rows="2" maxlength="500"></textarea></div>
@@ -390,29 +390,29 @@
                     <div class="col-md-3"><label class="form-label">Sitio profesor tiene silla (Si/No)</label><select class="form-select" id="area-sitio-profesor-silla"></select></div>
                     <div class="col-md-3"><label class="form-label">PC en el aula (Si/No)</label><select class="form-select" id="area-pc-aula"></select></div>
 
-                    <div class="col-md-6"><label class="form-label">Proyector (Si/No)</label><select class="form-select" id="area-proyector"></select></div>
-                    <div class="col-md-6"><label class="form-label">Pantalla interactiva (Si/No)</label><select class="form-select" id="area-pantalla-interactiva"></select></div>
+                    <div class="col-md-2"><label class="form-label">Proyector (Si/No)</label><select class="form-select" id="area-proyector"></select></div>
+                    <div class="col-md-2"><label class="form-label">Pantalla interactiva</label><select class="form-select" id="area-pantalla-interactiva"></select></div>
 
-                    <div class="col-md-4"><label class="form-label">Pupitres (Cantidad)</label><input type="number" class="form-control" id="area-pupitres-cantidad" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Pupitres que sí funcionan</label><input type="number" class="form-control" id="area-pupitres-funcionan" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Pupitres que NO funcionan</label><input type="number" class="form-control" id="area-pupitres-no-funcionan" min="0"></div>
+                    <div class="col-md-2"><label class="form-label">Pupitres (Cantidad)</label><input type="number" class="form-control" id="area-pupitres-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Pupitres que sí funcionan</label><input type="number" class="form-control" id="area-pupitres-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Pupitres que NO funcionan</label><input type="number" class="form-control" id="area-pupitres-no-funcionan" min="0"></div>
 
-                    <div class="col-md-6"><label class="form-label">Pizarra (Si/No)</label><select class="form-select" id="area-pizarra"></select></div>
-                    <div class="col-md-6"><label class="form-label">Pizarra estado (Bueno, Regular, Dañado)</label><select class="form-select" id="area-pizarra-estado"></select></div>
+                    <div class="col-md-2"><label class="form-label">Pizarra (Si/No)</label><select class="form-select" id="area-pizarra"></select></div>
+                    <div class="col-md-4"><label class="form-label">Pizarra estado (Bueno, Regular, Dañado)</label><select class="form-select" id="area-pizarra-estado"></select></div>
 
-                    <div class="col-md-4"><label class="form-label">Ventanas (Cantidad)</label><input type="number" class="form-control" id="area-ventanas-cantidad" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Ventanas que sí funcionan</label><input type="number" class="form-control" id="area-ventanas-funcionan" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Ventanas que NO funcionan</label><input type="number" class="form-control" id="area-ventanas-no-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Ventanas (Cantidad)</label><input type="number" class="form-control" id="area-ventanas-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Ventanas que sí funcionan</label><input type="number" class="form-control" id="area-ventanas-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Ventanas que NO funcionan</label><input type="number" class="form-control" id="area-ventanas-no-funcionan" min="0"></div>
 
-                    <div class="col-md-4"><label class="form-label">A/A (Cantidad)</label><input type="number" class="form-control" id="area-aa-cantidad" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">A/A (Cantidad que sí funcionan)</label><input type="number" class="form-control" id="area-aa-funcionan" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">A/A (Cantidad que NO funcionan)</label><input type="number" class="form-control" id="area-aa-no-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">A/A (Cantidad)</label><input type="number" class="form-control" id="area-aa-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">A/A (Cantidad que sí funcionan)</label><input type="number" class="form-control" id="area-aa-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">A/A (Cantidad que NO funcionan)</label><input type="number" class="form-control" id="area-aa-no-funcionan" min="0"></div>
 
-                    <div class="col-md-4"><label class="form-label">Ventiladores (Cantidad)</label><input type="number" class="form-control" id="area-ventiladores-cantidad" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Ventiladores que sí funcionan</label><input type="number" class="form-control" id="area-ventiladores-funcionan" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Ventiladores que NO funcionan</label><input type="number" class="form-control" id="area-ventiladores-no-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Ventiladores (Cantidad)</label><input type="number" class="form-control" id="area-ventiladores-cantidad" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Ventiladores que sí funcionan</label><input type="number" class="form-control" id="area-ventiladores-funcionan" min="0"></div>
+                    <div class="col-md-3"><label class="form-label">Ventiladores que NO funcionan</label><input type="number" class="form-control" id="area-ventiladores-no-funcionan" min="0"></div>
 
-                    <div class="col-md-4"><label class="form-label">Señal WIFI (Si/No)</label><select class="form-select" id="area-wifi"></select></div>
+                    <div class="col-md-3"><label class="form-label">Señal WIFI (Si/No)</label><select class="form-select" id="area-wifi"></select></div>
                     <div class="col-md-4"><label class="form-label">Red LAN alámbrica (Si/No)</label><select class="form-select" id="area-red-lan"></select></div>
                     <div class="col-md-4"><label class="form-label">Red LAN alámbrica (Puntos que funcionan)</label><input type="number" class="form-control" id="area-red-lan-funcionan" min="0"></div>
 
@@ -429,8 +429,8 @@
                     <div class="col-md-4"><label class="form-label">Puntos eléctricos (Cantidad)</label><input type="number" class="form-control" id="area-puntos-electricos-cantidad" min="0"></div>
 
                     <div class="col-md-4"><label class="form-label">Capacidad áulica (estudiantes)</label><input type="number" class="form-control" id="area-capacidad-aulica" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Capacidad considerando distanciamiento</label><input type="number" class="form-control" id="area-capacidad-distanciamiento" min="0"></div>
-                    <div class="col-md-4"><label class="form-label">Ambiente apto para retorno presencial (Si/No)</label><select class="form-select" id="area-ambiente-apto-retorno"></select></div>
+                    <div class="col-md-6"><label class="form-label">Capacidad considerando distanciamiento</label><input type="number" class="form-control" id="area-capacidad-distanciamiento" min="0"></div>
+                    <div class="col-md-6"><label class="form-label">Ambiente apto para retorno presencial (Si/No)</label><select class="form-select" id="area-ambiente-apto-retorno"></select></div>
 
                     <div class="col-12"><label class="form-label">Observaciones (detalle opcional)</label><textarea class="form-control" id="area-observaciones-detalle" rows="2" maxlength="500"></textarea></div>
                 </div>

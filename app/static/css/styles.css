@@ -141,8 +141,12 @@ body.inventory-column-dragging * {
     max-width: 16ch;
 }
 
-#tabla-inventario tbody tr:hover {
+#tabla-inventario tbody tr:hover > * {
     background-color: #f8f9fa;
+}
+
+#tabla-inventario tbody tr.row-selected > * {
+    background-color: #e9ecef !important; /* Un poco más oscuro para que resalte más que el hover */
 }
 
 .editable-cell {
@@ -432,4 +436,11 @@ body.inventory-column-dragging * {
     .area-grid {
         grid-template-columns: 1fr;
     }
+}
+
+.opciones button:hover {
+    background-color: #0b5ed7;
+    color: white;
+    border-radius: 0.5rem;
+
 }

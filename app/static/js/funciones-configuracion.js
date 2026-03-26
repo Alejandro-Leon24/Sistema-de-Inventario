@@ -18,10 +18,55 @@ return payload;
 };
 
 function notify(message, isError = false) {
-window.alert(message);
-if (isError) {
-console.error(message);
-}
+	if (isError) {
+		console.error(message);
+	}
+
+	const modalEl = document.getElementById("modalGlobalNotificacion");
+	if (!modalEl) {
+		window.alert(message);
+		return;
+	}
+
+	const titleEl = document.getElementById("modalGlobalNotificacionLabel");
+	const headerEl = document.getElementById("modalGlobalNotificacionHeader");
+	const bodyEl = document.getElementById("modalGlobalNotificacionBody");
+	const btnEl = document.getElementById("modalGlobalNotificacionBtn");
+
+	bodyEl.textContent = message;
+
+	// Resetear clases
+	headerEl.classList.remove("bg-danger", "bg-success");
+	btnEl.classList.remove("btn-danger", "btn-success", "btn-primary");
+
+	if (isError) {
+		titleEl.textContent = "Error";
+		headerEl.classList.add("bg-danger");
+		btnEl.classList.add("btn-danger");
+	} else {
+		titleEl.textContent = "Éxito";
+		headerEl.classList.add("bg-success");
+		btnEl.classList.add("btn-success");
+	}
+
+	// Forzar z-index más alto para evitar que quede detrás si hay otros modales abiertos
+	let modalInstance = bootstrap.Modal.getInstance(modalEl);
+	if (!modalInstance) {
+		modalInstance = new bootstrap.Modal(modalEl);
+	}
+	modalInstance.show();
+
+	// Arreglar el backdrop inmediatamente después de mostrar
+	setTimeout(() => {
+		const backdrops = document.querySelectorAll('.modal-backdrop');
+		if (backdrops.length > 0) {
+			// El último backdrop es el que corresponde a nuestro modal
+			const highestZIndex = 1100 + (backdrops.length * 10);
+			const lastBackdrop = backdrops[backdrops.length - 1];
+			lastBackdrop.style.zIndex = highestZIndex;
+			modalEl.style.zIndex = highestZIndex + 1;
+		}
+	}, 15);
 }
 
 function escapeHtmlText(value) {
@@ -91,6 +136,7 @@ async function initSettingsPage() {
 			structure: [],
 			activeBlockId: null,
 			activeFloorId: null,
+			expandedFloorId: null,
 		};
 
 		const modalAreaElement = document.getElementById("modalArea");
@@ -516,25 +562,30 @@ async function initSettingsPage() {
 			};
 		}
 
-		function renderAreaDetailReadOnly(context) {
+		function renderAreaDetailReadOnly(context, options = {}) {
 			const { block, piso, area } = context;
+			const getResponsableName = () => {
+				if (!area.responsable_admin_id) return "Sin asignar";
+				const admin = (options.admins || []).find(a => a.id === area.responsable_admin_id);
+				return admin?.nombre || "Sin asignar";
+			};
 			const infoRows = [
 				["Bloque", block.nombre],
-				["Piso", piso.nombre],
 				["Área", area.nombre],
+				["Responsable del ambiente", getResponsableName()],
 				["Identificación ambiente", area.identificacion_ambiente || "-"],
 				["Metros cuadrados", area.metros_cuadrados || "-"],
 				["Alto", area.alto ?? "-"],
 				["Señalética", area.senaletica || "-"],
-				["Código señalética", area.cod_senaletica || "-"],
+				["Codificación de la señalética", area.cod_senaletica || "-"],
 				["Infraestructura física", area.infraestructura_fisica || "-"],
+				["Piso", piso.nombre],
 				["Estado piso", area.estado_piso || "-"],
+				["Estado paredes", area.estado_paredes || "-"],
+				["Estado techo", area.estado_techo || "-"],
 				["Material techo", area.material_techo || "-"],
 				["Puerta", area.puerta || "-"],
 				["Material puerta", area.material_puerta || "-"],
-				["Descripción", area.descripcion || "Sin descripción"],
-				["Estado paredes", area.estado_paredes || "-"],
-				["Estado techo", area.estado_techo || "-"],
 				["Estado puerta", area.estado_puerta || "-"],
 				["Cerradura", area.cerradura || "-"],
 				["Nivel seguridad", area.nivel_seguridad || "-"],
@@ -591,7 +642,7 @@ async function initSettingsPage() {
 		}
 
 		function renderAreaDetailEditForm(context, options) {
-			const { area } = context;
+			const { piso, area } = context;
 			const ADD_ADMIN_OPTION = "__add_new_admin__";
 			const makeOptions = (values, selected) =>
 				[`<option value="">Seleccionar</option>`]
@@ -618,64 +669,69 @@ async function initSettingsPage() {
 			detalleUbicacionBody.innerHTML = `
 				<div class="row g-2" id="detalle-area-edit-form">
 					<div class="col-md-6"><label class="form-label small">Nombre</label><input type="text" class="form-control form-control-sm" data-field="nombre" value="${escapeHtml(area.nombre || "")}"></div>
-					<div class="col-md-6"><label class="form-label small">Identificación ambiente</label><input type="text" class="form-control form-control-sm" data-field="identificacion_ambiente" value="${escapeHtml(area.identificacion_ambiente || "")}"></div>
-					<div class="col-md-4"><label class="form-label small">Metros cuadrados</label><input type="text" class="form-control form-control-sm" data-field="metros_cuadrados" value="${escapeHtml(area.metros_cuadrados || "")}"></div>
-					<div class="col-md-4"><label class="form-label small">Alto</label><input type="number" min="0" step="0.01" class="form-control form-control-sm" data-field="alto" value="${area.alto ?? ""}"></div>
-					<div class="col-md-4"><label class="form-label small">Señalética</label><select class="form-select form-select-sm" data-field="senaletica">${makeOptions(options.yesNo, area.senaletica)}</select></div>
-					<div class="col-md-6"><label class="form-label small">Codificación señalética</label><input type="text" class="form-control form-control-sm" data-field="cod_senaletica" value="${escapeHtml(area.cod_senaletica || "")}"></div>
-					<div class="col-md-6"><label class="form-label small">Estado piso</label><select class="form-select form-select-sm" data-field="estado_piso">${makeOptions(options.estadoPiso, area.estado_piso)}</select></div>
-					<div class="col-md-6"><label class="form-label small">Material techo</label><select class="form-select form-select-sm" data-field="material_techo">${makeOptions(options.materialTecho, area.material_techo)}</select></div>
-					<div class="col-md-6"><label class="form-label small">Puerta (Si/No)</label><select class="form-select form-select-sm" data-field="puerta">${makeOptions(options.yesNo, area.puerta)}</select></div>
-					<div class="col-md-6"><label class="form-label small">Material puerta</label><select class="form-select form-select-sm" data-field="material_puerta">${makeOptions(options.materialPuerta, area.material_puerta)}</select></div>
 					<div class="col-md-6">
 						<label class="form-label small">Responsable</label>
 						<div class="input-group input-group-sm">
 							<select class="form-select form-select-sm" data-field="responsable_admin_id">${adminOptions}</select>
 						</div>
 					</div>
+					<div class="col-md-6"><label class="form-label small">Identificación ambiente</label><input type="text" class="form-control form-control-sm" data-field="identificacion_ambiente" value="${escapeHtml(area.identificacion_ambiente || "")}"></div>
+					<div class="col-md-4"><label class="form-label small">Metros cuadrados</label><input type="text" class="form-control form-control-sm" data-field="metros_cuadrados" value="${escapeHtml(area.metros_cuadrados || "")}"></div>
+					<div class="col-md-2"><label class="form-label small">Alto</label><input type="number" min="0" step="0.01" class="form-control form-control-sm" data-field="alto" value="${area.alto ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Señalética</label><select class="form-select form-select-sm" data-field="senaletica">${makeOptions(options.yesNo, area.senaletica)}</select></div>
+					<div class="col-md-9"><label class="form-label small">Codificación señalética</label><input type="text" class="form-control form-control-sm" data-field="cod_senaletica" value="${escapeHtml(area.cod_senaletica || "")}"></div>
 					<div class="col-12"><label class="form-label small">Infraestructura física</label><textarea rows="2" class="form-control form-control-sm" data-field="infraestructura_fisica">${escapeHtml(area.infraestructura_fisica || "")}</textarea></div>
-					<div class="col-12"><label class="form-label small">Descripción</label><input type="text" class="form-control form-control-sm" data-field="descripcion" value="${escapeHtml(area.descripcion || "")}"></div>
+					
+					<div class="col-md-3"><label class="form-label small">Nombre piso</label><input type="text" class="form-control form-control-sm" data-field="nombre_piso" value="${escapeHtml(piso.nombre || "")}" readonly></div>
+					<div class="col-md-3"><label class="form-label small">Estado piso</label><select class="form-select form-select-sm" data-field="estado_piso">${makeOptions(options.estadoPiso, area.estado_piso)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Estado paredes</label><select class="form-select form-select-sm" data-field="estado_paredes">${makeOptions(options.yesNo, area.estado_paredes)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Estado techo</label><select class="form-select form-select-sm" data-field="estado_techo">${makeOptions(options.yesNo, area.estado_techo)}</select></div>
+					
+					<div class="col-md-4"><label class="form-label small">Material techo</label><select class="form-select form-select-sm" data-field="material_techo">${makeOptions(options.materialTecho, area.material_techo)}</select></div>
+					<div class="col-md-2"><label class="form-label small">Puerta</label><select class="form-select form-select-sm" data-field="puerta">${makeOptions(options.yesNo, area.puerta)}</select></div>
+					<div class="col-md-6"><label class="form-label small">Material puerta</label><select class="form-select form-select-sm" data-field="material_puerta">${makeOptions(options.materialPuerta, area.material_puerta)}</select></div>
+					
 
-					<div class="col-md-4"><label class="form-label small">Estado paredes</label><select class="form-select form-select-sm" data-field="estado_paredes">${makeOptions(options.yesNo, area.estado_paredes)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Estado techo</label><select class="form-select form-select-sm" data-field="estado_techo">${makeOptions(options.yesNo, area.estado_techo)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Estado puerta</label><select class="form-select form-select-sm" data-field="estado_puerta">${makeOptions(options.estadoPuerta, area.estado_puerta)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Cerradura</label><select class="form-select form-select-sm" data-field="cerradura">${makeOptions(options.cerraduras, area.cerradura)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Nivel seguridad</label><select class="form-select form-select-sm" data-field="nivel_seguridad">${makeOptions(options.yesNo, area.nivel_seguridad)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Profesor mesa</label><select class="form-select form-select-sm" data-field="sitio_profesor_mesa">${makeOptions(options.yesNo, area.sitio_profesor_mesa)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Profesor silla</label><select class="form-select form-select-sm" data-field="sitio_profesor_silla">${makeOptions(options.yesNo, area.sitio_profesor_silla)}</select></div>
-					<div class="col-md-4"><label class="form-label small">PC aula</label><select class="form-select form-select-sm" data-field="pc_aula">${makeOptions(options.yesNo, area.pc_aula)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Proyector</label><select class="form-select form-select-sm" data-field="proyector">${makeOptions(options.yesNo, area.proyector)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Estado puerta</label><select class="form-select form-select-sm" data-field="estado_puerta">${makeOptions(options.estadoPuerta, area.estado_puerta)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Cerradura</label><select class="form-select form-select-sm" data-field="cerradura">${makeOptions(options.cerraduras, area.cerradura)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Nivel seguridad</label><select class="form-select form-select-sm" data-field="nivel_seguridad">${makeOptions(options.yesNo, area.nivel_seguridad)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Profesor mesa</label><select class="form-select form-select-sm" data-field="sitio_profesor_mesa">${makeOptions(options.yesNo, area.sitio_profesor_mesa)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Profesor silla</label><select class="form-select form-select-sm" data-field="sitio_profesor_silla">${makeOptions(options.yesNo, area.sitio_profesor_silla)}</select></div>
+					<div class="col-md-2"><label class="form-label small">PC aula</label><select class="form-select form-select-sm" data-field="pc_aula">${makeOptions(options.yesNo, area.pc_aula)}</select></div>
+					<div class="col-md-3"><label class="form-label small">Proyector</label><select class="form-select form-select-sm" data-field="proyector">${makeOptions(options.yesNo, area.proyector)}</select></div>
 					<div class="col-md-4"><label class="form-label small">Pantalla interactiva</label><select class="form-select form-select-sm" data-field="pantalla_interactiva">${makeOptions(options.yesNo, area.pantalla_interactiva)}</select></div>
-					<div class="col-md-4"><label class="form-label small">Pupitres cantidad</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_cantidad" value="${area.pupitres_cantidad ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Pupitres cant.</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_cantidad" value="${area.pupitres_cantidad ?? ""}"></div>
 					<div class="col-md-4"><label class="form-label small">Pupitres funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_funcionan" value="${area.pupitres_funcionan ?? ""}"></div>
-					<div class="col-md-4"><label class="form-label small">Pupitres no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_no_funcionan" value="${area.pupitres_no_funcionan ?? ""}"></div>
+					<div class="col-md-5"><label class="form-label small">Pupitres no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="pupitres_no_funcionan" value="${area.pupitres_no_funcionan ?? ""}"></div>
 					<div class="col-md-4"><label class="form-label small">Pizarra</label><select class="form-select form-select-sm" data-field="pizarra">${makeOptions(options.yesNo, area.pizarra)}</select></div>
 					<div class="col-md-4"><label class="form-label small">Estado pizarra</label><select class="form-select form-select-sm" data-field="pizarra_estado">${makeOptions(options.estadoPizarra, area.pizarra_estado)}</select></div>
 					<div class="col-md-4"><label class="form-label small">Ventanas cantidad</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventanas_cantidad" value="${area.ventanas_cantidad ?? ""}"></div>
 					<div class="col-md-4"><label class="form-label small">Ventanas funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventanas_funcionan" value="${area.ventanas_funcionan ?? ""}"></div>
-					<div class="col-md-4"><label class="form-label small">Ventanas no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventanas_no_funcionan" value="${area.ventanas_no_funcionan ?? ""}"></div>
+					<div class="col-md-5"><label class="form-label small">Ventanas no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventanas_no_funcionan" value="${area.ventanas_no_funcionan ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">A/A cantidad</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_cantidad" value="${area.aa_cantidad ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">A/A funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_funcionan" value="${area.aa_funcionan ?? ""}"></div>
+					<div class="col-md-5"><label class="form-label small">A/A no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_no_funcionan" value="${area.aa_no_funcionan ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Ventiladores</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_cantidad" value="${area.ventiladores_cantidad ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ventiladores func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_funcionan" value="${area.ventiladores_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ventiladores no func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_no_funcionan" value="${area.ventiladores_no_funcionan ?? ""}"></div>
 					<div class="col-md-4"><label class="form-label small">WIFI</label><select class="form-select form-select-sm" data-field="wifi">${makeOptions(options.yesNo, area.wifi)}</select></div>
+					
 					<div class="col-md-4"><label class="form-label small">Red LAN</label><select class="form-select form-select-sm" data-field="red_lan">${makeOptions(options.yesNo, area.red_lan)}</select></div>
+					<div class="col-md-4"><label class="form-label small">LAN funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_lan_funcionan" value="${area.red_lan_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">LAN no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_lan_no_funcionan" value="${area.red_lan_no_funcionan ?? ""}"></div>
+					
+					<div class="col-md-4"><label class="form-label small">Red inalámbrica</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_inalambrica_cantidad" value="${area.red_inalambrica_cantidad ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ilum. funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="iluminacion_funcionan" value="${area.iluminacion_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ilum. no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="iluminacion_no_funcionan" value="${area.iluminacion_no_funcionan ?? ""}"></div>
+					<div class="col-md-3"><label class="form-label small">Luminarias</label><input type="number" min="0" class="form-control form-control-sm" data-field="luminarias_cantidad" value="${area.luminarias_cantidad ?? ""}"></div>
 					<div class="col-md-4"><label class="form-label small">Puntos eléctricos</label><select class="form-select form-select-sm" data-field="puntos_electricos">${makeOptions(options.yesNo, area.puntos_electricos)}</select></div>
 
-					<div class="col-md-3"><label class="form-label small">A/A cantidad</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_cantidad" value="${area.aa_cantidad ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">A/A funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_funcionan" value="${area.aa_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">A/A no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="aa_no_funcionan" value="${area.aa_no_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ventiladores</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_cantidad" value="${area.ventiladores_cantidad ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ventiladores func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_funcionan" value="${area.ventiladores_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ventiladores no func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="ventiladores_no_funcionan" value="${area.ventiladores_no_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">LAN funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_lan_funcionan" value="${area.red_lan_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">LAN no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_lan_no_funcionan" value="${area.red_lan_no_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Red inalámbrica</label><input type="number" min="0" class="form-control form-control-sm" data-field="red_inalambrica_cantidad" value="${area.red_inalambrica_cantidad ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ilum. funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="iluminacion_funcionan" value="${area.iluminacion_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ilum. no funcionando</label><input type="number" min="0" class="form-control form-control-sm" data-field="iluminacion_no_funcionan" value="${area.iluminacion_no_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Luminarias</label><input type="number" min="0" class="form-control form-control-sm" data-field="luminarias_cantidad" value="${area.luminarias_cantidad ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ptos eléctricos func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_funcionan" value="${area.puntos_electricos_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ptos eléctricos no func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_no_funcionan" value="${area.puntos_electricos_no_funcionan ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Ptos eléctricos total</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_cantidad" value="${area.puntos_electricos_cantidad ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Capacidad áulica</label><input type="number" min="0" class="form-control form-control-sm" data-field="capacidad_aulica" value="${area.capacidad_aulica ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Capacidad distanciamiento</label><input type="number" min="0" class="form-control form-control-sm" data-field="capacidad_distanciamiento" value="${area.capacidad_distanciamiento ?? ""}"></div>
-					<div class="col-md-3"><label class="form-label small">Apto retorno</label><select class="form-select form-select-sm" data-field="ambiente_apto_retorno">${makeOptions(options.yesNo, area.ambiente_apto_retorno)}</select></div>
+					<div class="col-md-5"><label class="form-label small">Ptos eléctricos func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_funcionan" value="${area.puntos_electricos_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ptos eléctricos no func.</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_no_funcionan" value="${area.puntos_electricos_no_funcionan ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Ptos eléctricos total</label><input type="number" min="0" class="form-control form-control-sm" data-field="puntos_electricos_cantidad" value="${area.puntos_electricos_cantidad ?? ""}"></div>
+					<div class="col-md-4"><label class="form-label small">Capacidad áulica</label><input type="number" min="0" class="form-control form-control-sm" data-field="capacidad_aulica" value="${area.capacidad_aulica ?? ""}"></div>
+					<div class="col-md-6"><label class="form-label small">Capacidad distanciamiento</label><input type="number" min="0" class="form-control form-control-sm" data-field="capacidad_distanciamiento" value="${area.capacidad_distanciamiento ?? ""}"></div>
+					<div class="col-md-6"><label class="form-label small">Apto retorno presencial</label><select class="form-select form-select-sm" data-field="ambiente_apto_retorno">${makeOptions(options.yesNo, area.ambiente_apto_retorno)}</select></div>
 
 					<div class="col-12"><label class="form-label small">Observaciones</label><textarea rows="2" class="form-control form-control-sm" data-field="observaciones_detalle">${escapeHtml(area.observaciones_detalle || "")}</textarea></div>
 				</div>
@@ -819,14 +875,20 @@ async function initSettingsPage() {
 			setDetailButtonsMode("view", true);
 		}
 
-		function openAreaDetail(block, piso, area) {
+		async function openAreaDetail(block, piso, area) {
 			areaDetailContext = {
 				blockId: block.id,
 				pisoId: piso.id,
 				areaId: area.id,
 			};
 			setLocationDetailContext("area", area.id, area.nombre);
-			renderAreaDetailReadOnly({ block, piso, area });
+			try {
+				const options = await loadAreaDetailOptions();
+				renderAreaDetailReadOnly({ block, piso, area }, options);
+			} catch (error) {
+				console.error("Error al cargar opciones:", error);
+				renderAreaDetailReadOnly({ block, piso, area });
+			}
 		}
 
 		if (btnDetalleEliminar) {
@@ -881,14 +943,20 @@ async function initSettingsPage() {
 		}
 
 		if (btnDetalleCancelarEdicion) {
-			btnDetalleCancelarEdicion.addEventListener("click", () => {
+			btnDetalleCancelarEdicion.addEventListener("click", async () => {
 				if (!areaDetailContext) {
 					setDetailButtonsMode("view", false);
 					return;
 				}
 				const current = findAreaInStructure(areaDetailContext.blockId, areaDetailContext.pisoId, areaDetailContext.areaId);
 				if (!current) return;
-				renderAreaDetailReadOnly(current);
+				try {
+					const options = await loadAreaDetailOptions();
+					renderAreaDetailReadOnly(current, options);
+				} catch (error) {
+					console.error("Error al cargar opciones:", error);
+					renderAreaDetailReadOnly(current);
+				}
 			});
 		}
 
@@ -1006,6 +1074,9 @@ async function initSettingsPage() {
 			
 			block.pisos.forEach((piso) => {
 				const floorCard = document.createElement("div");
+				// Determinar si este piso debe estar expandido (basado en el estado)
+				const isExpanded = state.expandedFloorId === piso.id;
+				
 				floorCard.className = "floor-compact-card";
 				const areaNames = (piso.areas || []).map((entry) => entry.nombre).join(", ");
 				const summaryText = areaNames
@@ -1027,14 +1098,14 @@ async function initSettingsPage() {
 				floorCard.innerHTML = `
 					<div class="floor-compact-head">
 						<div class="floor-title-wrap">
-							<span class="floor-title-text" title="${escapeHtml(piso.descripcion || piso.nombre)}">${escapeHtml(piso.nombre)}</span>
+							<span class="floor-title-text ${isExpanded ? 'text-primary' : ''}" title="${escapeHtml(piso.descripcion || piso.nombre)}">${escapeHtml(piso.nombre)}</span>
 						</div>
 						<div class="floor-actions">
 							<button type="button" class="icon-action-btn floor-edit-btn" title="Editar piso"><i class="bi bi-pencil"></i></button>
 							<button type="button" class="icon-action-btn floor-delete-btn" title="Eliminar piso"><i class="bi bi-trash"></i></button>
 						</div>
 					</div>
-					<div class="floor-collapse d-none">
+					<div class="floor-collapse ${isExpanded ? '' : 'd-none'}">
 						<div class="floor-collapse-toolbar">
 							<button type="button" class="btn btn-outline-primary btn-sm add-area-floor-btn" data-floor-id="${piso.id}">
 								<i class="bi bi-plus-lg me-1"></i>Agregar Área
@@ -1056,6 +1127,12 @@ async function initSettingsPage() {
 				const toggleCollapse = () => {
 					const hidden = collapse.classList.toggle("d-none");
 					titleText.classList.toggle("text-primary", !hidden);
+					// Actualizamos el estado para recordar qué piso está abierto
+					if (!hidden) {
+						state.expandedFloorId = piso.id;
+					} else if (state.expandedFloorId === piso.id) {
+						state.expandedFloorId = null;
+					}
 				};
 				const isActionClick = (event) =>
 					Boolean(event.target.closest(".floor-edit-btn, .floor-delete-btn"));
@@ -1156,6 +1233,20 @@ async function initSettingsPage() {
 		async function loadStructure() {
 			const response = await api.get("/api/estructura");
 			state.structure = response.data;
+			
+			// Ordenar bloques, pisos y áreas de forma natural (detecta números automáticamente y alfabetico)
+			state.structure.sort((a, b) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
+			state.structure.forEach(block => {
+				if (block.pisos) {
+					block.pisos.sort((a, b) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
+					block.pisos.forEach(piso => {
+						if (piso.areas) {
+							piso.areas.sort((a, b) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
+						}
+					});
+				}
+			});
+
 			if (!state.activeBlockId && state.structure.length) {
 				state.activeBlockId = state.structure[0].id;
 				state.activeFloorId = state.structure[0].pisos[0]?.id || null;

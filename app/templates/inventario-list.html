@@ -92,10 +92,6 @@
                 <tbody id="inventario-body"></tbody>
             </table>
         </div>
-        <button id="add-inline-row" type="button" class="btn btn-primary btn-sm floating-plus"
-            title="Agregar fila al final">
-            <i class="bi bi-plus-lg"></i>
-        </button>
     </div>
 
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 px-1">
@@ -118,14 +114,14 @@
         </div>
     </div>
 
-    <div id="context-menu" class="context-menu shadow d-none">
-        <button type="button" class="dropdown-item" data-action="view">
+    <div id="context-menu" class="context-menu shadow d-none p-2 opciones">
+        <button type="button" class="dropdown-item p-2" data-action="view">
             <i class="bi bi-eye me-2 p-2"></i>Ver información
         </button>
-        <button type="button" class="dropdown-item" data-action="edit">
+        <button type="button" class="dropdown-item p-2" data-action="edit">
             <i class="bi bi-pencil-square me-2 p-2"></i>Editar
         </button>
-        <button type="button" class="dropdown-item text-danger" data-action="delete">
+        <button type="button" class="dropdown-item p-2 text-danger" data-action="delete">
             <i class="bi bi-trash me-2 p-2"></i>Borrar
         </button>
     </div>
@@ -169,7 +165,7 @@
     </div>
 </div>
 
-<div class="modal fade" id="modalAgregarItem" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="modalAgregarItem" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
