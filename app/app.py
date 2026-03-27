@@ -3,6 +3,8 @@ import uuid
 import shutil
 from io import BytesIO
 
+from docx import Document
+
 from flask import Flask, jsonify, render_template, request, send_file
 from datetime import datetime
 from pathlib import Path
@@ -147,6 +149,13 @@ def ajustes():
         'year': datetime.now().year,
     }
     return render_template('ajustes.html', data=data)
+
+@app.route('/informe')
+def informe():
+    data = {
+        'year': datetime.now().year,
+    }
+    return render_template('informe.html', data=data)
 
 
 @app.get('/api/estructura')

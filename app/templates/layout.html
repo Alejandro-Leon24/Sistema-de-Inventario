@@ -30,7 +30,9 @@
                             {% if request.endpoint == 'index' %}aria-current="page"{% endif %}
                             href="{{ url_for('index') }}">Inicio</a>
                     </li>
-                    <li class="nav-item"><a class="nav-link" href="">Generar Actas</a></li>
+                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'informe' %}active{% endif %}"
+                        {% if request.endpoint == 'informe' %}aria-current="page"{% endif %}
+                        href="{{ url_for('informe') }}">Generar Actas</a></li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'inventario_list' %}active{% endif %}"
                             {% if request.endpoint == 'inventario_list' %}aria-current="page"{% endif %}
