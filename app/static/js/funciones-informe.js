@@ -17,55 +17,6 @@ const api = {
     },
 };
 
-function notify(message, isError = false) {
-    if (isError) {
-        console.error(message);
-    }
-
-    const modalEl = document.getElementById("modalGlobalNotificacion");
-    if (!modalEl) {
-        window.alert(message);
-        return;
-    }
-
-    const titleEl = document.getElementById("modalGlobalNotificacionLabel");
-    const headerEl = document.getElementById("modalGlobalNotificacionHeader");
-    const bodyEl = document.getElementById("modalGlobalNotificacionBody");
-    const btnEl = document.getElementById("modalGlobalNotificacionBtn");
-
-    bodyEl.textContent = message;
-
-    // Resetear clases
-    headerEl.classList.remove("bg-danger", "bg-success");
-    btnEl.classList.remove("btn-danger", "btn-success", "btn-primary");
-
-    if (isError) {
-        titleEl.textContent = "Error";
-        headerEl.classList.add("bg-danger");
-        btnEl.classList.add("btn-danger");
-    } else {
-        titleEl.textContent = "Éxito";
-        headerEl.classList.add("bg-success");
-        btnEl.classList.add("btn-success");
-    }
-
-    let modalInstance = bootstrap.Modal.getInstance(modalEl);
-    if (!modalInstance) {
-        modalInstance = new bootstrap.Modal(modalEl);
-    }
-    modalInstance.show();
-
-    setTimeout(() => {
-        const backdrops = document.querySelectorAll('.modal-backdrop');
-        if (backdrops.length > 0) {
-            const highestZIndex = 1100 + (backdrops.length * 10);
-            const lastBackdrop = backdrops[backdrops.length - 1];
-            lastBackdrop.style.zIndex = highestZIndex;
-            modalEl.style.zIndex = highestZIndex + 1;
-        }
-    }, 15);
-}
-
 document.addEventListener("DOMContentLoaded", async () => {
     // 1. Configuración de Pestañas
     const tabs = document.querySelectorAll("#informe-tabs .nav-link");

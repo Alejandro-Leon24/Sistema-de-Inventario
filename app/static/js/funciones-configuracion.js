@@ -17,58 +17,6 @@ return payload;
 },
 };
 
-function notify(message, isError = false) {
-	if (isError) {
-		console.error(message);
-	}
-
-	const modalEl = document.getElementById("modalGlobalNotificacion");
-	if (!modalEl) {
-		window.alert(message);
-		return;
-	}
-
-	const titleEl = document.getElementById("modalGlobalNotificacionLabel");
-	const headerEl = document.getElementById("modalGlobalNotificacionHeader");
-	const bodyEl = document.getElementById("modalGlobalNotificacionBody");
-	const btnEl = document.getElementById("modalGlobalNotificacionBtn");
-
-	bodyEl.textContent = message;
-
-	// Resetear clases
-	headerEl.classList.remove("bg-danger", "bg-success");
-	btnEl.classList.remove("btn-danger", "btn-success", "btn-primary");
-
-	if (isError) {
-		titleEl.textContent = "Error";
-		headerEl.classList.add("bg-danger");
-		btnEl.classList.add("btn-danger");
-	} else {
-		titleEl.textContent = "Éxito";
-		headerEl.classList.add("bg-success");
-		btnEl.classList.add("btn-success");
-	}
-
-	// Forzar z-index más alto para evitar que quede detrás si hay otros modales abiertos
-	let modalInstance = bootstrap.Modal.getInstance(modalEl);
-	if (!modalInstance) {
-		modalInstance = new bootstrap.Modal(modalEl);
-	}
-	modalInstance.show();
-
-	// Arreglar el backdrop inmediatamente después de mostrar
-	setTimeout(() => {
-		const backdrops = document.querySelectorAll('.modal-backdrop');
-		if (backdrops.length > 0) {
-			// El último backdrop es el que corresponde a nuestro modal
-			const highestZIndex = 1100 + (backdrops.length * 10);
-			const lastBackdrop = backdrops[backdrops.length - 1];
-			lastBackdrop.style.zIndex = highestZIndex;
-			modalEl.style.zIndex = highestZIndex + 1;
-		}
-	}, 15);
-}
-
 function escapeHtmlText(value) {
 return String(value || "")
 .replaceAll("&", "&amp;")
@@ -126,6 +74,7 @@ async function initSettingsPage() {
 		const btnAgregarBloque = document.getElementById("btn-agregar-bloque");
 		const btnAgregarPiso = document.getElementById("btn-agregar-piso");
 		const btnImportarUbicaciones = document.getElementById("btn-importar-ubicaciones");
+		const btnExportarUbicaciones = document.getElementById("btn-exportar-ubicaciones");
 		const importModalElement = document.getElementById("modalImportarUbicaciones");
 		const importModal = importModalElement ? new bootstrap.Modal(importModalElement) : null;
 		const importTextarea = document.getElementById("import-ubicaciones-texto");
@@ -208,10 +157,6 @@ async function initSettingsPage() {
 		const modalDeleteTitle = document.getElementById("modalConfirmarEliminacionUbicacionLabel");
 		const modalDeleteBody = document.getElementById("modalConfirmarEliminacionUbicacionBody");
 		const btnConfirmDeleteLocation = document.getElementById("btn-confirmar-eliminacion-ubicacion");
-
-		let areaDetailContext = null;
-		let locationEditContext = null; // Para edición de bloques/pisos
-		let locationDetailContext = null; // bloque/piso/area seleccionado en modal detalle
 
 		function fillSelectWithText(select, values, placeholder = "Seleccionar") {
 			if (!select) return;
@@ -1003,8 +948,13 @@ async function initSettingsPage() {
 
 				if (!Object.keys(patchPayload).length) {
 					notify("No hay cambios para guardar.");
-					const refreshedNoChange = findAreaInStructure(areaDetailContext.blockId, areaDetailContext.pisoId, areaDetailContext.areaId);
-					if (refreshedNoChange) renderAreaDetailReadOnly(refreshedNoChange);
+					try {
+						const options = await loadAreaDetailOptions();
+						const refreshedNoChange = findAreaInStructure(areaDetailContext.blockId, areaDetailContext.pisoId, areaDetailContext.areaId);
+						if (refreshedNoChange) renderAreaDetailReadOnly(refreshedNoChange, options);
+					} catch (e) {
+						console.error(e);
+					}
 					return;
 				}
 
@@ -1013,7 +963,8 @@ async function initSettingsPage() {
 					await loadStructure();
 					const refreshed = findAreaInStructure(areaDetailContext.blockId, areaDetailContext.pisoId, areaDetailContext.areaId);
 					if (refreshed) {
-						renderAreaDetailReadOnly(refreshed);
+						const options = await loadAreaDetailOptions();
+						renderAreaDetailReadOnly(refreshed, options);
 						notify("Área actualizada correctamente.");
 					} else {
 						detalleUbicacionModal.hide();
@@ -1039,20 +990,38 @@ async function initSettingsPage() {
 		function renderBlocks() {
 			bloquesTabs.innerHTML = "";
 			state.structure.forEach((block) => {
-				const button = document.createElement("button");
-				button.type = "button";
-				button.className = `btn ${block.id === state.activeBlockId ? "btn-primary" : "btn-outline-secondary"}`;
-				button.textContent = block.nombre;
-				if (block.descripcion) button.title = block.descripcion;
-				button.addEventListener("click", () => {
+				const wrapper = document.createElement("div");
+				wrapper.className = "btn-group";
+				wrapper.setAttribute("role", "group");
+
+				const btnTab = document.createElement("button");
+				btnTab.type = "button";
+				btnTab.className = `btn ${block.id === state.activeBlockId ? "btn-primary" : "btn-outline-secondary"}`;
+				btnTab.textContent = block.nombre;
+				if (block.descripcion) btnTab.title = block.descripcion;
+				
+				btnTab.addEventListener("click", () => {
 					state.activeBlockId = block.id;
 					state.activeFloorId = block.pisos[0]?.id || null;
 					renderAll();
 				});
-				button.addEventListener("dblclick", () => {
+
+				const btnView = document.createElement("button");
+				btnView.type = "button";
+				btnView.className = `btn ${block.id === state.activeBlockId ? "btn-primary" : "btn-outline-secondary"} px-2 d-none`;
+				btnView.innerHTML = '<i class="bi bi-eye"></i>';
+				btnView.title = "Ver detalles del bloque";
+				btnView.addEventListener("click", (e) => {
+					e.stopPropagation();
 					openBlockDetail(block);
 				});
-				bloquesTabs.appendChild(button);
+
+				wrapper.addEventListener("mouseenter", () => btnView.classList.remove("d-none"));
+				wrapper.addEventListener("mouseleave", () => btnView.classList.add("d-none"));
+
+				wrapper.appendChild(btnView);
+				wrapper.appendChild(btnTab);
+				bloquesTabs.appendChild(wrapper);
 			});
 		}
 
@@ -1103,6 +1072,7 @@ async function initSettingsPage() {
 						<div class="floor-actions">
 							<button type="button" class="icon-action-btn floor-edit-btn" title="Editar piso"><i class="bi bi-pencil"></i></button>
 							<button type="button" class="icon-action-btn floor-delete-btn" title="Eliminar piso"><i class="bi bi-trash"></i></button>
+							<button type="button" class="icon-action-btn floor-view-btn" title="Ver detalles del piso"><i class="bi bi-eye"></i></button>
 						</div>
 					</div>
 					<div class="floor-collapse ${isExpanded ? '' : 'd-none'}">
@@ -1119,6 +1089,7 @@ async function initSettingsPage() {
 
 				const titleText = floorCard.querySelector(".floor-title-text");
 				const floorHead = floorCard.querySelector(".floor-compact-head");
+				const viewBtn = floorCard.querySelector(".floor-view-btn");
 				const editBtn = floorCard.querySelector(".floor-edit-btn");
 				const deleteBtn = floorCard.querySelector(".floor-delete-btn");
 				const collapse = floorCard.querySelector(".floor-collapse");
@@ -1135,16 +1106,14 @@ async function initSettingsPage() {
 					}
 				};
 				const isActionClick = (event) =>
-					Boolean(event.target.closest(".floor-edit-btn, .floor-delete-btn"));
+					Boolean(event.target.closest(".floor-edit-btn, .floor-delete-btn, .floor-view-btn"));
 
 				floorHead?.addEventListener("click", (event) => {
 					if (isActionClick(event)) return;
 					toggleCollapse();
 				});
-				floorHead?.addEventListener("dblclick", (event) => {
-					if (isActionClick(event)) return;
-					openFloorDetail(block, piso);
-				});
+				
+				viewBtn.addEventListener("click", () => openFloorDetail(block, piso));
 				editBtn.addEventListener("click", () => openLocationModal("piso", piso));
 				deleteBtn.addEventListener("click", async () => {
 					try {
@@ -1212,11 +1181,13 @@ async function initSettingsPage() {
 			if (dataToEdit) {
 				if (mode === "bloque") {
 					mode = "bloque-edit";
+					modalMode = mode;
 					locationEditContext = { type: "bloque", id: dataToEdit.id };
 					inputNombre.value = dataToEdit.nombre || "";
 					inputDescripcion.value = dataToEdit.descripcion || "";
 				} else if (mode === "piso") {
 					mode = "piso-edit";
+					modalMode = mode;
 					locationEditContext = { type: "piso", id: dataToEdit.id };
 					inputNombre.value = dataToEdit.nombre || "";
 					inputDescripcion.value = dataToEdit.descripcion || "";
@@ -1264,6 +1235,10 @@ async function initSettingsPage() {
 		}
 
 		btnAgregarBloque.addEventListener("click", () => openLocationModal("bloque"));
+		btnExportarUbicaciones?.addEventListener("click", () => {
+			window.location.href = "/api/ubicaciones/export";
+		});
+
 		btnImportarUbicaciones?.addEventListener("click", () => {
 			if (importResumen) importResumen.textContent = "";
 			if (importTextarea) importTextarea.value = "";
@@ -1314,22 +1289,19 @@ async function initSettingsPage() {
 				// Location modes - Creación o edición
 				if (modalMode === "bloque") {
 					await api.send("/api/bloques", "POST", { nombre, descripcion });
-				}
-				if (modalMode === "bloque-edit" && locationEditContext) {
+				} else if (modalMode === "bloque-edit" && locationEditContext) {
 					await api.send(`/api/bloques/${locationEditContext.id}`, "PATCH", { nombre, descripcion });
-				}
-				if (modalMode === "piso") {
+				} else if (modalMode === "piso") {
 					await api.send("/api/pisos", "POST", {
 						bloque_id: state.activeBlockId,
 						nombre,
 						descripcion,
 					});
-				}
-				if (modalMode === "piso-edit" && locationEditContext) {
+				} else if (modalMode === "piso-edit" && locationEditContext) {
 					await api.send(`/api/pisos/${locationEditContext.id}`, "PATCH", { nombre, descripcion });
 				}
 				// Parameter modes
-				if (["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta"].includes(modalMode)) {
+				if (["estados", "condiciones", "cuentas", "si_no", "estado_puerta", "cerraduras", "estado_piso", "material_techo", "material_puerta", "estado_pizarra"].includes(modalMode)) {
 					await api.send(`/api/parametros/${modalMode}`, "POST", {
 						nombre,
 						descripcion: descripcion || null,
@@ -1569,6 +1541,12 @@ async function initSettingsPage() {
 			btn.addEventListener("click", async () => {
 				const paramId = btn.dataset.id;
 				const paramType = btn.dataset.type;
+				const paramName = btn.dataset.name;
+				
+				if (!window.confirm(`¿Estás seguro de que deseas eliminar este parámetro?\nSi está siendo usado en alguna tabla, la eliminación será rechazada.`)) {
+					return;
+				}
+				
 				try {
 					await api.send(`/api/parametros/${paramType}/${paramId}`, "DELETE", {});
 					await loadParametros();
@@ -1648,6 +1626,67 @@ async function initSettingsPage() {
 				event.preventDefault();
 				if (btnCancelUniversidad) btnCancelUniversidad.click();
 			}
+		});
+	}
+
+	const modalDeletePersonalConfirmEl = document.getElementById("modalConfirmarEliminacionPersonal");
+	const modalDeletePersonalConfirm = modalDeletePersonalConfirmEl ? new bootstrap.Modal(modalDeletePersonalConfirmEl) : null;
+	const modalDeletePersonalTitle = document.getElementById("modalConfirmarEliminacionPersonalLabel");
+	const modalDeletePersonalBody = document.getElementById("modalConfirmarEliminacionPersonalBody");
+	const btnConfirmDeletePersonal = document.getElementById("btn-confirmar-eliminacion-personal");
+
+	async function askDeletePersonalWithImpact(admin) {
+		if (!admin || !modalDeletePersonalConfirm || !modalDeletePersonalBody || !btnConfirmDeletePersonal) {
+			return false;
+		}
+
+		const response = await api.get(`/api/administradores/${admin.id}/impacto`);
+		const impact = response.data || {};
+		const items = Number(impact.items || 0);
+		const areas = Number(impact.areas || 0);
+		const hasRelations = items > 0 || areas > 0;
+
+		modalDeletePersonalTitle.textContent = hasRelations
+			? `Advertencia de eliminación en cascada (Personal)`
+			: `Confirmar eliminación de personal`;
+
+		modalDeletePersonalBody.innerHTML = hasRelations
+			? `
+				<div class="alert alert-warning mb-2">
+					<strong>Ya existen datos relacionados al personal.</strong>
+				</div>
+				<ul class="mb-2">
+					<li>Áreas asociadas: <strong>${areas}</strong></li>
+					<li>Ítems de inventario asignados: <strong>${items}</strong></li>
+				</ul>
+				<p class="mb-1">Si eliminas a <strong>${escapeHtmlText(admin.nombre)}</strong>, se perderá su asignación en las áreas y en el inventario (quedarán vacíos).</p>
+				<p class="text-muted small mb-0">Recomendación: si no deseas afectar reportes existentes, edita sus datos en lugar de Eliminar.</p>
+			`
+			: `<p class="mb-0">¿Seguro que deseas eliminar a <strong>${escapeHtmlText(admin.nombre)}</strong>?</p>`;
+
+		return new Promise((resolve) => {
+			let resolved = false;
+			const onConfirm = () => {
+				if (resolved) return;
+				resolved = true;
+				cleanup();
+				resolve(true);
+				modalDeletePersonalConfirm.hide();
+			};
+			const onHidden = () => {
+				if (resolved) return;
+				resolved = true;
+				cleanup();
+				resolve(false);
+			};
+			const cleanup = () => {
+				btnConfirmDeletePersonal.removeEventListener("click", onConfirm);
+				modalDeletePersonalConfirmEl.removeEventListener("hidden.bs.modal", onHidden);
+			};
+
+			btnConfirmDeletePersonal.addEventListener("click", onConfirm);
+			modalDeletePersonalConfirmEl.addEventListener("hidden.bs.modal", onHidden);
+			modalDeletePersonalConfirm.show();
 		});
 	}
 
@@ -1772,9 +1811,10 @@ async function initSettingsPage() {
 			});
 
 			btnDelete?.addEventListener("click", async () => {
-				const confirmed = window.confirm("¿Deseas eliminar este registro de personal?");
-				if (!confirmed) return;
 				try {
+					const accepted = await askDeletePersonalWithImpact(admin);
+					if (!accepted) return;
+					
 					await api.send(`/api/administradores/${admin.id}`, "DELETE", {});
 					await loadAdministradores();
 					notify("Registro eliminado.");
@@ -1829,6 +1869,24 @@ async function initSettingsPage() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+	// Prevenir ingreso de valores negativos y caracteres no deseados en campos numéricos
+	document.addEventListener('keydown', (e) => {
+		if (e.target.tagName === 'INPUT' && e.target.type === 'number') {
+			if (e.key === '-' || e.key === 'e' || e.key === 'E' || e.key === '+') {
+				e.preventDefault();
+			}
+		}
+	});
+
+	// Limpiar el valor si el usuario logra pegar un número negativo
+	document.addEventListener('input', (e) => {
+		if (e.target.tagName === 'INPUT' && e.target.type === 'number') {
+			if (e.target.value && parseFloat(e.target.value) < 0) {
+				e.target.value = Math.abs(parseFloat(e.target.value));
+			}
+		}
+	});
+
 	await initSettingsPage();
 });
 

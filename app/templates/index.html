@@ -36,15 +36,15 @@
     <div class="row footer-stats text-uppercase small fw-bold text-muted" style="margin-top: 20px;">
         <div class="col-md-3">
             <div class="mb-1">Bienes Registrados</div>
-            <div class="h4 fw-bold text-dark">120 <i class="bi bi-graph-up-arrow text-success fs-6"></i></div>
+            <div class="h4 fw-bold text-dark"><span id="cant-bienes">{{ data.cant_bienes or 0 }}</span> <i class="bi bi-graph-up-arrow text-success fs-6"></i></div>
         </div>
         <div class="col-md-3">
             <div class="mb-1">Actas Generadas</div>
-            <div class="h4 fw-bold text-dark">45 <i class="bi bi-file-earmark-check text-primary fs-6"></i></div>
+            <div class="h4 fw-bold text-dark"><span id="cant-actas">{{ data.cant_actas or 0 }}</span> <i class="bi bi-file-earmark-check text-primary fs-6"></i></div>
         </div>
         <div class="col-md-3">
             <div class="mb-1">Actas Recibidas</div>
-            <div class="h4 fw-bold text-dark">38 <span class="badge bg-warning text-dark p-1 ms-1">●</span></div>
+            <div class="h4 fw-bold text-dark"><span id="cant-actas-recibidas">{{ data.cant_actas_recibidas or 0 }}</span> <span class="badge bg-warning text-dark p-1 ms-1">●</span></div>
         </div>
         <div class="col-md-3 text-end text-capitalize opacity-50">
             © {{ data.year }} Universidad de Guayaquil <br>Sistema de inventarios

@@ -68,10 +68,25 @@ def create_param(tipo, nombre, descripcion=None):
 def update_param(tipo, param_id, nombre, descripcion=None):
     db = get_db()
     table = _get_param_table(tipo)
+    
+    old_row = db.execute(f"SELECT nombre FROM {table} WHERE id = ?", (param_id,)).fetchone()
+    old_nombre = old_row["nombre"] if old_row else None
+    new_nombre = nombre.strip()
+    
     cursor = db.execute(
         f"UPDATE {table} SET nombre = ?, descripcion = ? WHERE id = ?",
-        (nombre.strip(), (descripcion or "").strip() or None, param_id),
+        (new_nombre, (descripcion or "").strip() or None, param_id),
     )
+    
+    # Propagar los cambios a la tabla de inventario donde el valor dependa directamente de sus strings
+    if old_nombre and old_nombre != new_nombre:
+        if tipo == "estados":
+            db.execute("UPDATE inventario_items SET estado = ? WHERE estado = ?", (new_nombre, old_nombre))
+        elif tipo == "condiciones":
+            db.execute("UPDATE inventario_items SET condicion = ? WHERE condicion = ?", (new_nombre, old_nombre))
+        elif tipo == "cuentas":
+            db.execute("UPDATE inventario_items SET cuenta = ? WHERE cuenta = ?", (new_nombre, old_nombre))
+
     db.commit()
     return cursor.rowcount > 0
 
@@ -81,6 +96,18 @@ def can_delete_param(tipo, nombre):
     if tipo == "estados":
         row = db.execute(
             "SELECT COUNT(1) AS total FROM inventario_items WHERE estado = ?",
+            (nombre,),
+        ).fetchone()
+        return (row["total"] or 0) == 0
+    if tipo == "condiciones":
+        row = db.execute(
+            "SELECT COUNT(1) AS total FROM inventario_items WHERE condicion = ?",
+            (nombre,),
+        ).fetchone()
+        return (row["total"] or 0) == 0
+    if tipo == "cuentas":
+        row = db.execute(
+            "SELECT COUNT(1) AS total FROM inventario_items WHERE cuenta = ?",
             (nombre,),
         ).fetchone()
         return (row["total"] or 0) == 0
@@ -121,7 +148,16 @@ def can_delete_param(tipo, nombre):
         ).fetchone()
         return (row["total"] or 0) == 0
     if tipo == "si_no":
-        return False
+        si_no_columns = [
+            "senaletica", "puerta", "estado_paredes", "estado_techo",
+            "nivel_seguridad", "sitio_profesor_mesa", "sitio_profesor_silla",
+            "pc_aula", "proyector", "pantalla_interactiva", "pizarra",
+            "wifi", "red_lan", "puntos_electricos", "ambiente_apto_retorno"
+        ]
+        conditions = " OR ".join([f"{col} = ?" for col in si_no_columns])
+        params = tuple([nombre] * len(si_no_columns))
+        row = db.execute(f"SELECT COUNT(1) AS total FROM areas WHERE {conditions}", params).fetchone()
+        return (row["total"] or 0) == 0
     return True
 
 
@@ -219,6 +255,13 @@ def update_administrador(admin_id, payload):
         return text or None
 
     db = get_db()
+    
+    # Obtener el nombre anterior para actualizar las dependencias en cascada
+    old_admin = db.execute("SELECT nombre FROM administradores WHERE id = ?", (admin_id,)).fetchone()
+    old_nombre = old_admin['nombre'] if old_admin else None
+    
+    new_nombre = str(payload.get("nombre") or "").strip()
+    
     db.execute(
         """
         UPDATE administradores
@@ -226,7 +269,7 @@ def update_administrador(admin_id, payload):
         WHERE id = ?
         """,
         (
-            str(payload.get("nombre") or "").strip(),
+            new_nombre,
             clean_optional(payload.get("cargo")),
             clean_optional(payload.get("facultad")),
             clean_optional(payload.get("titulo_academico")),
@@ -235,11 +278,50 @@ def update_administrador(admin_id, payload):
             admin_id,
         ),
     )
+    
+    # Actualizar la columna usuario_final de inventario_items cuando se modifica el nombre de un personal
+    if old_nombre and old_nombre != new_nombre:
+        db.execute(
+            """
+            UPDATE inventario_items
+            SET usuario_final = ?
+            WHERE usuario_final = ?
+            """,
+            (new_nombre, old_nombre)
+        )
+
     db.commit()
 
 
 def delete_administrador(admin_id):
-    """Desactivar administrador (soft delete)"""
+    """Desactivar administrador (soft delete) y quitar reasignaciones"""
     db = get_db()
+    row = db.execute("SELECT nombre FROM administradores WHERE id = ?", (admin_id,)).fetchone()
+    old_nombre = row["nombre"] if row else None
+
+    # Soft delete
     db.execute("UPDATE administradores SET activo = 0 WHERE id = ?", (admin_id,))
+    
+    # "Cascade" desvincular el personal de los bienes
+    if old_nombre:
+        db.execute("UPDATE inventario_items SET usuario_final = NULL WHERE usuario_final = ?", (old_nombre,))
+        
+    # Desvincular de las areas relacionadas
+    db.execute("UPDATE areas SET responsable_admin_id = NULL WHERE responsable_admin_id = ?", (admin_id,))
+
     db.commit()
+
+def get_administrador_dependency_summary(admin_id):
+    db = get_db()
+    row = db.execute("SELECT nombre FROM administradores WHERE id = ?", (admin_id,)).fetchone()
+    if not row:
+        return {"items": 0, "areas": 0}
+
+    nombre = row["nombre"]
+    count_items = db.execute("SELECT COUNT(1) as total FROM inventario_items WHERE usuario_final = ?", (nombre,)).fetchone()
+    count_areas = db.execute("SELECT COUNT(1) as total FROM areas WHERE responsable_admin_id = ?", (admin_id,)).fetchone()
+    
+    return {
+        "items": count_items["total"] or 0,
+        "areas": count_areas["total"] or 0
+    }

@@ -52,6 +52,7 @@ from database.params_controller import (
     create_administrador,
     update_administrador,
     delete_administrador,
+    get_administrador_dependency_summary,
 )
 from database.db import init_app
 
@@ -77,33 +78,6 @@ app = Flask(
 app.config["DATABASE"] = _resolve_database_path(BASE_DIR)
 init_app(app)
 DEFAULT_USER_KEY = "portable_user"
-INVENTORY_EXPORT_COLUMNS = [
-    ("item_numero", "ITEM"),
-    ("cod_inventario", "CÓD. INV"),
-    ("cod_esbye", "CÓD. ESBYE"),
-    ("cuenta", "CUENTA"),
-    ("cantidad", "CANT"),
-    ("descripcion", "DESCRIPCIÓN"),
-    ("marca", "MARCA"),
-    ("modelo", "MODELO"),
-    ("serie", "SERIE"),
-    ("estado", "ESTADO"),
-    ("ubicacion", "UBICACIÓN"),
-    ("fecha_adquisicion", "FECHA DE ADQUISICIÓN"),
-    ("valor", "VALOR"),
-    ("usuario_final", "USUARIO FINAL"),
-    ("observacion", "OBSERVACIÓN"),
-    ("descripcion_esbye", "DESCRIPCIÓN"),
-    ("marca_esbye", "MARCA"),
-    ("modelo_esbye", "MODELO"),
-    ("serie_esbye", "SERIE"),
-    ("fecha_adquisicion_esbye", "FECHA"),
-    ("valor_esbye", "VALOR"),
-    ("ubicacion_esbye", "UBICACIÓN"),
-    ("observacion_esbye", "OBSERVACIÓN"),
-]
-
-
 with app.app_context():
     init_schema(BASE_DIR)
 
@@ -120,10 +94,13 @@ def after_request(response):
 
 @app.route('/')
 def index():
+    from database.controller import get_dashboard_stats
     personas = get_personas()
+    stats = get_dashboard_stats()
     data = {
         'year': datetime.now().year,
         'personas': personas,
+        **stats
     }
     return render_template('index.html', data=data)
 
@@ -363,8 +340,32 @@ def api_list_inventario():
     })
 
 
+@app.get('/api/ubicaciones/export')
+def api_export_areas():
+    from database.controller import get_all_areas_for_export
+    from utils.constants import AREA_EXPORT_COLUMNS
+    from utils.excel_export import generar_excel
+    items = get_all_areas_for_export()
+    
+    try:
+        output = generar_excel(items, AREA_EXPORT_COLUMNS, "Áreas")
+    except ImportError:
+        return jsonify({"error": "Para exportar a Excel se requiere openpyxl instalado."}), 500
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"ubicaciones_{timestamp}.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 @app.get('/api/inventario/export')
 def api_export_inventario():
+    from utils.constants import INVENTORY_EXPORT_COLUMNS
+    from utils.excel_export import generar_excel
     filters = {
         "bloque_id": request.args.get("bloque_id", type=int),
         "piso_id": request.args.get("piso_id", type=int),
@@ -375,46 +376,9 @@ def api_export_inventario():
     items = list_inventory_items(filters=filters, sort_direction=sort_direction)
 
     try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Alignment, Font, PatternFill
+        output = generar_excel(items, INVENTORY_EXPORT_COLUMNS, "Inventario")
     except ImportError:
         return jsonify({"error": "Para exportar a Excel se requiere openpyxl instalado."}), 500
-
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = "Inventario"
-
-    headers = [label for _, label in INVENTORY_EXPORT_COLUMNS]
-    worksheet.append(headers)
-
-    header_fill = PatternFill(fill_type="solid", start_color="D9EEF9", end_color="D9EEF9")
-    header_font = Font(bold=True, color="1F2937")
-    for col_index, header in enumerate(headers, start=1):
-        cell = worksheet.cell(row=1, column=col_index, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    for row_item in items:
-        row_values = []
-        for field, _ in INVENTORY_EXPORT_COLUMNS:
-            value = row_item.get(field)
-            row_values.append("" if value is None else value)
-        worksheet.append(row_values)
-
-    worksheet.auto_filter.ref = f"A1:{worksheet.cell(row=1, column=len(headers)).column_letter}{worksheet.max_row}"
-    worksheet.freeze_panes = "A2"
-
-    for column_cells in worksheet.columns:
-        max_len = 0
-        for cell in column_cells:
-            cell_value = "" if cell.value is None else str(cell.value)
-            max_len = max(max_len, len(cell_value))
-        worksheet.column_dimensions[column_cells[0].column_letter].width = min(max_len + 2, 42)
-
-    output = BytesIO()
-    workbook.save(output)
-    output.seek(0)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"inventario_{timestamp}.xlsx"
@@ -647,6 +611,15 @@ def api_delete_administrador_route(admin_id):
     except Exception as error:
         return jsonify({"error": f"Error al eliminar: {error}"}), 500
     return jsonify({"success": True})
+
+
+@app.get('/api/administradores/<int:admin_id>/impacto')
+def api_administradores_impacto(admin_id):
+    try:
+        summary = get_administrador_dependency_summary(admin_id)
+        return jsonify({"data": summary})
+    except Exception as error:
+        return jsonify({"error": str(error)}), 500
 
 
 def pagina_no_encontrada(error):

@@ -1427,3 +1427,32 @@ def replace_column_mappings(mappings):
             ),
         )
     db.commit()
+
+
+def get_all_areas_for_export():
+    db = get_db()
+    existing_columns = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(areas)").fetchall()
+    }
+    
+    col_str = ", ".join([f"a.{col}" for col in existing_columns])
+    
+    query = f"""
+        SELECT 
+            b.nombre || ' / ' || p.nombre AS ubicacion,
+            a.nombre AS ambiente_aprendizaje,
+            {col_str}
+        FROM areas a
+        JOIN pisos p ON p.id = a.piso_id
+        JOIN bloques b ON b.id = p.bloque_id
+        ORDER BY b.orden, p.orden, a.orden;
+    """
+    
+    rows = db.execute(query).fetchall()
+    return [dict(row) for row in rows]
+
+def get_dashboard_stats():
+    db = get_db()
+    total_bienes = db.execute('SELECT COUNT(1) as total FROM inventario_items').fetchone()['total']
+    return {'cant_bienes': total_bienes or 0, 'cant_actas': 0, 'cant_actas_recibidas': 0}
