@@ -1456,3 +1456,66 @@ def get_dashboard_stats():
     db = get_db()
     total_bienes = db.execute('SELECT COUNT(1) as total FROM inventario_items').fetchone()['total']
     return {'cant_bienes': total_bienes or 0, 'cant_actas': 0, 'cant_actas_recibidas': 0}
+
+# --- PERSONAL / ADMINISTRADORES ---
+def get_personal():
+    db = get_db()
+    rows = db.execute("SELECT id, nombre, cargo FROM administradores WHERE activo = 1 ORDER BY nombre ASC").fetchall()
+    return [{"id": row["id"], "nombre": row["nombre"], "cargo": row["cargo"]} for row in rows]
+
+def get_or_create_personal(nombre, cargo=None):
+    if not nombre or not str(nombre).strip():
+        return None
+    db = get_db()
+    nombre = str(nombre).strip()
+    # Check if exists
+    row = db.execute("SELECT id FROM administradores WHERE UPPER(nombre) = UPPER(?)", (nombre,)).fetchone()
+    if row:
+        return row["id"]
+    # Create if not exists
+    cursor = db.execute(
+        "INSERT INTO administradores (nombre, cargo, activo) VALUES (?, ?, 1)", 
+        (nombre, cargo.strip() if cargo else None)
+    )
+    db.commit()
+    return cursor.lastrowid
+
+# --- HISTORIAL DE ACTAS ---
+def _ensure_historial_table():
+    db = get_db()
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS historial_actas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo_acta TEXT NOT NULL,
+        fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        datos_json TEXT,
+        docx_path TEXT,
+        pdf_path TEXT
+    )
+    """)
+    db.commit()
+
+def save_historial_acta(tipo_acta, datos_json, docx_path, pdf_path):
+    _ensure_historial_table()
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO historial_actas (tipo_acta, datos_json, docx_path, pdf_path) VALUES (?, ?, ?, ?)",
+        (tipo_acta, datos_json, docx_path, pdf_path)
+    )
+    db.commit()
+    return cursor.lastrowid
+
+def get_historial_actas(tipo_acta=None):
+    _ensure_historial_table()
+    db = get_db()
+    if tipo_acta:
+        rows = db.execute("SELECT * FROM historial_actas WHERE tipo_acta = ? ORDER BY id DESC", (tipo_acta,)).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM historial_actas ORDER BY id DESC").fetchall()
+    return [dict(row) for row in rows]
+
+def delete_historial_acta(acta_id):
+    _ensure_historial_table()
+    db = get_db()
+    db.execute("DELETE FROM historial_actas WHERE id = ?", (acta_id,))
+    db.commit()

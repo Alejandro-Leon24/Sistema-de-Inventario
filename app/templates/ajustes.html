@@ -17,6 +17,9 @@
                     <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="personal" style="border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem;">
                         <i class="bi bi-people me-2"></i>Personal
                     </button>
+                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="plantilla-word" style="border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem;">
+                        <i class="bi bi-file-earmark-word me-2"></i>Plantilla de Word
+                    </button>
                 </div>
             </div>
         </div>
@@ -292,6 +295,146 @@
 
                 <div id="administradores-container" class="row g-3"></div>
             </div>
+
+            <!-- --- END SECTION PERSONAL --- -->
+
+            <!-- --- SECTION PLANTILLAS WORD --- -->
+            <div id="section-plantilla-word" class="settings-section d-none">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                    <h3 class="m-0 fw-bold text-primary"><i class="bi bi-file-earmark-word me-2"></i>Plantillas Word</h3>
+                    <p class="text-muted mb-0">Sube tus documentos Word <code>.docx</code> con etiquetas <code>{{ variable }}</code> para autogenerar actas.</p>
+                </div>
+
+                <div class="row g-4">
+                    <!-- Plantilla Entrega -->
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-header bg-light border-bottom d-flex align-items-center">
+                                <h6 class="m-0 fw-bold"><i class="bi bi-arrow-left-right me-2 text-primary"></i>Acta de Entrega</h6>
+                            </div>
+                            <div class="card-body">
+                                <form class="form-plantilla" data-tipo="entrega">
+                                    <input type="file" name="documento" accept=".docx" class="form-control form-control-sm mb-3" required>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-cloud-upload me-1"></i>Subir y Analizar</button>
+                                </form>
+                                <div class="mt-3 badge-container" class="small">
+                                    <!-- Variables -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Plantilla Recepción -->
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-header bg-light border-bottom d-flex align-items-center">
+                                <h6 class="m-0 fw-bold"><i class="bi bi-download me-2 text-primary"></i>Acta de Recepción</h6>
+                            </div>
+                            <div class="card-body">
+                                <form class="form-plantilla" data-tipo="recepcion">
+                                    <input type="file" name="documento" accept=".docx" class="form-control form-control-sm mb-3" required>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-cloud-upload me-1"></i>Subir y Analizar</button>
+                                </form>
+                                <div class="mt-3 badge-container" class="small">
+                                    <!-- Variables -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Plantilla Movimiento -->
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-header bg-light border-bottom d-flex align-items-center">
+                                <h6 class="m-0 fw-bold"><i class="bi bi-calendar-event me-2 text-primary"></i>Acta de Movimiento</h6>
+                            </div>
+                            <div class="card-body">
+                                <form class="form-plantilla" data-tipo="movimiento">
+                                    <input type="file" name="documento" accept=".docx" class="form-control form-control-sm mb-3" required>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-cloud-upload me-1"></i>Subir y Analizar</button>
+                                </form>
+                                <div class="mt-3 badge-container" class="small">
+                                    <!-- Variables -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Plantilla Bajas -->
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-header bg-light border-bottom d-flex align-items-center">
+                                <h6 class="m-0 fw-bold"><i class="bi bi-trash me-2 text-primary"></i>Acta de Bajas</h6>
+                            </div>
+                            <div class="card-body">
+                                <form class="form-plantilla" data-tipo="bajas">
+                                    <input type="file" name="documento" accept=".docx" class="form-control form-control-sm mb-3" required>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-cloud-upload me-1"></i>Subir y Analizar</button>
+                                </form>
+                                <div class="mt-3 badge-container" class="small">
+                                    <!-- Variables -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Plantilla Traspaso -->
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-header bg-light border-bottom d-flex align-items-center">
+                                <h6 class="m-0 fw-bold"><i class="bi bi-arrow-repeat me-2 text-primary"></i>Acta de Traspaso</h6>
+                            </div>
+                            <div class="card-body">
+                                <form class="form-plantilla" data-tipo="traspaso">
+                                    <input type="file" name="documento" accept=".docx" class="form-control form-control-sm mb-3" required>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-cloud-upload me-1"></i>Subir y Analizar</button>
+                                </form>
+                                <div class="mt-3 badge-container" class="small">
+                                    <!-- Variables -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Plantilla Fin de Gestion -->
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-header bg-light border-bottom d-flex align-items-center">
+                                <h6 class="m-0 fw-bold"><i class="bi bi-clipboard-data me-2 text-primary"></i>Acta de Fin Gestión</h6>
+                            </div>
+                            <div class="card-body">
+                                <form class="form-plantilla" data-tipo="fin-gestion">
+                                    <input type="file" name="documento" accept=".docx" class="form-control form-control-sm mb-3" required>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-cloud-upload me-1"></i>Subir y Analizar</button>
+                                </form>
+                                <div class="mt-3 badge-container" class="small">
+                                    <!-- Variables -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Plantilla Area Aula -->
+                    <div class="col-md-6">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-header bg-light border-bottom d-flex align-items-center">
+                                <h6 class="m-0 fw-bold"><i class="bi bi-book me-2 text-primary"></i>Inventario por Área</h6>
+                            </div>
+                            <div class="card-body">
+                                <form class="form-plantilla" data-tipo="aula">
+                                    <input type="file" name="documento" accept=".docx" class="form-control form-control-sm mb-3" required>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary w-100"><i class="bi bi-cloud-upload me-1"></i>Subir y Analizar</button>
+                                </form>
+                                <div class="mt-3 badge-container" class="small">
+                                    <!-- Variables -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            <!-- --- END SECTION PLANTILLAS --- -->
         </div>
     </div>
 </section>

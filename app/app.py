@@ -628,5 +628,124 @@ def pagina_no_encontrada(error):
 
 app.register_error_handler(404, pagina_no_encontrada)
 
+# ==========================================
+# ENDPOINTS PLANTILLAS WORD Y PERSONAL
+# ==========================================
+from database.controller import get_personal, get_or_create_personal
+from utils.word_manager import extract_variables_from_template, generate_acta
+import os
+import werkzeug.utils
+
+# Ensure templates upload folder exists
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'plantillas')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+@app.route('/api/personal', methods=['GET'])
+def api_get_personal():
+    try:
+        data = get_personal()
+        return jsonify({"success": True, "data": data})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/plantillas/upload', methods=['POST'])
+def api_upload_plantilla():
+    # Expects a file and a "tipo" (e.g., "acta_entrega")
+    if 'documento' not in request.files:
+        return jsonify({"success": False, "error": "No file part"}), 400
+    
+    file = request.files['documento']
+    tipo = request.form.get('tipo', 'general')
+    
+    if file.filename == '':
+        return jsonify({"success": False, "error": "No selected file"}), 400
+        
+    if file and file.filename.endswith('.docx'):
+        filename = werkzeug.utils.secure_filename(f"{tipo}.docx")
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(file_path)
+        
+        # Extract variables
+        variables = extract_variables_from_template(file_path)
+        return jsonify({
+            "success": True, 
+            "message": "Plantilla guardada y analizada existosamente",
+            "variables": variables
+        })
+    else:
+        return jsonify({"success": False, "error": "Invalid file format, must be .docx"}), 400
+
+@app.route('/api/informes/generar', methods=['POST'])
+def api_generar_informe():
+    """  Genera el informe Word y PDF en ~/Downloads/...  """
+    payload = request.json
+    tipo = payload.get("tipo", "acta_entrega")
+    context_data = payload.get("datos_formulario", {})
+    tabla_data = payload.get("datos_tabla", [])
+    vista_previa = payload.get("vista_previa", False) # True si solo queremos una preview temporal
+    
+    # Auto-registrar personal de los campos conocidos
+    nombres_campos_personal = ['entregado_por', 'recibido_por', 'usuario_final', 'administradora']
+    for campo in nombres_campos_personal:
+        if campo in context_data and context_data[campo]:
+            get_or_create_personal(context_data[campo])
+            
+    template_path = os.path.join(UPLOAD_FOLDER, f"{tipo}.docx")
+    if not os.path.exists(template_path):
+        return jsonify({"success": False, "error": "No existe plantilla cargada para este tipo."}), 404
+        
+    try:
+        docx_path, pdf_path = generate_acta(
+            template_path=template_path, 
+            context_data=context_data, 
+            table_data=tabla_data,
+            doc_name=f"acta_{tipo}"
+        )
+        
+        # Save history if it's not just a preview
+        if not vista_previa:
+            from database.controller import save_historial_acta
+            import json
+            datos_completos = {"formulario": context_data, "tabla": tabla_data}
+            save_historial_acta(tipo, json.dumps(datos_completos), docx_path, pdf_path)
+            
+        return jsonify({
+            "success": True, 
+            "docx_path": docx_path, 
+            "pdf_path": pdf_path,
+            "message": "Archivo generado exitosamente en " + (docx_path if docx_path else "ruta desconocida")
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+from database.controller import save_historial_acta, get_historial_actas, delete_historial_acta
+import json
+
+@app.route('/api/historial', methods=['GET'])
+def api_get_historial_all():
+    tipo = request.args.get('tipo_acta')
+    historial = get_historial_actas(tipo)
+    return jsonify({"success": True, "data": historial})
+
+@app.route('/api/historial/<int:id>', methods=['DELETE'])
+def api_delete_historial(id):
+    delete_historial_acta(id)
+    return jsonify({"success": True})
+
+
+@app.route('/api/descargar', methods=['GET'])
+def api_descargar():
+    path = request.args.get('path')
+    if path and os.path.exists(path):
+        return send_file(path, as_attachment=True)
+    return "No encontrado", 404
+
+@app.route('/files/<path:filename>')
+def serve_temp_files(filename):
+    # Sirve archivos generados desde la carpeta Downloads para la vista previa
+    downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
+    return send_from_directory(downloads_path, filename)
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)

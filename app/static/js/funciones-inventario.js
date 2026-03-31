@@ -403,14 +403,21 @@ async function initInventoryPage() {
 	function renderRows() {
 		const columns = getOrderedColumns();
 		body.innerHTML = "";
-		state.items.forEach((item) => {
+		state.items.forEach((item, index) => {
 			const tr = document.createElement("tr");
 			tr.dataset.id = item.id;
 			columns.forEach((column) => {
 				const td = document.createElement("td");
 				td.dataset.field = column.field;
 				td.dataset.id = item.id;
-				const displayValue = formatValue(column.field, item[column.field]);
+				
+				let displayValue;
+				if (column.field === "item_numero") {
+					displayValue = (state.page - 1) * state.perPage + index + 1;
+				} else {
+					displayValue = formatValue(column.field, item[column.field]);
+				}
+
 				td.textContent = displayValue;
 				td.title = String(displayValue || "");
 				td.classList.add("inventory-cell");
