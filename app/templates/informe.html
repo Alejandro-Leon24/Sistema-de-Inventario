@@ -120,242 +120,242 @@
         <div class="col-lg-10">
             <div class="row h-100 justify-content-center gap-3">
                 <!-- Columna Izquierda: Formularios -->
-                <div class="col-lg-5 overflow-y-auto border-end pe-3 fs-6" style="height: 80vh; font-size: 0.9rem;" id="form-container">
+                <div class="col-lg-6 overflow-y-auto border-end fs-6" style="height: 80vh; font-size: 0.9rem;"
+                    id="form-container">
                     <!-- datalist para el personal -->
                     <datalist id="lista-personal">
                         <!-- Llenado automáticamente o por backend si prefieres -->
                     </datalist>
 
                     <!-- sección de acta de entrega -->
-            <div id="sec-entrega" class="tab-section">
-                <form class="row g-4" id="form-entrega">
-                    <div class="col-md-4">
-                        <label class="form-label">Fecha de Corte</label>
-                        <input type="date" class="form-control" name="fecha_corte" id="entrega-fecha-corte">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Fecha de Emisión</label>
-                        <input type="date" class="form-control" name="fecha_emision" id="entrega-fecha-emision">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Acción de personal</label>
-                        <input type="text" class="form-control" name="accion_personal" id="entrega-accion-personal"
-                            placeholder="Ej: 501-ADM-24">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Entregado por</label>
-                        <input type="text" class="form-control" name="entregado_por" id="entrega-entregado"
-                            placeholder="Ej: Econ. Jenny Ortega">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Recibido por</label>
-                        <input type="text" class="form-control" name="recibido_por" id="entrega-recibido"
-                            placeholder="Ej: Abg. Candy Mendoza">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Usuario final</label>
-                        <input type="text" class="form-control" name="usuario_final" id="entrega-usuario-final"
-                            placeholder="Ej: Abg. Candy Mendoza">
-                    </div>
-
-                    <div class="col-12 mt-3">
-                        <h6 class="fw-bold text-primary mb-3">Ubicación del Acta</h6>
-                    </div>
-                    <div class="col-md-4 mt-0">
-                        <label class="form-label small">Bloque</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-bloque" id="entrega-bloque">
-                            <option value="">Seleccionar edificio...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-4 mt-0">
-                        <label class="form-label small">Piso</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-piso" id="entrega-piso"
-                            disabled>
-                            <option value="">Seleccionar piso...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-4 mt-0">
-                        <label class="form-label small">Área</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-area" id="entrega-area"
-                            disabled>
-                            <option value="">Seleccionar área...</option>
-                        </select>
-                    </div>
-                </form>
-                <div class="col-12 mt-3 text-center resultado-tabla-container" style="min-height: 2.5rem;">
-                        <!-- Aquí va a inyectarse el resultado -->
-                    </div>
-
-                <!-- Botonera Inferior -->
-                <div class="d-flex justify-content-center gap-3 mt-5">
-                    <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
-                    <button class="btn btn-outline-primary shadow-sm btn-historial"><i class="bi bi-clock-history me-1"></i>Historial</button>
-                    <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
-                </div>
-            </div>
-
-            <!-- sección de acta de recepción -->
-            <div id="sec-recepcion" class="tab-section d-none">
-                <form class="row g-4" id="form-recepcion">
-                    <div class="col-md-4">
-                        <label class="form-label">Fecha de Corte</label>
-                        <input type="date" class="form-control" id="recepcion-fecha-corte">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Fecha de Elaboración</label>
-                        <input type="date" class="form-control" id="recepcion-fecha-elaboracion">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Acción de personal</label>
-                        <input type="text" class="form-control" id="recepcion-accion-personal"
-                            placeholder="Ej: 501-ADM-24">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Entregado por</label>
-                        <input type="text" class="form-control" id="recepcion-entregado"
-                            placeholder="Ej: Econ. Jenny Ortega">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Recibido por</label>
-                        <input type="text" class="form-control" id="recepcion-recibido"
-                            placeholder="Ej: Abg. Candy Mendoza">
-                    </div>
-                    <div class="col-md-12">
-                        <label class="form-label">Memorando delegado</label>
-                        <input type="text" class="form-control" id="recepcion-memorando"
-                            placeholder="Ej: UG-JAF-2026-0124-M del 19 de enero del 2026">
-                    </div>
-
-                    <div class="col-12 mt-3">
-                        <h6 class="fw-bold text-primary mb-3">Ubicación del Acta</h6>
-                    </div>
-                    <div class="col-12 mt-3 text-center resultado-tabla-container" style="min-height: 2.5rem;">
-                        <!-- Aquí va a inyectarse el resultado -->
-                    </div>
-                    <div class="col-md-4 mt-0">
-                        <label class="form-label small">Bloque</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-bloque" id="recepcion-bloque">
-                            <option value="">Seleccionar edificio...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-4 mt-0">
-                        <label class="form-label small">Piso</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-piso" id="recepcion-piso"
-                            disabled>
-                            <option value="">Seleccionar piso...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-4 mt-0">
-                        <label class="form-label small">Área</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-area" id="recepcion-area"
-                            disabled>
-                            <option value="">Seleccionar área...</option>
-                        </select>
-                    </div>
-                </form>
-
-                <!-- Botonera Inferior -->
-                <div class="d-flex justify-content-center gap-3 mt-5">
-                    <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
-                    <button class="btn btn-outline-primary shadow-sm btn-historial"><i class="bi bi-clock-history me-1"></i>Historial</button>
-                    <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
-                </div>
-            </div>
-
-            <!-- sección de actas anuladas -->
-            <div id="sec-anuladas" class="tab-section d-none text-center py-5">
-                <i class="bi bi-x-circle text-muted" style="font-size: 4rem;"></i>
-                <h4 class="mt-3 text-muted">Módulo de Actas Anuladas</h4>
-                <p class="text-secondary">Aquí podrás ver el registro de actas que han sido invalidadas en el sistema.
-                </p>
-                <button class="btn btn-edu-secondary mt-2 shadow-sm"
-                    onclick="notify('Módulo en construcción', true)">Ver
-                    Historial</button>
-            </div>
-
-            <!-- sección de acta de aula inventario -->
-            <div id="sec-aula" class="tab-section d-none">
-                <div class="row g-3" id="form-aula">
-                    <div class="col-md-3">
-                        <label class="form-label small">Nro. de acta</label>
-                        <input type="text" class="form-control" id="aula-numero-acta" placeholder="Ej: 023-2026">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label small">Bloque</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-bloque" id="aula-bloque">
-                            <option value="">Seleccionar edificio...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label small">Piso</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-piso" id="aula-piso" disabled>
-                            <option value="">Seleccionar piso...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label small">Área</label>
-                        <select class="form-select border-primary-subtle shadow-sm select-area" id="aula-area" disabled>
-                            <option value="">Seleccionar área...</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="col-12 mt-3 text-center resultado-tabla-container" style="min-height: 2.5rem;">
-                        <!-- Aquí va a inyectarse el resultado -->
-                </div>
-
-                <div class="card-edu p-0 overflow-hidden mt-4">
-                    <div
-                        class="bg-light p-3 border-start border-primary border-5 d-flex align-items-center justify-content-between">
-                        <div>
-                            <span class="badge bg-primary mb-1">Área Fijada Actual</span>
-                            <h5 class="mb-0 fw-bold text-dark" id="aula-ruta-seleccionada">Seleccione un elemento de la
-                                ruta...
-                            </h5>
+                    <div id="sec-entrega" class="tab-section">
+                        <form class="row g-4" id="form-entrega">
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha de Corte</label>
+                                <input type="date" class="form-control" name="fecha_corte" id="entrega-fecha-corte">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha de Emisión</label>
+                                <input type="date" class="form-control" name="fecha_emision" id="entrega-fecha-emision">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Acción de personal</label>
+                                <input type="text" class="form-control" name="accion_personal"
+                                    id="entrega-accion-personal" placeholder="Ej: 501-ADM-24">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Entregado por</label>
+                                <input type="text" class="form-control" name="entregado_por" id="entrega-entregado"
+                                    placeholder="Ej: Econ. Jenny Ortega">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Recibido por/Usuario final</label>
+                                <input type="text" class="form-control" name="recibido_por" id="entrega-recibido"
+                                    placeholder="Ej: Abg. Candy Mendoza">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Rol del que recibe</label>
+                                <input type="text" class="form-control" name="rol_recibe" id="entrega-rol-recibe"
+                                    placeholder="Ej: Asistente de secretaria">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Área de trabajo del usuario final</label>
+                                <input type="text" class="form-control" name="area_trabajo" id="entrega-area-trabajo"
+                                    placeholder="Ej: Oficina de Secretaría General">
+                            </div>
+                            <!-- Contenedor dinámico para variables extra detectadas -->
+                            <div id="dinamico-entrega-container" class="col-12 row g-4 m-0 p-0"></div>
+                        </form>
+                        <div class="col-12 mt-3 text-center resultado-tabla-container" style="min-height: 2.5rem;">
+                            <!-- Aquí va a inyectarse el resultado -->
                         </div>
-                        <div class="text-primary h2 mb-0">
-                            <i class="bi bi-geo-fill"></i>
+
+                        <!-- Botonera Inferior -->
+                        <div class="d-flex justify-content-center gap-3 mt-5">
+                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
+                            <button class="btn btn-outline-primary shadow-sm btn-historial"><i
+                                    class="bi bi-clock-history me-1"></i>Historial</button>
+                            <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
                         </div>
                     </div>
+
+                    <!-- sección de acta de recepción -->
+                    <div id="sec-recepcion" class="tab-section d-none">
+                        <form class="row g-4" id="form-recepcion">
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha de Corte</label>
+                                <input type="date" class="form-control" id="recepcion-fecha-corte">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha de Elaboración</label>
+                                <input type="date" class="form-control" id="recepcion-fecha-elaboracion">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Acción de personal</label>
+                                <input type="text" class="form-control" id="recepcion-accion-personal"
+                                    placeholder="Ej: 501-ADM-24">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Entregado por</label>
+                                <input type="text" class="form-control" id="recepcion-entregado"
+                                    placeholder="Ej: Econ. Jenny Ortega">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Recibido por</label>
+                                <input type="text" class="form-control" id="recepcion-recibido"
+                                    placeholder="Ej: Abg. Candy Mendoza">
+                            </div>
+                            <div class="col-md-12">
+                                <label class="form-label">Memorando delegado</label>
+                                <input type="text" class="form-control" id="recepcion-memorando"
+                                    placeholder="Ej: UG-JAF-2026-0124-M del 19 de enero del 2026">
+                            </div>
+
+                            <div class="col-12 mt-3">
+                                <h6 class="fw-bold text-primary mb-3">Ubicación del Acta</h6>
+                            </div>
+                            <div class="col-12 mt-3 text-center resultado-tabla-container" style="min-height: 2.5rem;">
+                                <!-- Aquí va a inyectarse el resultado -->
+                            </div>
+                            <div class="col-md-4 mt-0">
+                                <label class="form-label small">Bloque</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-bloque"
+                                    id="recepcion-bloque">
+                                    <option value="">Seleccionar edificio...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mt-0">
+                                <label class="form-label small">Piso</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-piso"
+                                    id="recepcion-piso" disabled>
+                                    <option value="">Seleccionar piso...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mt-0">
+                                <label class="form-label small">Área</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-area"
+                                    id="recepcion-area" disabled>
+                                    <option value="">Seleccionar área...</option>
+                                </select>
+                            </div>
+                        </form>
+
+                        <!-- Botonera Inferior -->
+                        <div class="d-flex justify-content-center gap-3 mt-5">
+                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
+                            <button class="btn btn-outline-primary shadow-sm btn-historial"><i
+                                    class="bi bi-clock-history me-1"></i>Historial</button>
+                            <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
+                        </div>
+                    </div>
+
+                    <!-- sección de actas anuladas -->
+                    <div id="sec-anuladas" class="tab-section d-none text-center py-5">
+                        <i class="bi bi-x-circle text-muted" style="font-size: 4rem;"></i>
+                        <h4 class="mt-3 text-muted">Módulo de Actas Anuladas</h4>
+                        <p class="text-secondary">Aquí podrás ver el registro de actas que han sido invalidadas en el
+                            sistema.
+                        </p>
+                        <button class="btn btn-edu-secondary mt-2 shadow-sm"
+                            onclick="notify('Módulo en construcción', true)">Ver
+                            Historial</button>
+                    </div>
+
+                    <!-- sección de acta de aula inventario -->
+                    <div id="sec-aula" class="tab-section d-none">
+                        <div class="row g-3" id="form-aula">
+                            <div class="col-md-3">
+                                <label class="form-label small">Nro. de acta</label>
+                                <input type="text" class="form-control" id="aula-numero-acta"
+                                    placeholder="Ej: 023-2026">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Bloque</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-bloque"
+                                    id="aula-bloque">
+                                    <option value="">Seleccionar edificio...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Piso</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-piso" id="aula-piso"
+                                    disabled>
+                                    <option value="">Seleccionar piso...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small">Área</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-area" id="aula-area"
+                                    disabled>
+                                    <option value="">Seleccionar área...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="col-12 mt-3 text-center resultado-tabla-container" style="min-height: 2.5rem;">
+                            <!-- Aquí va a inyectarse el resultado -->
+                        </div>
+
+                        <div class="card-edu p-0 overflow-hidden mt-4">
+                            <div
+                                class="bg-light p-3 border-start border-primary border-5 d-flex align-items-center justify-content-between">
+                                <div>
+                                    <span class="badge bg-primary mb-1">Área Fijada Actual</span>
+                                    <h5 class="mb-0 fw-bold text-dark" id="aula-ruta-seleccionada">Seleccione un
+                                        elemento de la
+                                        ruta...
+                                    </h5>
+                                </div>
+                                <div class="text-primary h2 mb-0">
+                                    <i class="bi bi-geo-fill"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Botonera Inferior -->
+                        <div class="d-flex justify-content-center gap-3 mt-5">
+                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
+                            <!-- <button class="btn btn-outline-primary shadow-sm btn-historial"><i class="bi bi-clock-history me-1"></i>Historial</button> -->
+                            <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
+                        </div>
+                    </div>
+                    <!-- Fin de Formularios (col-lg-4) -->
                 </div>
 
-                <!-- Botonera Inferior -->
-                <div class="d-flex justify-content-center gap-3 mt-5">
-                    <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
-                    <!-- <button class="btn btn-outline-primary shadow-sm btn-historial"><i class="bi bi-clock-history me-1"></i>Historial</button> -->
-                    <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
-                </div>
-            </div>
-            <!-- Fin de Formularios (col-lg-4) -->
-            </div>
-            
-            <!-- Columna Derecha: Vista Previa en Vivo -->
-            <div class="col-lg-6" style="height: 80vh;">
-                <div class="card border-0 shadow-sm h-100 bg-light">
-                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                        <h6 class="mb-0 fw-bold"><i class="bi bi-file-earmark-word me-2"></i>Vista Previa en Vivo</h6>
-                        <span class="badge bg-light text-primary" id="preview-status">Esperando datos...</span>
-                    </div>
-                    <div class="card-body p-0 d-flex flex-column align-items-center justify-content-center overflow-hidden position-relative" id="doc-preview-container">
-                        <!-- Spinner de carga -->
-                        <div id="preview-loader" class="position-absolute w-100 h-100 bg-light d-none flex-column align-items-center justify-content-center" style="z-index: 10; opacity: 0.8;">
-                            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
-                            <span class="mt-2 fw-bold text-primary">Generando preview...</span>
+                <!-- Columna Derecha: Vista Previa en Vivo -->
+                <div class="col-lg-4" style="height: 80vh; width: 30vw;">
+                    <div class="card border-0 shadow-sm h-100 bg-light">
+                        <div
+                            class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0 fw-bold"><i class="bi bi-file-earmark-word me-2"></i>Vista Previa en Vivo
+                            </h6>
+                            <span class="badge bg-light text-primary" id="preview-status">Esperando datos...</span>
                         </div>
-                        
-                        <!-- Placeholder cuando no hay pdf -->
-                        <div class="text-center text-muted" id="preview-placeholder">
-                            <i class="bi bi-file-earmark-text display-1"></i>
-                            <p class="mt-3">Complete el formulario o extraiga una tabla <br>para previsualizar su acta automágicamente.</p>
+                        <div class="card-body p-0 d-flex flex-column align-items-center justify-content-center overflow-hidden position-relative"
+                            id="doc-preview-container">
+                            <!-- Spinner de carga -->
+                            <div id="preview-loader"
+                                class="position-absolute w-100 h-100 bg-light d-none flex-column align-items-center justify-content-center"
+                                style="z-index: 10; opacity: 0.8;">
+                                <div class="spinner-border text-primary" role="status"
+                                    style="width: 3rem; height: 3rem;"></div>
+                                <span class="mt-2 fw-bold text-primary">Generando preview...</span>
+                            </div>
+
+                            <!-- Placeholder cuando no hay pdf -->
+                            <div class="text-center text-muted" id="preview-placeholder">
+                                <i class="bi bi-file-earmark-text display-1"></i>
+                                <p class="mt-3">Complete el formulario o extraiga una tabla <br>para previsualizar su
+                                    acta automágicamente.</p>
+                            </div>
+
+                            <!-- Iframe para mostrar el pdf en vivo -->
+                            <iframe id="preview-iframe" class="w-100 h-100 d-none" style="border: none;"></iframe>
                         </div>
-                        
-                        <!-- Iframe para mostrar el pdf en vivo -->
-                        <iframe id="preview-iframe" class="w-100 h-100 d-none" style="border: none;"></iframe>
                     </div>
                 </div>
-            </div>
-            <!-- Fin de Vista Previa -->
-            
+                <!-- Fin de Vista Previa -->
+
             </div> <!-- Fin row interior -->
         </div> <!-- Fin col-lg-10 -->
     </div> <!-- Fin row principal -->
@@ -374,19 +374,22 @@
                 </div>
                 <div class="modal-body bg-soft">
                     <!-- sección de extraer datos tabla movida dentro del modal -->
-                    <div class="card-edu m-0" style="background: linear-gradient(to right, #ffffff, #f8f9ff); padding: 1.5rem;">
+                    <div class="card-edu m-0"
+                        style="background: linear-gradient(to right, #ffffff, #f8f9ff); padding: 1.5rem;">
                         <div class="row h-100">
                             <!-- Columna Izquierda: Selector de columnas -->
                             <div class="col-md-3 border-end">
                                 <h6 class="fw-bold text-primary mb-3 border-bottom pb-2">Columnas</h6>
-                                <div class="list-group list-group-flush overflow-y-auto" style="max-height: 480px;" id="column-selector">
+                                <div class="list-group list-group-flush overflow-y-auto" style="max-height: 480px;"
+                                    id="column-selector">
                                     <!-- Checkboxes inyectados por JS -->
                                 </div>
                             </div>
-                            
+
                             <!-- Columna Derecha: Filtros y Tabla -->
                             <div class="col-md-9">
-                                <h6 class="fw-bold text-primary mb-3 border-bottom pb-2">Filtros de Búsqueda para Acta</h6>
+                                <h6 class="fw-bold text-primary mb-3 border-bottom pb-2">Filtros de Búsqueda para Acta
+                                </h6>
                                 <div class="row g-3">
                                     <div class="col-md-3">
                                         <label class="form-label small">Bloque</label>
@@ -397,15 +400,15 @@
                                     </div>
                                     <div class="col-md-3">
                                         <label class="form-label small">Piso</label>
-                                        <select class="form-select border-primary-subtle shadow-sm select-piso" id="ext-piso"
-                                            disabled>
+                                        <select class="form-select border-primary-subtle shadow-sm select-piso"
+                                            id="ext-piso" disabled>
                                             <option value="">Selección...</option>
                                         </select>
                                     </div>
                                     <div class="col-md-3">
                                         <label class="form-label small">Área</label>
-                                        <select class="form-select border-primary-subtle shadow-sm select-area" id="ext-area"
-                                            disabled>
+                                        <select class="form-select border-primary-subtle shadow-sm select-area"
+                                            id="ext-area" disabled>
                                             <option value="">Selección...</option>
                                         </select>
                                     </div>
@@ -420,17 +423,22 @@
                                     </div>
                                 </div>
 
-                                <div id="mensaje-sin-columnas" class="alert alert-warning mt-4 text-center d-none shadow-sm">
+                                <div id="mensaje-sin-columnas"
+                                    class="alert alert-warning mt-4 text-center d-none shadow-sm">
                                     <i class="bi bi-exclamation-triangle-fill me-2 text-warning fs-5"></i>
-                                    <strong>Aviso:</strong> Debe seleccionar al menos una columna en el panel izquierdo para visualizar los datos de extracción.
+                                    <strong>Aviso:</strong> Debe seleccionar al menos una columna en el panel izquierdo
+                                    para visualizar los datos de extracción.
                                 </div>
 
-                                <div class="table-responsive mt-4" id="contenedor-tabla-extraccion" style="max-height: 350px;">
-                                    <table class="table table-sm table-hover table-bordered shadow-sm" style="font-size: 0.85rem;" id="tabla-extraccion">
+                                <div class="table-responsive mt-4" id="contenedor-tabla-extraccion"
+                                    style="max-height: 350px;">
+                                    <table class="table table-sm table-hover table-bordered shadow-sm"
+                                        style="font-size: 0.85rem;" id="tabla-extraccion">
                                         <thead class="table-light sticky-top">
                                             <tr id="thead-extraccion-tr">
-                                                <th class="text-center" style="width: 50px;"><input class="form-check-input"
-                                                        type="checkbox" id="chk-all-items"></th>
+                                                <th class="text-center" style="width: 50px;"><input
+                                                        class="form-check-input" type="checkbox" id="chk-all-items">
+                                                </th>
                                                 <th>CÓDIGO INV.</th>
                                                 <th>DESCRIPCIÓN</th>
                                                 <th>MARCA</th>
@@ -442,7 +450,8 @@
                                         <tbody id="tbody-extraccion">
                                             <!-- Llenado por JS -->
                                             <tr>
-                                                <td colspan="7" class="text-center text-muted">Use los filtros para buscar
+                                                <td colspan="7" class="text-center text-muted">Use los filtros para
+                                                    buscar
                                                     elementos.</td>
                                             </tr>
                                         </tbody>
@@ -469,32 +478,37 @@
 </section>
 
 <script src="{{ url_for('static', filename='js/funciones-informe.js') }}"></script>
-    <!-- Modal Historial de Actas -->
-    <div class="modal fade" id="modalHistorialActas" tabindex="-1" aria-labelledby="modalHistorialLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-            <div class="modal-content shadow-lg">
-                <div class="modal-header bg-primary text-white">
-                    <h5 class="modal-title" id="modalHistorialLabel"><i class="bi bi-clock-history me-2"></i>Historial de Actas Realizadas</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="table-responsive">
-                        <table class="table table-hover align-middle">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Fecha y Hora</th>
-                                    <th>Tipo</th>
-                                    <th class="text-end">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody id="lista-historial-actas">
-                                <!-- Llenado din�mico por JS -->
-                                <tr><td colspan="3" class="text-center text-muted">Cargando historial...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
+<script src="{{ url_for('static', filename='js/modulo-informe-preview.js') }}"></script>
+<!-- Modal Historial de Actas -->
+<div class="modal fade" id="modalHistorialActas" tabindex="-1" aria-labelledby="modalHistorialLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow-lg">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="modalHistorialLabel"><i class="bi bi-clock-history me-2"></i>Historial de
+                    Actas Realizadas</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                    aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Fecha y Hora</th>
+                                <th>Tipo</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lista-historial-actas">
+                            <!-- Llenado din�mico por JS -->
+                            <tr>
+                                <td colspan="3" class="text-center text-muted">Cargando historial...</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
     </div>
+</div>
 {% endblock %}

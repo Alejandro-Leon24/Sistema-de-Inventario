@@ -5,7 +5,7 @@ from io import BytesIO
 
 from docx import Document
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request, send_file, send_from_directory
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -632,13 +632,18 @@ app.register_error_handler(404, pagina_no_encontrada)
 # ENDPOINTS PLANTILLAS WORD Y PERSONAL
 # ==========================================
 from database.controller import get_personal, get_or_create_personal
-from utils.word_manager import extract_variables_from_template, generate_acta
+from utils.word_manager import extract_variables_from_template, generate_acta, render_docx_preview_html
 import os
 import werkzeug.utils
 
 # Ensure templates upload folder exists
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'plantillas')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Shared output root for all clients connected to this local server.
+# Using a project-local folder avoids writing to only one Windows user profile.
+ACTAS_OUTPUT_ROOT = os.path.join(BASE_DIR, 'salidas', 'inventario', 'actas')
+os.makedirs(ACTAS_OUTPUT_ROOT, exist_ok=True)
 
 @app.route('/api/personal', methods=['GET'])
 def api_get_personal():
@@ -660,7 +665,8 @@ def api_upload_plantilla():
     if file.filename == '':
         return jsonify({"success": False, "error": "No selected file"}), 400
         
-    if file and file.filename.endswith('.docx'):
+    filename = file.filename or ""
+    if file and filename.endswith('.docx'):
         filename = werkzeug.utils.secure_filename(f"{tipo}.docx")
         file_path = os.path.join(UPLOAD_FOLDER, filename)
         file.save(file_path)
@@ -675,13 +681,36 @@ def api_upload_plantilla():
     else:
         return jsonify({"success": False, "error": "Invalid file format, must be .docx"}), 400
 
+@app.route('/api/plantillas/estado', methods=['GET'])
+def api_estado_plantillas():
+    tipo = request.args.get('tipo')
+    if not tipo:
+        return jsonify({"success": False, "error": "Tipo no proporcionado"}), 400
+    
+    file_path = os.path.join(UPLOAD_FOLDER, f"{tipo}.docx")
+    if os.path.exists(file_path):
+        variables = extract_variables_from_template(file_path)
+        return jsonify({
+            "success": True,
+            "existe": True,
+            "variables": variables
+        })
+    else:
+        return jsonify({
+            "success": True,
+            "existe": False,
+            "variables": []
+        })
+
 @app.route('/api/informes/generar', methods=['POST'])
 def api_generar_informe():
-    """  Genera el informe Word y PDF en ~/Downloads/...  """
+    """Genera el informe Word/PDF en una carpeta compartida del servidor local."""
     payload = request.json
     tipo = payload.get("tipo", "acta_entrega")
-    context_data = payload.get("datos_formulario", {})
+    context_data_raw = payload.get("datos_formulario", {})
+    context_data = dict(context_data_raw or {})
     tabla_data = payload.get("datos_tabla", [])
+    tabla_columnas = payload.get("datos_columnas", [])
     vista_previa = payload.get("vista_previa", False) # True si solo queremos una preview temporal
     
     # Auto-registrar personal de los campos conocidos
@@ -695,24 +724,50 @@ def api_generar_informe():
         return jsonify({"success": False, "error": "No existe plantilla cargada para este tipo."}), 404
         
     try:
+        output_dir = None
+        doc_name = f"acta_{tipo}"
+        generate_pdf = not vista_previa
+        tipo_slug = str(tipo).replace("_", "-").strip().lower() or "entrega"
+
+        if not vista_previa:
+            # Descarga final: guardar en salidas/inventario/actas/<tipo>
+            # con nombre acta-<tipo>-<fecha_hoy>.docx/.pdf
+            folder_name = f"acta-{tipo_slug}"
+            output_dir = os.path.join(ACTAS_OUTPUT_ROOT, folder_name)
+            fecha_hoy = datetime.now().strftime("%d-%m-%Y")
+            doc_name = f"acta-{tipo_slug}-{fecha_hoy}"
+        else:
+            # Vista previa: mantener la misma raíz para evitar rutas dispersas.
+            output_dir = os.path.join(ACTAS_OUTPUT_ROOT, "_preview", f"acta-{tipo_slug}")
+
         docx_path, pdf_path = generate_acta(
             template_path=template_path, 
             context_data=context_data, 
             table_data=tabla_data,
-            doc_name=f"acta_{tipo}"
+            table_columns=tabla_columnas,
+            output_dir=output_dir,
+            generate_pdf=generate_pdf,
+            doc_name=doc_name,
+            use_date_subfolder=vista_previa,
+            include_time_suffix=vista_previa,
         )
         
         # Save history if it's not just a preview
         if not vista_previa:
             from database.controller import save_historial_acta
             import json
-            datos_completos = {"formulario": context_data, "tabla": tabla_data}
+            datos_completos = {
+                "formulario": context_data_raw,
+                "tabla": tabla_data,
+                "columnas": tabla_columnas,
+            }
             save_historial_acta(tipo, json.dumps(datos_completos), docx_path, pdf_path)
             
         return jsonify({
             "success": True, 
             "docx_path": docx_path, 
             "pdf_path": pdf_path,
+            "html_preview": render_docx_preview_html(docx_path) if vista_previa and not pdf_path else None,
             "message": "Archivo generado exitosamente en " + (docx_path if docx_path else "ruta desconocida")
         })
     except Exception as e:
@@ -738,14 +793,30 @@ def api_delete_historial(id):
 def api_descargar():
     path = request.args.get('path')
     if path and os.path.exists(path):
+        real_path = os.path.abspath(path)
+        root_path = os.path.abspath(ACTAS_OUTPUT_ROOT)
+        # Prevent arbitrary file download outside actas output root.
+        if not real_path.startswith(root_path):
+            return "Ruta no permitida", 403
         return send_file(path, as_attachment=True)
+    return "No encontrado", 404
+
+
+@app.route('/api/ver', methods=['GET'])
+def api_ver_archivo():
+    path = request.args.get('path')
+    if path and os.path.exists(path):
+        real_path = os.path.abspath(path)
+        root_path = os.path.abspath(ACTAS_OUTPUT_ROOT)
+        if not real_path.startswith(root_path):
+            return "Ruta no permitida", 403
+        return send_file(path, as_attachment=False)
     return "No encontrado", 404
 
 @app.route('/files/<path:filename>')
 def serve_temp_files(filename):
-    # Sirve archivos generados desde la carpeta Downloads para la vista previa
-    downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
-    return send_from_directory(downloads_path, filename)
+    # Sirve archivos generados para la vista previa dentro de la carpeta compartida.
+    return send_from_directory(ACTAS_OUTPUT_ROOT, filename)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)

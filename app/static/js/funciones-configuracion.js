@@ -1,4 +1,4 @@
-﻿const api = {
+const api = {
 async get(url) {
 const response = await fetch(url);
 const payload = await response.json();
@@ -1888,71 +1888,4 @@ document.addEventListener("DOMContentLoaded", async () => {
 	});
 
 	await initSettingsPage();
-});
-
-
-
-// ==========================================
-// MÓDULO DE CARGA DE PLANTILLAS WORD
-// ==========================================
-document.addEventListener('DOMContentLoaded', () => {
-    const formsPlantillas = document.querySelectorAll('.form-plantilla');
-    
-    formsPlantillas.forEach(form => {
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const tipo = form.getAttribute('data-tipo');
-            const fileInput = form.querySelector('input[type="file"]');
-            
-            if (!fileInput.files.length) {
-                notify('Debe seleccionar un archivo Word (.docx)', 'warning');
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('documento', fileInput.files[0]);
-            formData.append('tipo', tipo);
-            
-            const btnSubmit = form.querySelector('button[type="submit"]');
-            const originalText = btnSubmit.innerHTML;
-            btnSubmit.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Analizando...';
-            btnSubmit.disabled = true;
-            
-            try {
-                const response = await fetch('/api/plantillas/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const result = await response.json();
-                if (result.success) {
-                    notify(result.message || 'Plantilla subida con éxito', 'success');
-                    
-                    // Render variables detected
-                    const badgeContainer = form.nextElementSibling;
-                    badgeContainer.innerHTML = '<strong>Variables Inyectables:</strong><br>';
-                    
-                    if (result.variables && result.variables.length > 0) {
-                        result.variables.forEach(v => {
-                            const badge = document.createElement('span');
-                            badge.className = 'badge bg-secondary me-1 mt-1';
-                            badge.textContent = `{{${v}}}`;
-                            badgeContainer.appendChild(badge);
-                        });
-                    } else {
-                        badgeContainer.innerHTML += '<span class="text-muted">No se detectaron variables dinámicas en este documento.</span>';
-                    }
-                } else {
-                    notify(result.error || 'Error al subir la plantilla', 'danger');
-                }
-            } catch (err) {
-                console.error(err);
-                notify('Ocurrió un error de red al subir archivo.', 'danger');
-            } finally {
-                btnSubmit.innerHTML = originalText;
-                btnSubmit.disabled = false;
-                form.reset();
-            }
-        });
-    });
 });
