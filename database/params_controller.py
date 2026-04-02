@@ -16,6 +16,30 @@ PARAM_TABLES = {
     "estado_pizarra": "param_estado_pizarra",
 }
 
+PARAM_USAGE_MAPPING = {
+    "estados": ("inventario_items", "estado"),
+    "condiciones": ("inventario_items", "condicion"),
+    "cuentas": ("inventario_items", "cuenta"),
+    "estado_puerta": ("areas", "estado_puerta"),
+    "cerraduras": ("areas", "cerradura"),
+    "estado_piso": ("areas", "estado_piso"),
+    "material_techo": ("areas", "material_techo"),
+    "material_puerta": ("areas", "material_puerta"),
+    "estado_pizarra": ("areas", "pizarra_estado"),
+}
+
+SI_NO_COLUMNS = [
+    "senaletica", "puerta", "estado_paredes", "estado_techo",
+    "nivel_seguridad", "sitio_profesor_mesa", "sitio_profesor_silla",
+    "pc_aula", "proyector", "pantalla_interactiva", "pizarra",
+    "wifi", "red_lan", "puntos_electricos", "ambiente_apto_retorno"
+]
+
+
+def clean_optional(value):
+    text = str(value or "").strip()
+    return text or None
+
 
 def _get_param_table(tipo):
     table = PARAM_TABLES.get(tipo)
@@ -32,13 +56,15 @@ def get_param(tipo):
         rows = db.execute(
             f"SELECT id, nombre, descripcion, orden FROM {table} ORDER BY orden, id"
         ).fetchall()
+        names = [row["nombre"] for row in rows]
+        usage_counts = _get_param_usage_counts(tipo, names)
         result = []
         for row in rows:
             item = {
                 "id": row["id"],
                 "nombre": row["nombre"],
                 "descripcion": row["descripcion"],
-                "can_delete": can_delete_param(tipo, row["nombre"]),
+                "can_delete": (usage_counts.get(row["nombre"], 0) == 0),
             }
             result.append(item)
         return result
@@ -92,73 +118,42 @@ def update_param(tipo, param_id, nombre, descripcion=None):
 
 
 def can_delete_param(tipo, nombre):
+    counts = _get_param_usage_counts(tipo, [nombre])
+    return counts.get(nombre, 0) == 0
+
+
+def _get_param_usage_counts(tipo, names):
     db = get_db()
-    if tipo == "estados":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM inventario_items WHERE estado = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "condiciones":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM inventario_items WHERE condicion = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "cuentas":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM inventario_items WHERE cuenta = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "estado_puerta":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM areas WHERE estado_puerta = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "cerraduras":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM areas WHERE cerradura = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "estado_piso":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM areas WHERE estado_piso = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "material_techo":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM areas WHERE material_techo = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "material_puerta":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM areas WHERE material_puerta = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
-    if tipo == "estado_pizarra":
-        row = db.execute(
-            "SELECT COUNT(1) AS total FROM areas WHERE pizarra_estado = ?",
-            (nombre,),
-        ).fetchone()
-        return (row["total"] or 0) == 0
+    unique_names = [name for name in {str(name or "").strip() for name in names} if name]
+    if not unique_names:
+        return {}
+
+    placeholders = ", ".join(["?"] * len(unique_names))
+
+    if tipo in PARAM_USAGE_MAPPING:
+        table_name, column_name = PARAM_USAGE_MAPPING[tipo]
+        rows = db.execute(
+            f"""
+            SELECT {column_name} AS nombre, COUNT(1) AS total
+            FROM {table_name}
+            WHERE {column_name} IN ({placeholders})
+            GROUP BY {column_name}
+            """,
+            tuple(unique_names),
+        ).fetchall()
+        return {row["nombre"]: row["total"] for row in rows}
+
     if tipo == "si_no":
-        si_no_columns = [
-            "senaletica", "puerta", "estado_paredes", "estado_techo",
-            "nivel_seguridad", "sitio_profesor_mesa", "sitio_profesor_silla",
-            "pc_aula", "proyector", "pantalla_interactiva", "pizarra",
-            "wifi", "red_lan", "puntos_electricos", "ambiente_apto_retorno"
-        ]
-        conditions = " OR ".join([f"{col} = ?" for col in si_no_columns])
-        params = tuple([nombre] * len(si_no_columns))
-        row = db.execute(f"SELECT COUNT(1) AS total FROM areas WHERE {conditions}", params).fetchone()
-        return (row["total"] or 0) == 0
-    return True
+        union_sql = " UNION ALL ".join(
+            [f"SELECT {column} AS nombre FROM areas WHERE {column} IN ({placeholders})" for column in SI_NO_COLUMNS]
+        )
+        rows = db.execute(
+            f"SELECT nombre, COUNT(1) AS total FROM ({union_sql}) u GROUP BY nombre",
+            tuple(unique_names * len(SI_NO_COLUMNS)),
+        ).fetchall()
+        return {row["nombre"]: row["total"] for row in rows}
+
+    return {}
 
 
 def delete_param(tipo, param_id):
@@ -225,10 +220,6 @@ def get_administradores():
 
 def create_administrador(payload):
     """Crear nuevo administrador"""
-    def clean_optional(value):
-        text = str(value or "").strip()
-        return text or None
-
     db = get_db()
     cursor = db.execute(
         """
@@ -250,10 +241,6 @@ def create_administrador(payload):
 
 def update_administrador(admin_id, payload):
     """Actualizar administrador"""
-    def clean_optional(value):
-        text = str(value or "").strip()
-        return text or None
-
     db = get_db()
     
     # Obtener el nombre anterior para actualizar las dependencias en cascada

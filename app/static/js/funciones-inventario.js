@@ -32,34 +32,7 @@ const INLINE_INPUT_CONFIG = {
 	fecha_adquisicion_esbye: { type: "date" },
 };
 
-const api = {
-	async get(url) {
-		const response = await fetch(url);
-		const payload = await response.json();
-		if (!response.ok) {
-			const error = new Error(payload.error || "Error de servidor");
-			error.payload = payload;
-			error.status = response.status;
-			throw error;
-		}
-		return payload;
-	},
-	async send(url, method, body) {
-		const response = await fetch(url, {
-			method,
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(body),
-		});
-		const payload = await response.json();
-		if (!response.ok) {
-			const error = new Error(payload.error || "Error de servidor");
-			error.payload = payload;
-			error.status = response.status;
-			throw error;
-		}
-		return payload;
-	},
-};
+const api = window.api;
 
 function debounce(callback, delay = 350) {
 	let timer;
@@ -93,14 +66,7 @@ function formatValue(field, value) {
 	return value;
 }
 
-function escapeHtmlText(value) {
-	return String(value || "")
-		.replaceAll("&", "&amp;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("'", "&#39;");
-}
+const escapeHtmlText = window.appHelpers.escapeHtmlText;
 
 function buildDuplicateWarningMessage(duplicates = [], payload = {}) {
 	const maxRows = 8;
@@ -221,80 +187,18 @@ async function initInventoryPage() {
 		mode: null,
 		resolver: null,
 	};
+	const duplicateModalController = typeof window.createDuplicateInventoryModal === "function"
+		? window.createDuplicateInventoryModal({
+			duplicateModal,
+			nodes,
+			escapeHtmlText,
+			buildDuplicateWarningMessage,
+		})
+		: null;
 
-	function buildDuplicateRowsHtml(duplicates = []) {
-		if (!duplicates.length) {
-			return '<div class="alert alert-secondary mb-0">No hay coincidencias para mostrar.</div>';
-		}
-		return duplicates
-			.map((item) => {
-				const matchBadge = Array.isArray(item.matches) && item.matches.length
-					? item.matches
-						.map((match) => `<span class="badge text-bg-warning me-1">${match === "cod_inventario" ? "INV" : "ESBYE"}</span>`)
-						.join("")
-					: '<span class="badge text-bg-secondary">Coincidencia</span>';
-				return `
-					<div class="card border-warning-subtle shadow-sm">
-						<div class="card-body py-2 px-3">
-							<div class="d-flex justify-content-between align-items-start gap-2 mb-1">
-								<div class="fw-semibold">ítem #${escapeHtmlText(item.item_numero || "-")}</div>
-								<div>${matchBadge}</div>
-							</div>
-							<div class="small"><strong>Nombre:</strong> ${escapeHtmlText(item.descripcion || "-")}</div>
-							<div class="small"><strong>Modelo:</strong> ${escapeHtmlText(item.modelo || "-")}</div>
-							<div class="small"><strong>Ubicación:</strong> ${escapeHtmlText(item.ubicacion || "-")}</div>
-							<div class="small"><strong>Fecha:</strong> ${escapeHtmlText(item.fecha_adquisicion || "-")}</div>
-							<div class="small"><strong>Usuario final:</strong> ${escapeHtmlText(item.usuario_final || "-")}</div>
-						</div>
-					</div>
-				`;
-			})
-			.join("");
-	}
-
-	function openDuplicateModal({ duplicates = [], payload = {}, mode = "create" } = {}) {
-		if (!duplicateModal || !nodes.duplicateSummary || !nodes.duplicateList || !nodes.duplicateContinueBtn || !nodes.duplicateCancelBtn) {
-			return Promise.resolve(window.confirm(buildDuplicateWarningMessage(duplicates, payload)));
-		}
-
-		const inv = String(payload.cod_inventario || "").trim();
-		const esbye = String(payload.cod_esbye || "").trim();
-		const modeText = mode === "update" ? "guardar el cambio" : "registrar este nuevo ítem";
-		nodes.duplicateSummary.textContent = `Se encontraron ${duplicates.length} coincidencias para ${modeText}.${inv ? ` INV: ${inv}` : ""}${esbye ? ` ESBYE: ${esbye}` : ""}`;
-		nodes.duplicateList.innerHTML = buildDuplicateRowsHtml(duplicates);
-
-		return new Promise((resolve) => {
-			let settled = false;
-
-			const cleanup = () => {
-				nodes.duplicateContinueBtn.removeEventListener("click", handleContinue);
-				nodes.duplicateCancelBtn.removeEventListener("click", handleCancel);
-				nodes.duplicateModalEl.removeEventListener("hidden.bs.modal", handleHidden);
-			};
-
-			const finish = (value) => {
-				if (settled) return;
-				settled = true;
-				cleanup();
-				resolve(value);
-			};
-
-			const handleContinue = () => {
-				finish(true);
-				duplicateModal.hide();
-			};
-			const handleCancel = () => {
-				finish(false);
-				duplicateModal.hide();
-			};
-			const handleHidden = () => finish(false);
-
-			nodes.duplicateContinueBtn.addEventListener("click", handleContinue);
-			nodes.duplicateCancelBtn.addEventListener("click", handleCancel);
-			nodes.duplicateModalEl.addEventListener("hidden.bs.modal", handleHidden);
-			duplicateModal.show();
-		});
-	}
+	const openDuplicateModal = duplicateModalController?.openDuplicateModal
+		? duplicateModalController.openDuplicateModal
+		: ({ duplicates = [], payload = {} } = {}) => Promise.resolve(window.confirm(buildDuplicateWarningMessage(duplicates, payload)));
 
 	function getColumn(field) {
 		return INVENTORY_COLUMNS.find((column) => column.field === field);
@@ -384,71 +288,28 @@ async function initInventoryPage() {
 		});
 	}
 
+	const tableController = typeof window.createInventarioTablaController === "function"
+		? window.createInventarioTablaController({
+			state,
+			nodes,
+			body,
+			getOrderedColumns,
+			formatValue,
+			escapeHtmlText,
+			applyColumnWidthToField,
+		})
+		: null;
+
 	function renderTableHead() {
-		const columns = getOrderedColumns();
-		nodes.tableHeadRow.innerHTML = "";
-		columns.forEach((column) => {
-			const th = document.createElement("th");
-			th.innerHTML = `<span class="head-label">${escapeHtmlText(column.label)}</span><span class="column-resize-handle" title="Ajustar ancho"></span>`;
-			th.dataset.field = column.field;
-			th.draggable = true;
-			th.classList.add("inventory-head-cell");
-			nodes.tableHeadRow.appendChild(th);
-			if (state.columnWidths[column.field]) {
-				applyColumnWidthToField(column.field, state.columnWidths[column.field]);
-			}
-		});
+		tableController?.renderTableHead();
 	}
 
 	function renderRows() {
-		const columns = getOrderedColumns();
-		body.innerHTML = "";
-		state.items.forEach((item, index) => {
-			const tr = document.createElement("tr");
-			tr.dataset.id = item.id;
-			columns.forEach((column) => {
-				const td = document.createElement("td");
-				td.dataset.field = column.field;
-				td.dataset.id = item.id;
-				
-				let displayValue;
-				if (column.field === "item_numero") {
-					displayValue = (state.page - 1) * state.perPage + index + 1;
-				} else {
-					displayValue = formatValue(column.field, item[column.field]);
-				}
-
-				td.textContent = displayValue;
-				td.title = String(displayValue || "");
-				td.classList.add("inventory-cell");
-				if (column.editable) td.classList.add("editable-cell");
-				if (column.field === "item_numero") td.classList.add("fw-bold", "text-primary");
-				if (state.columnWidths[column.field]) {
-					const px = `${state.columnWidths[column.field]}px`;
-					td.style.width = px;
-					td.style.minWidth = px;
-					td.style.maxWidth = px;
-				}
-				tr.appendChild(td);
-			});
-			body.appendChild(tr);
-		});
+		tableController?.renderRows();
 	}
 
 	function renderPaginationMeta() {
-		if (!nodes.pageInfo || !nodes.pageIndicator || !nodes.pagePrev || !nodes.pageNext) return;
-		const total = state.totalItems || 0;
-		const currentPage = Math.max(state.page, 1);
-		const perPage = Math.max(state.perPage, 1);
-		const first = total === 0 ? 0 : (currentPage - 1) * perPage + 1;
-		const last = total === 0 ? 0 : Math.min(currentPage * perPage, total);
-		const totalPages = Math.max(state.totalPages || 1, 1);
-
-		nodes.pageInfo.textContent = `Mostrando ${first} - ${last} de ${total}`;
-		nodes.pageIndicator.textContent = `${currentPage} / ${totalPages}`;
-		nodes.pagePrev.disabled = currentPage <= 1;
-		nodes.pageNext.disabled = currentPage >= totalPages;
-		if (nodes.pageSize) nodes.pageSize.value = String(perPage);
+		tableController?.renderPaginationMeta();
 	}
 
 	function fillSelect(select, list, placeholder = "Todos") {
@@ -866,16 +727,15 @@ async function initInventoryPage() {
 	}
 
 	async function loadStructure() {
-		const response = await api.get("/api/estructura");
-		state.structure = response.data;
+		state.structure = await window.appHelpers.loadStructure(api);
 		fillSelect(nodes.filtroBloque, state.structure, "Todos");
 		updateFloorAndAreaFilters();
 		renderAreaModalSelect();
 	}
 
 	async function loadPreferences() {
-		const response = await api.get("/api/preferencias");
-		const prefOrder = response.data.inventory_column_order;
+		const preferences = await window.appHelpers.loadPreferences(api);
+		const prefOrder = preferences.inventory_column_order;
 		if (Array.isArray(prefOrder) && prefOrder.length) {
 			const valid = prefOrder.filter((field) => INVENTORY_COLUMNS.some((column) => column.field === field));
 			if (valid.length === INVENTORY_COLUMNS.length) {
@@ -883,7 +743,7 @@ async function initInventoryPage() {
 			}
 		}
 
-		const prefWidths = response.data.inventory_column_widths;
+		const prefWidths = preferences.inventory_column_widths;
 		if (prefWidths && typeof prefWidths === "object" && !Array.isArray(prefWidths)) {
 			const widths = {};
 			Object.entries(prefWidths).forEach(([field, rawWidth]) => {
@@ -896,12 +756,12 @@ async function initInventoryPage() {
 			state.columnWidths = widths;
 		}
 
-		const prefPageSize = Number(response.data.inventory_page_size);
+		const prefPageSize = Number(preferences.inventory_page_size);
 		if (Number.isFinite(prefPageSize) && prefPageSize >= 25 && prefPageSize <= 500) {
 			state.perPage = prefPageSize;
 		}
 
-		const prefDensity = response.data.inventory_table_density;
+		const prefDensity = preferences.inventory_table_density;
 		if (prefDensity === "compact" || prefDensity === "normal") {
 			state.tableDensity = prefDensity;
 		}
@@ -1571,10 +1431,12 @@ if (nodes.excelSingleRow) {
 		return params;
 	}
 
-	nodes.exportExcelBtn?.addEventListener("click", () => {
-		const params = getCurrentFilterParams();
-		window.location.href = `/api/inventario/export?${params.toString()}`;
-	});
+	if (typeof window.bindInventarioExport === "function") {
+		window.bindInventarioExport({
+			button: nodes.exportExcelBtn,
+			getCurrentFilterParams,
+		});
+	}
 
 	nodes.toggleDensityBtn?.addEventListener("click", () => {
 		state.tableDensity = state.tableDensity === "compact" ? "normal" : "compact";

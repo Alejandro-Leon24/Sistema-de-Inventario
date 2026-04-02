@@ -1,5 +1,6 @@
 const REQUIRED_VARS_INFORME = {
     entrega: [
+        "numero_acta",
         "fecha_corte",
         "fecha_emision",
         "accion_personal",
@@ -8,11 +9,21 @@ const REQUIRED_VARS_INFORME = {
         "rol_recibe",
         "area_trabajo",
     ],
+    recepcion: ["numero_acta"],
+    movimiento: ["numero_acta"],
+    bajas: ["numero_acta"],
+    traspaso: ["numero_acta"],
+    "fin-gestion": ["numero_acta"],
+    aula: ["numero_acta"],
 };
 
 let previewTimer = null;
 let previewRetryTimer = null;
-const PREVIEW_DELAY_MS = 900;
+let previewNoRenderRetries = 0;
+let previewInFlight = false;
+let previewQueuedWhileBusy = false;
+const PREVIEW_DELAY_MS = 1400;
+const MAX_PREVIEW_NO_RENDER_RETRIES = 3;
 
 const INTERNAL_TEMPLATE_VARS = new Set([
     "tabla_items",
@@ -162,13 +173,13 @@ function buildPreviewPayload(tipo) {
     const columnasSeleccionadas = Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [];
     const required = REQUIRED_VARS_INFORME[tipo] || [];
     const hasRequiredFormValues =
-        required.length > 0 &&
+        required.length === 0 ||
         required.every((key) => String(datosFormulario[key] || "").trim() !== "");
     const hasAnyFormValues = Object.values(datosFormulario).some((v) => String(v || "").trim() !== "");
     const hasTableValues = tablaSeleccionada.length > 0 && columnasSeleccionadas.length > 0;
     // Evita llamadas pesadas mientras el usuario apenas empieza a escribir.
     if (!hasRequiredFormValues && !hasTableValues && !hasAnyFormValues) return null;
-    if (!hasRequiredFormValues && !hasTableValues) return null;
+    if (!hasAnyFormValues && !hasTableValues) return null;
 
     return {
         tipo,
@@ -180,6 +191,11 @@ function buildPreviewPayload(tipo) {
 }
 
 async function triggerPreview() {
+    if (previewInFlight) {
+        previewQueuedWhileBusy = true;
+        return;
+    }
+
     const tipo = getActiveTipoActa();
     const payload = buildPreviewPayload(tipo);
     if (!payload) {
@@ -187,6 +203,7 @@ async function triggerPreview() {
         return;
     }
 
+    previewInFlight = true;
     setPreviewUiState("loading");
 
     try {
@@ -198,29 +215,51 @@ async function triggerPreview() {
         const json = await response.json();
         if (response.ok && json.success && json.pdf_path) {
             clearTimeout(previewRetryTimer);
+            previewNoRenderRetries = 0;
             updatePreviewIframe(json.pdf_path);
             setPreviewUiState("ready");
         } else if (response.ok && json.success && json.html_preview) {
             clearTimeout(previewRetryTimer);
+            previewNoRenderRetries = 0;
             updatePreviewHtml(json.html_preview);
             setPreviewUiState("ready");
-        } else if (response.ok && json.success && !json.pdf_path) {
-            // Si el DOCX se generó pero no hay PDF todavía, informamos claramente y reintentamos 1 vez.
-            setPreviewUiState("loading");
-            setPreviewInfo("Se generó el documento, pero el PDF aún no está disponible. Reintentando...");
+        } else if (response.ok && json.success && !json.pdf_path && !json.html_preview) {
             clearTimeout(previewRetryTimer);
-            previewRetryTimer = setTimeout(() => {
-                queuePreview(0);
-            }, 1800);
+            if (previewNoRenderRetries < MAX_PREVIEW_NO_RENDER_RETRIES) {
+                previewNoRenderRetries += 1;
+                setPreviewUiState("loading");
+                setPreviewInfo("Word está procesando la vista previa. Reintentando...");
+                previewRetryTimer = setTimeout(() => {
+                    queuePreview(0);
+                }, 1200);
+            } else {
+                setPreviewUiState("error");
+                const warning = json && json.preview_warning
+                    ? json.preview_warning
+                    : "No se pudo generar la vista previa en PDF en este momento.";
+                const docxHint = json && json.docx_path
+                    ? `<div class=\"mt-2\"><a class=\"btn btn-sm btn-outline-primary\" href=\"/api/descargar?path=${encodeURIComponent(String(json.docx_path))}\">Descargar DOCX generado</a></div>`
+                    : "";
+                setPreviewError(`${warning}${docxHint}`);
+                previewNoRenderRetries = 0;
+            }
         } else {
             setPreviewUiState("error");
             const msg = json && json.error ? json.error : "No se generó el PDF para vista previa.";
             setPreviewError(msg);
             console.warn("Error en preview:", msg);
+            previewNoRenderRetries = 0;
         }
     } catch (_err) {
         setPreviewUiState("error");
         setPreviewError("Error de red al generar la vista previa.");
+        previewNoRenderRetries = 0;
+    } finally {
+        previewInFlight = false;
+        if (previewQueuedWhileBusy) {
+            previewQueuedWhileBusy = false;
+            queuePreview(150);
+        }
     }
 }
 

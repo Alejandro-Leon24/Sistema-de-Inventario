@@ -1,10 +1,64 @@
 import sqlite3
 import json
+import re
 from pathlib import Path
 
 from database.db import get_db, execute_schema
 
-ALLOWED_ORDER_FIELDS = {"name", "permisos", "edad"}
+AREA_EXPORT_COLUMN_ORDER = [
+    "identificacion_ambiente",
+    "metros_cuadrados",
+    "alto",
+    "senaletica",
+    "cod_senaletica",
+    "infraestructura_fisica",
+    "estado_piso",
+    "material_techo",
+    "puerta",
+    "material_puerta",
+    "responsable_admin_id",
+    "estado_paredes",
+    "estado_techo",
+    "estado_puerta",
+    "cerradura",
+    "nivel_seguridad",
+    "sitio_profesor_mesa",
+    "sitio_profesor_silla",
+    "pc_aula",
+    "proyector",
+    "pantalla_interactiva",
+    "pupitres_cantidad",
+    "pupitres_funcionan",
+    "pupitres_no_funcionan",
+    "pizarra",
+    "pizarra_estado",
+    "ventanas_cantidad",
+    "ventanas_funcionan",
+    "ventanas_no_funcionan",
+    "aa_cantidad",
+    "aa_funcionan",
+    "aa_no_funcionan",
+    "ventiladores_cantidad",
+    "ventiladores_funcionan",
+    "ventiladores_no_funcionan",
+    "wifi",
+    "red_lan",
+    "red_lan_funcionan",
+    "red_lan_no_funcionan",
+    "red_inalambrica_cantidad",
+    "iluminacion_funcionan",
+    "iluminacion_no_funcionan",
+    "luminarias_cantidad",
+    "puntos_electricos",
+    "puntos_electricos_funcionan",
+    "puntos_electricos_no_funcionan",
+    "puntos_electricos_cantidad",
+    "capacidad_aulica",
+    "capacidad_distanciamiento",
+    "ambiente_apto_retorno",
+    "observaciones_detalle",
+]
+
 ALLOWED_INVENTORY_FIELDS = {
     "item_numero",
     "cod_inventario",
@@ -59,14 +113,6 @@ CANONICAL_COLUMN_ORDER = [
 ]
 
 
-def _row_to_persona(row):
-    return {
-        "name": row["name"],
-        "permisos": bool(row["permisos"]),
-        "edad": row["edad"],
-    }
-
-
 def _row_to_inventory_item(row):
     return {
         "id": row["id"],
@@ -111,7 +157,21 @@ def init_schema(base_dir: Path):
     _ensure_area_extended_columns()
     _ensure_inventory_extended_columns()
     _ensure_inventory_codes_allow_duplicates()
+    _ensure_inventory_search_indexes()
+    _ensure_inventory_fts()
+    _ensure_historial_actas_numero_column()
     _seed_default_param_values()
+
+
+def _ensure_historial_actas_numero_column():
+    db = get_db()
+    existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(historial_actas)").fetchall()}
+
+    if "numero_acta" not in existing_columns:
+        db.execute("ALTER TABLE historial_actas ADD COLUMN numero_acta TEXT")
+
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_numero_acta ON historial_actas(numero_acta)")
+    db.commit()
 
 
 def _ensure_university_unique_constraint():
@@ -367,115 +427,6 @@ def _seed_default_param_values():
         ],
     )
     db.commit()
-
-
-def create_bd():
-    get_db()
-
-
-def create_table():
-    db = get_db()
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS Persona (
-            name TEXT,
-            permisos INTEGER,
-            edad INTEGER
-        )
-        """
-    )
-    db.commit()
-
-
-def insert_data(name, permisos, edad):
-    db = get_db()
-    db.execute(
-        "INSERT INTO Persona (name, permisos, edad) VALUES (?, ?, ?)",
-        (name, int(bool(permisos)), edad),
-    )
-    db.commit()
-
-
-def get_personas():
-    db = get_db()
-    try:
-        rows = db.execute(
-            "SELECT name, permisos, edad FROM Persona"
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return []
-    return [_row_to_persona(row) for row in rows]
-
-
-def read_rows():
-    rows = get_personas()
-    print(rows)
-    return rows
-
-
-def insert_rows(persona_list):
-    db = get_db()
-    rows_to_insert = [
-        (name, int(bool(permisos)), edad)
-        for (name, permisos, edad) in persona_list
-    ]
-    db.executemany(
-        "INSERT INTO Persona (name, permisos, edad) VALUES (?, ?, ?)",
-        rows_to_insert,
-    )
-    db.commit()
-
-
-def read_order(field):
-    if field not in ALLOWED_ORDER_FIELDS:
-        raise ValueError(
-            f"Campo de orden no permitido: {field}. "
-            f"Use uno de: {', '.join(sorted(ALLOWED_ORDER_FIELDS))}"
-        )
-
-    db = get_db()
-    rows = db.execute(
-        f"SELECT name, permisos, edad FROM Persona ORDER BY {field}"
-    ).fetchall()
-    personas = [_row_to_persona(row) for row in rows]
-    print(personas)
-    return personas
-
-
-def search(name):
-    db = get_db()
-    rows = db.execute(
-        "SELECT name, permisos, edad FROM Persona WHERE name LIKE ?",
-        (f"{name}%",),
-    ).fetchall()
-    personas = [_row_to_persona(row) for row in rows]
-    print(personas)
-    return personas
-
-
-# Compatibilidad con nombres antiguos
-def createBD():
-    create_bd()
-
-
-def createTable():
-    create_table()
-
-
-def insertData(name, permisos, edad):
-    insert_data(name, permisos, edad)
-
-
-def redRows():
-    return read_rows()
-
-
-def insertRows(persona_list):
-    insert_rows(persona_list)
-
-
-def readOrder(field):
-    return read_order(field)
 
 
 def get_structure():
@@ -798,15 +749,6 @@ def update_floor(floor_id, nombre=None, descripcion=None):
 
 def delete_floor(floor_id):
     db = get_db()
-    db.execute(
-        """
-        DELETE FROM inventario_items
-        WHERE area_id IN (
-            SELECT id FROM areas WHERE piso_id = ?
-        )
-        """,
-        (floor_id,),
-    )
     cursor = db.execute("DELETE FROM pisos WHERE id = ?", (floor_id,))
     db.commit()
     return cursor.rowcount > 0
@@ -896,7 +838,6 @@ def update_area(area_id, nombre=None, descripcion=None, details=None):
 
 def delete_area(area_id):
     db = get_db()
-    db.execute("DELETE FROM inventario_items WHERE area_id = ?", (area_id,))
     cursor = db.execute("DELETE FROM areas WHERE id = ?", (area_id,))
     db.commit()
     return cursor.rowcount > 0
@@ -1008,6 +949,86 @@ def _audit_change(item_id, action, field=None, old_value=None, new_value=None):
     )
 
 
+def _ensure_inventory_search_indexes():
+    db = get_db()
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_descripcion ON inventario_items(descripcion)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_cod_inventario ON inventario_items(cod_inventario)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_cod_esbye ON inventario_items(cod_esbye)")
+    db.commit()
+
+
+def _ensure_inventory_fts():
+    db = get_db()
+    try:
+        db.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS inventario_items_fts
+            USING fts5(
+                descripcion,
+                cod_inventario,
+                cod_esbye,
+                content='inventario_items',
+                content_rowid='id'
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS inventario_items_ai
+            AFTER INSERT ON inventario_items
+            BEGIN
+                INSERT INTO inventario_items_fts(rowid, descripcion, cod_inventario, cod_esbye)
+                VALUES (new.id, new.descripcion, new.cod_inventario, new.cod_esbye);
+            END
+            """
+        )
+        db.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS inventario_items_ad
+            AFTER DELETE ON inventario_items
+            BEGIN
+                INSERT INTO inventario_items_fts(inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye)
+                VALUES('delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye);
+            END
+            """
+        )
+        db.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS inventario_items_au
+            AFTER UPDATE ON inventario_items
+            BEGIN
+                INSERT INTO inventario_items_fts(inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye)
+                VALUES('delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye);
+                INSERT INTO inventario_items_fts(rowid, descripcion, cod_inventario, cod_esbye)
+                VALUES (new.id, new.descripcion, new.cod_inventario, new.cod_esbye);
+            END
+            """
+        )
+        fts_count_row = db.execute("SELECT COUNT(1) AS total FROM inventario_items_fts").fetchone()
+        items_count_row = db.execute("SELECT COUNT(1) AS total FROM inventario_items").fetchone()
+        if (fts_count_row["total"] or 0) != (items_count_row["total"] or 0):
+            db.execute("INSERT INTO inventario_items_fts(inventario_items_fts) VALUES ('rebuild')")
+        db.commit()
+    except sqlite3.OperationalError:
+        # Some SQLite builds might not include FTS5; LIKE fallback remains active.
+        db.rollback()
+
+
+def _has_inventory_fts():
+    db = get_db()
+    row = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inventario_items_fts'"
+    ).fetchone()
+    return row is not None
+
+
+def _build_fts_query(raw_search):
+    tokens = re.findall(r"[\w\-]+", str(raw_search or ""), flags=re.UNICODE)
+    if not tokens:
+        return ""
+    return " AND ".join([f'{token}*' for token in tokens])
+
+
 def _build_inventory_where_clause(filters=None):
     filters = filters or {}
     where_clauses = []
@@ -1023,17 +1044,63 @@ def _build_inventory_where_clause(filters=None):
         where_clauses.append("i.area_id = ?")
         params.append(filters["area_id"])
     if filters.get("search"):
-        token = f"%{filters['search'].strip()}%"
-        where_clauses.append(
-            "(i.descripcion LIKE ? OR i.cod_inventario LIKE ? OR i.cod_esbye LIKE ? OR i.cuenta LIKE ? OR i.ubicacion LIKE ? OR i.marca LIKE ? OR i.modelo LIKE ? OR i.serie LIKE ? OR i.usuario_final LIKE ? OR i.observacion LIKE ? OR i.descripcion_esbye LIKE ? OR i.marca_esbye LIKE ? OR i.modelo_esbye LIKE ? OR i.serie_esbye LIKE ? OR i.ubicacion_esbye LIKE ? OR i.observacion_esbye LIKE ?)"
-        )
-        params.extend([token, token, token, token, token, token, token, token, token, token, token, token, token, token, token, token])
+        raw_search = filters["search"].strip()
+        fts_query = _build_fts_query(raw_search)
+        if fts_query and _has_inventory_fts():
+            where_clauses.append(
+                "i.id IN (SELECT rowid FROM inventario_items_fts WHERE inventario_items_fts MATCH ?)"
+            )
+            params.append(fts_query)
+        else:
+            token = f"%{raw_search}%"
+            where_clauses.append(
+                "(i.descripcion LIKE ? OR i.cod_inventario LIKE ? OR i.cod_esbye LIKE ? OR i.cuenta LIKE ? OR i.ubicacion LIKE ? OR i.marca LIKE ? OR i.modelo LIKE ? OR i.serie LIKE ? OR i.usuario_final LIKE ? OR i.observacion LIKE ? OR i.descripcion_esbye LIKE ? OR i.marca_esbye LIKE ? OR i.modelo_esbye LIKE ? OR i.serie_esbye LIKE ? OR i.ubicacion_esbye LIKE ? OR i.observacion_esbye LIKE ?)"
+            )
+            params.extend([token, token, token, token, token, token, token, token, token, token, token, token, token, token, token, token])
 
     where_sql = ""
     if where_clauses:
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
     return where_sql, params
+
+
+def get_inventory_search_diagnostics(search_text=None):
+    db = get_db()
+    filters = {"search": search_text} if search_text else {}
+    where_sql, params = _build_inventory_where_clause(filters)
+    query = f"""
+        SELECT i.id
+        FROM inventario_items i
+        LEFT JOIN areas a ON a.id = i.area_id
+        LEFT JOIN pisos p ON p.id = a.piso_id
+        LEFT JOIN bloques b ON b.id = p.bloque_id
+        {where_sql}
+        ORDER BY i.item_numero DESC, i.id DESC
+        LIMIT 50
+    """
+    plan_rows = db.execute(f"EXPLAIN QUERY PLAN {query}", params).fetchall()
+    journal_mode_row = db.execute("PRAGMA journal_mode").fetchone()
+    fts_count_row = db.execute(
+        "SELECT COUNT(1) AS total FROM sqlite_master WHERE type='table' AND name='inventario_items_fts'"
+    ).fetchone()
+
+    return {
+        "journal_mode": journal_mode_row[0] if journal_mode_row else None,
+        "fts_available": bool((fts_count_row["total"] if fts_count_row else 0) > 0),
+        "using_fts": "inventario_items_fts" in where_sql,
+        "search_text": search_text,
+        "where_sql": where_sql,
+        "query_plan": [
+            {
+                "id": row[0],
+                "parent": row[1],
+                "notused": row[2],
+                "detail": row[3],
+            }
+            for row in plan_rows
+        ],
+    }
 
 
 def list_inventory_items(filters=None, sort_direction="asc"):
@@ -1216,7 +1283,7 @@ def get_inventory_item(item_id):
     return _row_to_inventory_item(row)
 
 
-def create_inventory_item(payload):
+def create_inventory_item(payload, commit=True):
     db = get_db()
     fields = {k: payload.get(k) for k in ALLOWED_INVENTORY_FIELDS if k in payload}
     fields["item_numero"] = fields.get("item_numero") or _next_item_numero()
@@ -1234,7 +1301,8 @@ def create_inventory_item(payload):
     )
     item_id = cursor.lastrowid
     _audit_change(item_id, "create")
-    db.commit()
+    if commit:
+        db.commit()
     return item_id
 
 
@@ -1354,19 +1422,67 @@ def find_inventory_code_duplicates(cod_inventario=None, cod_esbye=None, limit=50
 
 def bulk_insert_inventory_rows(rows, area_id=None):
     db = get_db()
-    inserted_ids = []
-    for row in rows:
-        payload = {}
-        for index, raw_value in enumerate(row):
-            if index >= len(CANONICAL_COLUMN_ORDER):
-                break
-            payload[CANONICAL_COLUMN_ORDER[index]] = raw_value
-        if area_id and not payload.get("area_id"):
-            payload["area_id"] = area_id
-        item_id = create_inventory_item(payload)
-        inserted_ids.append(item_id)
-    db.commit()
-    return inserted_ids
+    normalized_values = []
+    start_item_numero = _next_item_numero()
+    insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
+    try:
+        db.execute("BEGIN")
+        for row_index, row in enumerate(rows):
+            payload = {
+                "item_numero": start_item_numero + row_index,
+                "area_id": area_id,
+            }
+            for index, raw_value in enumerate(row):
+                if index >= len(CANONICAL_COLUMN_ORDER):
+                    break
+                payload[CANONICAL_COLUMN_ORDER[index]] = raw_value
+            if area_id and not payload.get("area_id"):
+                payload["area_id"] = area_id
+
+            payload["cantidad"] = int(payload.get("cantidad") or 1)
+            payload["valor"] = float(payload.get("valor")) if payload.get("valor") not in (None, "") else None
+            payload["valor_esbye"] = float(payload.get("valor_esbye")) if payload.get("valor_esbye") not in (None, "") else None
+            normalized_values.append(tuple(payload.get(column) for column in insert_columns))
+
+        if normalized_values:
+            placeholders = ", ".join(["?"] * len(insert_columns))
+            db.executemany(
+                f"INSERT INTO inventario_items ({', '.join(insert_columns)}) VALUES ({placeholders})",
+                normalized_values,
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    if not normalized_values:
+        return []
+
+    last_insert_rowid = db.execute("SELECT last_insert_rowid() AS last_id").fetchone()["last_id"]
+    first_insert_rowid = last_insert_rowid - len(normalized_values) + 1
+    return list(range(first_insert_rowid, last_insert_rowid + 1))
+
+
+def iter_inventory_items(filters=None, sort_direction="asc", batch_size=2000):
+    direction = "DESC" if str(sort_direction).lower() == "desc" else "ASC"
+    page = 1
+    per_page = max(int(batch_size or 2000), 1)
+
+    while True:
+        page_result = list_inventory_items_paginated(
+            filters=filters,
+            sort_direction=direction,
+            page=page,
+            per_page=per_page,
+        )
+        items = page_result["items"]
+        if not items:
+            break
+        for item in items:
+            yield item
+        if page >= page_result["total_pages"]:
+            break
+        page += 1
 
 
 def get_user_preferences(user_key):
@@ -1432,30 +1548,47 @@ def replace_column_mappings(mappings):
 def get_all_areas_for_export():
     db = get_db()
     existing_columns = {
-        row["name"]
-        for row in db.execute("PRAGMA table_info(areas)").fetchall()
+        row["name"] for row in db.execute("PRAGMA table_info(areas)").fetchall()
     }
-    
-    col_str = ", ".join([f"a.{col}" for col in existing_columns])
-    
+    ordered_area_columns = [
+        column for column in AREA_EXPORT_COLUMN_ORDER if column in existing_columns
+    ]
+    dynamic_select = ",\n            ".join(
+        [f"a.{column} AS {column}" for column in ordered_area_columns]
+    )
+
+    extra_columns_sql = f",\n            {dynamic_select}" if dynamic_select else ""
+
     query = f"""
         SELECT 
             b.nombre || ' / ' || p.nombre AS ubicacion,
-            a.nombre AS ambiente_aprendizaje,
-            {col_str}
+            a.nombre AS ambiente_aprendizaje
+            {extra_columns_sql}
         FROM areas a
         JOIN pisos p ON p.id = a.piso_id
         JOIN bloques b ON b.id = p.bloque_id
         ORDER BY b.orden, p.orden, a.orden;
     """
-    
+
     rows = db.execute(query).fetchall()
     return [dict(row) for row in rows]
 
 def get_dashboard_stats():
     db = get_db()
     total_bienes = db.execute('SELECT COUNT(1) as total FROM inventario_items').fetchone()['total']
-    return {'cant_bienes': total_bienes or 0, 'cant_actas': 0, 'cant_actas_recibidas': 0}
+    total_actas = db.execute('SELECT COUNT(1) as total FROM historial_actas').fetchone()['total']
+    total_actas_recibidas = db.execute(
+        """
+        SELECT COUNT(1) as total
+        FROM historial_actas
+        WHERE LOWER(COALESCE(tipo_acta, '')) LIKE '%recib%'
+        """
+    ).fetchone()['total']
+    return {
+        'cant_bienes': total_bienes or 0,
+        'cant_actas': total_actas or 0,
+        'cant_actas_recibidas': total_actas_recibidas or 0,
+    }
 
 # --- PERSONAL / ADMINISTRADORES ---
 def get_personal():
@@ -1481,32 +1614,58 @@ def get_or_create_personal(nombre, cargo=None):
     return cursor.lastrowid
 
 # --- HISTORIAL DE ACTAS ---
-def _ensure_historial_table():
-    db = get_db()
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS historial_actas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tipo_acta TEXT NOT NULL,
-        fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        datos_json TEXT,
-        docx_path TEXT,
-        pdf_path TEXT
-    )
-    """)
-    db.commit()
-
-def save_historial_acta(tipo_acta, datos_json, docx_path, pdf_path):
-    _ensure_historial_table()
+def save_historial_acta(tipo_acta, datos_json, docx_path, pdf_path, numero_acta=None):
     db = get_db()
     cursor = db.execute(
-        "INSERT INTO historial_actas (tipo_acta, datos_json, docx_path, pdf_path) VALUES (?, ?, ?, ?)",
-        (tipo_acta, datos_json, docx_path, pdf_path)
+        "INSERT INTO historial_actas (tipo_acta, numero_acta, datos_json, docx_path, pdf_path) VALUES (?, ?, ?, ?, ?)",
+        (tipo_acta, numero_acta, datos_json, docx_path, pdf_path)
     )
     db.commit()
     return cursor.lastrowid
 
+
+def _split_numero_acta(numero_acta):
+    text = str(numero_acta or "").strip()
+    if "-" not in text:
+        return None, None
+    left, right = text.split("-", 1)
+    if not left.isdigit() or not right.isdigit():
+        return None, None
+    return int(left), int(right)
+
+
+def get_max_numero_acta_for_year(year):
+    db = get_db()
+    rows = db.execute(
+        "SELECT numero_acta FROM historial_actas WHERE numero_acta IS NOT NULL AND TRIM(numero_acta) != ''"
+    ).fetchall()
+
+    max_value = 0
+    target_year = int(year)
+    for row in rows:
+        number, num_year = _split_numero_acta(row["numero_acta"])
+        if number is None or num_year != target_year:
+            continue
+        if number > max_value:
+            max_value = number
+    return max_value
+
+
+def get_next_numero_acta(year):
+    max_value = get_max_numero_acta_for_year(year)
+    next_value = max_value + 1
+    return f"{next_value:03d}-{int(year)}"
+
+
+def numero_acta_exists(numero_acta):
+    db = get_db()
+    row = db.execute(
+        "SELECT 1 FROM historial_actas WHERE numero_acta = ? LIMIT 1",
+        (str(numero_acta or "").strip(),),
+    ).fetchone()
+    return bool(row)
+
 def get_historial_actas(tipo_acta=None):
-    _ensure_historial_table()
     db = get_db()
     if tipo_acta:
         rows = db.execute("SELECT * FROM historial_actas WHERE tipo_acta = ? ORDER BY id DESC", (tipo_acta,)).fetchall()
@@ -1515,7 +1674,6 @@ def get_historial_actas(tipo_acta=None):
     return [dict(row) for row in rows]
 
 def delete_historial_acta(acta_id):
-    _ensure_historial_table()
     db = get_db()
     db.execute("DELETE FROM historial_actas WHERE id = ?", (acta_id,))
     db.commit()

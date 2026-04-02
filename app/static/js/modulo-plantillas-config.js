@@ -1,5 +1,6 @@
 const PLANTILLAS_REQUIRED_VARS = {
     entrega: [
+        "numero_acta",
         "fecha_corte",
         "fecha_emision",
         "accion_personal",
@@ -8,13 +9,52 @@ const PLANTILLAS_REQUIRED_VARS = {
         "rol_recibe",
         "area_trabajo",
     ],
-    recepcion: [],
-    movimiento: [],
-    bajas: [],
-    traspaso: [],
-    "fin-gestion": [],
-    aula: [],
+    recepcion: ["numero_acta"],
+    movimiento: ["numero_acta"],
+    bajas: ["numero_acta"],
+    traspaso: ["numero_acta"],
+    "fin-gestion": ["numero_acta"],
+    aula: ["numero_acta"],
 };
+
+let plantillasEventSource = null;
+let plantillasReloadTimer = null;
+
+function scheduleReloadPlantillas(forms, delay = 350) {
+    clearTimeout(plantillasReloadTimer);
+    plantillasReloadTimer = setTimeout(() => {
+        forms.forEach((form) => cargarEstadoPlantilla(form));
+    }, delay);
+}
+
+function initPlantillasSSE(forms) {
+    if (typeof EventSource === "undefined") return;
+    if (plantillasEventSource) return;
+
+    const connect = () => {
+        plantillasEventSource = new EventSource("/api/events");
+
+        plantillasEventSource.addEventListener("templates_changed", () => {
+            scheduleReloadPlantillas(forms, 150);
+        });
+
+        plantillasEventSource.addEventListener("connected", () => {
+            // Conexion activa.
+        });
+
+        plantillasEventSource.onerror = () => {
+            try {
+                plantillasEventSource.close();
+            } catch (_err) {
+                // noop
+            }
+            plantillasEventSource = null;
+            setTimeout(connect, 2500);
+        };
+    };
+
+    connect();
+}
 
 // Compatibilidad para plantillas antiguas de Entrega.
 const PLANTILLAS_REQUIRED_ALIASES = {
@@ -24,11 +64,42 @@ const PLANTILLAS_REQUIRED_ALIASES = {
     },
 };
 
+const COMMON_REQUIRED_ALIASES = {
+    numero_acta: ["numeroacta", "numero_de_acta", "nro_acta", "nroacta", "n_acta"],
+};
+
 function normalizeVarName(value) {
-    return String(value || "").trim().toLowerCase();
+    let v = String(value || "").trim();
+    if (!v) return "";
+
+    // Compatibilidad con expresiones de plantilla: {{ var|filtro }} o {{ var.attr }}.
+    v = v.replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "");
+    v = v.split("|")[0].trim();
+    v = v.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
+    v = v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    v = v.toLowerCase();
+    v = v.replace(/[\s-]+/g, "_");
+    v = v.replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+
+    // Regla directa: cualquier variante que combine 'numero' + 'acta' se trata igual.
+    const compact = v.replace(/[^a-z0-9]/g, "");
+    if (compact.includes("numero") && compact.includes("acta")) return "numero_acta";
+
+    if (v === "numero_de_acta") return "numero_acta";
+    return v;
+}
+
+function canonicalVarKey(value) {
+    const normalized = normalizeVarName(value);
+    if (!normalized) return "";
+
+    // Si viene namespaced (ej. data.numero_acta), usamos la ultima parte util.
+    const lastSegment = normalized.split(".").pop() || normalized;
+    return lastSegment.replace(/[^a-z0-9]/g, "");
 }
 
 function varsBasicas(lista) {
+    const seen = new Set();
     return (lista || [])
         .filter((v) => typeof v === "string")
         .map((v) => normalizeVarName(v))
@@ -40,17 +111,28 @@ function varsBasicas(lista) {
             if (["tabla_items", "tabla_columnas", "tabla_filas", "col.label", "celda"].includes(v)) {
                 return false;
             }
+            const key = canonicalVarKey(v);
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
             return true;
         });
 }
 
 function isRequiredVarPresent(tipo, requiredVar, foundSet) {
     const normalizedRequired = normalizeVarName(requiredVar);
-    if (foundSet.has(normalizedRequired)) return true;
+    const requiredKey = canonicalVarKey(normalizedRequired);
 
+    const foundKeys = new Set(Array.from(foundSet).map((v) => canonicalVarKey(v)).filter(Boolean));
+    if (foundSet.has(normalizedRequired) || foundKeys.has(requiredKey)) return true;
+
+    const commonAliases = COMMON_REQUIRED_ALIASES[normalizedRequired] || [];
     const aliasMap = PLANTILLAS_REQUIRED_ALIASES[tipo] || {};
-    const aliases = aliasMap[normalizedRequired] || [];
-    return aliases.some((alias) => foundSet.has(normalizeVarName(alias)));
+    const aliases = [...commonAliases, ...(aliasMap[normalizedRequired] || [])];
+    return aliases.some((alias) => {
+        const normalizedAlias = normalizeVarName(alias);
+        const aliasKey = canonicalVarKey(normalizedAlias);
+        return foundSet.has(normalizedAlias) || foundKeys.has(aliasKey);
+    });
 }
 
 function pintarEstadoVariables(tipo, container, foundVariables = [], plantillaExiste = false) {
@@ -115,6 +197,34 @@ function pintarBotonSubida(form, existePlantilla) {
     }
 }
 
+function getOrCreatePlantillaInfoNode(form) {
+    let info = form.querySelector(".plantilla-info");
+    if (info) return info;
+
+    info = document.createElement("div");
+    info.className = "plantilla-info mt-2 d-flex align-items-center justify-content-between gap-2";
+    form.appendChild(info);
+    return info;
+}
+
+function pintarInfoPlantilla(form, tipo, existePlantilla) {
+    const info = getOrCreatePlantillaInfoNode(form);
+    if (!info) return;
+
+    if (!existePlantilla) {
+        info.innerHTML = '<span class="small text-muted">No hay plantilla cargada.</span>';
+        return;
+    }
+
+    const safeTipo = encodeURIComponent(String(tipo || ""));
+    info.innerHTML = `
+        <span class="small text-success fw-semibold"><i class="bi bi-check-circle-fill me-1"></i>Plantilla cargada</span>
+        <a class="btn btn-sm btn-outline-secondary" href="/api/plantillas/descargar?tipo=${safeTipo}">
+            <i class="bi bi-download me-1"></i>Descargar actual
+        </a>
+    `;
+}
+
 async function cargarEstadoPlantilla(form) {
     const tipo = form.getAttribute("data-tipo");
     const container = form.nextElementSibling;
@@ -126,13 +236,16 @@ async function cargarEstadoPlantilla(form) {
         if (payload.success && payload.existe) {
             pintarEstadoVariables(tipo, container, payload.variables || [], true);
             pintarBotonSubida(form, true);
+            pintarInfoPlantilla(form, tipo, true);
         } else {
             pintarEstadoVariables(tipo, container, [], false);
             pintarBotonSubida(form, false);
+            pintarInfoPlantilla(form, tipo, false);
         }
     } catch (err) {
         console.error("Error cargando estado de plantilla", err);
         pintarEstadoVariables(tipo, container, [], false);
+        pintarInfoPlantilla(form, tipo, false);
     }
 }
 
@@ -144,7 +257,7 @@ async function subirPlantilla(form) {
     if (!tipo || !input || !container || !btn) return;
 
     if (!input.files.length) {
-        notify("Seleccione el documento primero.", "warning");
+        notify("Seleccione el documento primero.", true);
         return;
     }
 
@@ -164,16 +277,17 @@ async function subirPlantilla(form) {
         const result = await response.json();
 
         if (result.success) {
-            notify("Plantilla analizada y subida correctamente", "success");
+            notify("Plantilla analizada y subida correctamente", false);
             pintarEstadoVariables(tipo, container, result.variables || [], true);
             pintarBotonSubida(form, true);
+            pintarInfoPlantilla(form, tipo, true);
         } else {
-            notify(result.error || "Error al subir plantilla", "danger");
+            notify(result.error || "Error al subir plantilla", true);
             await cargarEstadoPlantilla(form);
         }
     } catch (err) {
         console.error(err);
-        notify("Ocurrió un error de red al subir archivo.", "danger");
+        notify("Ocurrió un error de red al subir archivo.", true);
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
@@ -190,4 +304,6 @@ document.addEventListener("DOMContentLoaded", () => {
             await subirPlantilla(form);
         });
     });
+
+    initPlantillasSSE(forms);
 });

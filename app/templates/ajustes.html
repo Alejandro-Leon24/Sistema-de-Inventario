@@ -14,6 +14,9 @@
                     <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="parametros">
                         <i class="bi bi-gear me-2"></i>Parámetros
                     </button>
+                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="diagnostico">
+                        <i class="bi bi-speedometer2 me-2"></i>Diagnóstico
+                    </button>
                     <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="personal" style="border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem;">
                         <i class="bi bi-people me-2"></i>Personal
                     </button>
@@ -257,6 +260,37 @@
                                 <div id="param-estado-pizarra-list" class="list-group list-group-sm"></div>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="section-diagnostico" class="settings-section d-none">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                    <h3 class="m-0 fw-bold text-primary">Diagnóstico de Búsqueda</h3>
+                </div>
+
+                <div class="card border-0 shadow-sm mb-3">
+                    <div class="card-body">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-9">
+                                <label for="diag-search-input" class="form-label fw-semibold">Término de búsqueda</label>
+                                <input id="diag-search-input" type="text" class="form-control" placeholder="Ejemplo: laptop, proyector, HP">
+                            </div>
+                            <div class="col-md-3 d-grid">
+                                <button id="btn-run-search-diagnostics" type="button" class="btn btn-primary">
+                                    <i class="bi bi-play-circle me-1"></i>Ejecutar diagnóstico
+                                </button>
+                            </div>
+                        </div>
+                        <p class="text-muted small mt-2 mb-0">Consulta el endpoint técnico y muestra modo WAL, uso de FTS y EXPLAIN QUERY PLAN.</p>
+                    </div>
+                </div>
+
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <div id="diag-search-summary" class="mb-3 text-muted small">Aún no se ha ejecutado el diagnóstico.</div>
+                        <label class="form-label fw-semibold">Plan de consulta</label>
+                        <pre id="diag-search-plan" class="bg-light border rounded p-3 small mb-0" style="max-height: 420px; overflow: auto;">[]</pre>
                     </div>
                 </div>
             </div>
@@ -672,6 +706,12 @@
     </div>
 </div>
 
+<script src="{{ url_for('static', filename='js/utils/api.js') }}"></script>
+<script src="{{ url_for('static', filename='js/utils/helpers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/config-ubicaciones.js') }}"></script>
+<script src="{{ url_for('static', filename='js/config-universidad.js') }}"></script>
+<script src="{{ url_for('static', filename='js/config-parametros.js') }}"></script>
+<script src="{{ url_for('static', filename='js/config-personal.js') }}"></script>
 <script src="{{ url_for('static', filename='js/funciones-configuracion.js') }}"></script>
 <script src="{{ url_for('static', filename='js/modulo-plantillas-config.js') }}"></script>
 {% endblock %}

@@ -1,35 +1,14 @@
-const api = {
-async get(url) {
-const response = await fetch(url);
-const payload = await response.json();
-if (!response.ok) throw new Error(payload.error || "Error de servidor");
-return payload;
-},
-async send(url, method, body) {
-const response = await fetch(url, {
-method,
-headers: { "Content-Type": "application/json" },
-body: JSON.stringify(body),
-});
-const payload = await response.json();
-if (!response.ok) throw new Error(payload.error || "Error de servidor");
-return payload;
-},
-};
-
-function escapeHtmlText(value) {
-return String(value || "")
-.replaceAll("&", "&amp;")
-.replaceAll("<", "&lt;")
-.replaceAll(">", "&gt;")
-.replaceAll('"', "&quot;")
-.replaceAll("'", "&#39;");
-}
+const api = window.api;
+const escapeHtmlText = window.appHelpers.escapeHtmlText;
 
 async function initSettingsPage() {
 	// Navigation between sections
 	const menuButtons = document.querySelectorAll(".settings-menu-btn");
 	const sections = document.querySelectorAll(".settings-section");
+	const diagnosticsSearchInput = document.getElementById("diag-search-input");
+	const diagnosticsRunButton = document.getElementById("btn-run-search-diagnostics");
+	const diagnosticsSummary = document.getElementById("diag-search-summary");
+	const diagnosticsPlan = document.getElementById("diag-search-plan");
 
 	menuButtons.forEach((btn) => {
 		btn.addEventListener("click", () => {
@@ -44,6 +23,38 @@ async function initSettingsPage() {
 		});
 	});
 
+	async function runInventoryDiagnostics() {
+		if (!diagnosticsRunButton || !diagnosticsSummary || !diagnosticsPlan) return;
+		diagnosticsRunButton.disabled = true;
+		diagnosticsSummary.textContent = "Ejecutando diagnóstico...";
+		try {
+			const search = (diagnosticsSearchInput?.value || "").trim();
+			const endpoint = `/api/inventario/search-diagnostics?search=${encodeURIComponent(search)}`;
+			const response = await api.get(endpoint);
+			const data = response.data || {};
+			const summaryParts = [
+				`WAL: ${String(data.journal_mode || "desconocido").toUpperCase()}`,
+				`FTS disponible: ${data.fts_available ? "SI" : "NO"}`,
+				`Usando FTS: ${data.using_fts ? "SI" : "NO"}`,
+				`Filtro: ${data.where_sql || "(sin filtros)"}`,
+			];
+			diagnosticsSummary.innerHTML = summaryParts.map((part) => `<div>${escapeHtmlText(part)}</div>`).join("");
+			diagnosticsPlan.textContent = JSON.stringify(data.query_plan || [], null, 2);
+		} catch (error) {
+			diagnosticsSummary.textContent = `Error: ${error.message}`;
+			diagnosticsPlan.textContent = "[]";
+		} finally {
+			diagnosticsRunButton.disabled = false;
+		}
+	}
+
+	diagnosticsRunButton?.addEventListener("click", runInventoryDiagnostics);
+	diagnosticsSearchInput?.addEventListener("keydown", async (event) => {
+		if (event.key !== "Enter") return;
+		event.preventDefault();
+		await runInventoryDiagnostics();
+	});
+
 	// Create shared modal instance (used for both locations and parameters)
 	const modalElement = document.getElementById("modalEntidad");
 	if (!modalElement) return; // Exit if modal doesn't exist
@@ -55,6 +66,7 @@ async function initSettingsPage() {
 	const btnGuardar = document.getElementById("btn-guardar-entidad");
 
 	let modalMode = null; // Track current mode: "bloque", "piso", "area", "estados", etc.
+	let loadParametros = async () => {};
 
 	// Handle locations section (bloques, pisos, areas)
 	const bloquesTabs = document.getElementById("bloques-tabs");
@@ -1202,21 +1214,7 @@ async function initSettingsPage() {
 		}
 
 		async function loadStructure() {
-			const response = await api.get("/api/estructura");
-			state.structure = response.data;
-			
-			// Ordenar bloques, pisos y áreas de forma natural (detecta números automáticamente y alfabetico)
-			state.structure.sort((a, b) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
-			state.structure.forEach(block => {
-				if (block.pisos) {
-					block.pisos.sort((a, b) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
-					block.pisos.forEach(piso => {
-						if (piso.areas) {
-							piso.areas.sort((a, b) => a.nombre.localeCompare(b.nombre, undefined, { numeric: true, sensitivity: 'base' }));
-						}
-					});
-				}
-			});
+			state.structure = await window.appHelpers.loadStructure(api, { sortNatural: true });
 
 			if (!state.activeBlockId && state.structure.length) {
 				state.activeBlockId = state.structure[0].id;
@@ -1399,493 +1397,43 @@ async function initSettingsPage() {
 		}
 	}
 
-	// Handle parameters section (estados, condiciones, cuentas, universidad)
-	const btnAddEstado = document.getElementById("btn-add-estado");
-	const btnAddCondicion = document.getElementById("btn-add-condicion");
-	const btnAddCuenta = document.getElementById("btn-add-cuenta");
-	const btnAddSiNo = document.getElementById("btn-add-si-no");
-	const btnAddEstadoPuerta = document.getElementById("btn-add-estado-puerta");
-	const btnAddCerradura = document.getElementById("btn-add-cerradura");
-	const btnAddEstadoPiso = document.getElementById("btn-add-estado-piso");
-	const btnAddMaterialTecho = document.getElementById("btn-add-material-techo");
-	const btnAddMaterialPuerta = document.getElementById("btn-add-material-puerta");
-	const btnAddEstadoPizarra = document.getElementById("btn-add-estado-pizarra");
-	const btnSaveUniversidad = document.getElementById("btn-save-universidad");
-	const btnEditUniversidad = document.getElementById("btn-edit-universidad");
-	const btnCancelUniversidad = document.getElementById("btn-cancel-universidad");
-	const inputUniversidad = document.getElementById("param-universidad-nombre");
-	
-	const listEstados = document.getElementById("param-estados-list");
-	const listCondiciones = document.getElementById("param-condiciones-list");
-	const listCuentas = document.getElementById("param-cuentas-list");
-	const listSiNo = document.getElementById("param-si-no-list");
-	const listEstadoPuerta = document.getElementById("param-estado-puerta-list");
-	const listCerraduras = document.getElementById("param-cerraduras-list");
-	const listEstadoPiso = document.getElementById("param-estado-piso-list");
-	const listMaterialTecho = document.getElementById("param-material-techo-list");
-	const listMaterialPuerta = document.getElementById("param-material-puerta-list");
-	const listEstadoPizarra = document.getElementById("param-estado-pizarra-list");
-
-	const universidadState = {
-		isEditing: false,
-		originalValue: "",
-	};
-
-	function setUniversidadMode(editing) {
-		universidadState.isEditing = editing;
-		if (!inputUniversidad) return;
-		inputUniversidad.readOnly = !editing;
-		if (editing) {
-			inputUniversidad.focus();
-			inputUniversidad.select();
-		}
-		if (btnEditUniversidad) btnEditUniversidad.classList.toggle("d-none", editing);
-		if (btnSaveUniversidad) btnSaveUniversidad.classList.toggle("d-none", !editing);
-		if (btnCancelUniversidad) btnCancelUniversidad.classList.toggle("d-none", !editing);
-	}
-
-	function applyUniversidadValue(value) {
-		const finalValue = (value || "").trim();
-		if (!inputUniversidad) return;
-		inputUniversidad.value = finalValue;
-		universidadState.originalValue = finalValue;
-		setUniversidadMode(false);
-	}
-
-	async function loadParametros() {
-		try {
-			const [estadosRes, condicionesRes, cuentasRes, siNoRes, estadoPuertaRes, cerradurasRes, estadoPisoRes, materialTechoRes, materialPuertaRes, estadoPizarraRes, universidadRes] = await Promise.all([
-				api.get("/api/parametros/estados"),
-				api.get("/api/parametros/condiciones"),
-				api.get("/api/parametros/cuentas"),
-				api.get("/api/parametros/si_no"),
-				api.get("/api/parametros/estado_puerta"),
-				api.get("/api/parametros/cerraduras"),
-				api.get("/api/parametros/estado_piso"),
-				api.get("/api/parametros/material_techo"),
-				api.get("/api/parametros/material_puerta"),
-				api.get("/api/parametros/estado_pizarra"),
-				api.get("/api/universidad"),
-			]);
-
-			renderParamList(listEstados, estadosRes.data || [], "estados");
-			renderParamList(listCondiciones, condicionesRes.data || [], "condiciones");
-			renderParamList(listCuentas, cuentasRes.data || [], "cuentas");
-			renderParamList(listSiNo, siNoRes.data || [], "si_no");
-			renderParamList(listEstadoPuerta, estadoPuertaRes.data || [], "estado_puerta");
-			renderParamList(listCerraduras, cerradurasRes.data || [], "cerraduras");
-			renderParamList(listEstadoPiso, estadoPisoRes.data || [], "estado_piso");
-			renderParamList(listMaterialTecho, materialTechoRes.data || [], "material_techo");
-			renderParamList(listMaterialPuerta, materialPuertaRes.data || [], "material_puerta");
-			renderParamList(listEstadoPizarra, estadoPizarraRes.data || [], "estado_pizarra");
-			
-			const universidadNombre = (universidadRes.data || {})["nombre_universidad"] || "";
-			applyUniversidadValue(universidadNombre);
-		} catch (error) {
-			console.error("Error loading parametros:", error);
-		}
-	}
-
-	function renderParamList(container, items, paramType) {
-		if (!container) return;
-		container.innerHTML = "";
-		if (!items.length) {
-			container.innerHTML = '<p class="text-muted small mb-0">No hay elementos creados</p>';
-			return;
-		}
-		items.forEach((item) => {
-			const div = document.createElement("div");
-			div.className = "list-group-item d-flex justify-content-between align-items-center";
-			const canDelete = !!item.can_delete;
-			div.innerHTML = `
-				<div>
-					<strong>${item.nombre}</strong>
-					${item.descripcion ? `<div class="text-muted small">${item.descripcion}</div>` : ""}
-				</div>
-				<div class="d-flex gap-2">
-					<button type="button" class="btn btn-sm btn-outline-primary param-edit" data-id="${item.id}" data-name="${escapeHtmlText(item.nombre)}" data-description="${escapeHtmlText(item.descripcion || "")}" data-type="${paramType}">Editar</button>
-					${canDelete ? `<button type="button" class="btn btn-sm btn-outline-danger param-delete" data-id="${item.id}" data-type="${paramType}">Eliminar</button>` : ""}
-				</div>
-			`;
-			container.appendChild(div);
-		});
-
-		container.querySelectorAll(".param-edit").forEach((btn) => {
-			btn.addEventListener("click", async () => {
-				const paramId = btn.dataset.id;
-				const paramTypeInner = btn.dataset.type;
-				const currentName = btn.dataset.name || "";
-				const currentDescription = btn.dataset.description || "";
-				const newName = window.prompt("Editar nombre del parámetro:", currentName);
-				if (newName === null) return;
-				const trimmed = newName.trim();
-				if (!trimmed) {
-					notify("El nombre es obligatorio.", true);
-					return;
+	const parametrosModule = typeof window.initConfigParametrosSection === "function"
+		? window.initConfigParametrosSection({
+			modal,
+			modalTitle,
+			inputNombre,
+			inputDescripcion,
+			setModalMode: (mode) => {
+				modalMode = mode;
+			},
+			registerLoadParametros: (loader) => {
+				if (typeof loader === "function") {
+					loadParametros = loader;
 				}
-				const newDescription = window.prompt("Editar descripción (opcional):", currentDescription) ?? currentDescription;
-				try {
-					await api.send(`/api/parametros/${paramTypeInner}/${paramId}`, "PATCH", {
-						nombre: trimmed,
-						descripcion: newDescription,
-					});
-					await loadParametros();
-				} catch (error) {
-					notify(error.message, true);
-				}
-			});
-		});
+			},
+		})
+		: null;
 
-		// Add delete handlers
-		container.querySelectorAll(".param-delete").forEach((btn) => {
-			btn.addEventListener("click", async () => {
-				const paramId = btn.dataset.id;
-				const paramType = btn.dataset.type;
-				const paramName = btn.dataset.name;
-				
-				if (!window.confirm(`¿Estás seguro de que deseas eliminar este parámetro?\nSi está siendo usado en alguna tabla, la eliminación será rechazada.`)) {
-					return;
-				}
-				
-				try {
-					await api.send(`/api/parametros/${paramType}/${paramId}`, "DELETE", {});
-					await loadParametros();
-				} catch (error) {
-					notify(error.message, true);
-				}
-			});
-		});
-	}
-
-	function openParamModal(tipo) {
-		modalMode = tipo;
-		const mapTitle = {
-			estados: "Agregar Estado",
-			condiciones: "Agregar Condición",
-			cuentas: "Agregar Cuenta",
-			si_no: "Agregar opción Sí/No",
-			estado_puerta: "Agregar estado de puerta",
-			cerraduras: "Agregar tipo de cerradura",
-			estado_piso: "Agregar estado de piso",
-			material_techo: "Agregar material de techo",
-			material_puerta: "Agregar material de puerta",
-			estado_pizarra: "Agregar estado de pizarra",
-		};
-		modalTitle.textContent = mapTitle[tipo] || "Nuevo parámetro";
-		inputNombre.value = "";
-		inputDescripcion.value = "";
-		modal.show();
-	}
-
-	if (btnAddEstado) btnAddEstado.addEventListener("click", () => openParamModal("estados"));
-	if (btnAddCondicion) btnAddCondicion.addEventListener("click", () => openParamModal("condiciones"));
-	if (btnAddCuenta) btnAddCuenta.addEventListener("click", () => openParamModal("cuentas"));
-	if (btnAddSiNo) btnAddSiNo.addEventListener("click", () => openParamModal("si_no"));
-	if (btnAddEstadoPuerta) btnAddEstadoPuerta.addEventListener("click", () => openParamModal("estado_puerta"));
-	if (btnAddCerradura) btnAddCerradura.addEventListener("click", () => openParamModal("cerraduras"));
-	if (btnAddEstadoPiso) btnAddEstadoPiso.addEventListener("click", () => openParamModal("estado_piso"));
-	if (btnAddMaterialTecho) btnAddMaterialTecho.addEventListener("click", () => openParamModal("material_techo"));
-	if (btnAddMaterialPuerta) btnAddMaterialPuerta.addEventListener("click", () => openParamModal("material_puerta"));
-	if (btnAddEstadoPizarra) btnAddEstadoPizarra.addEventListener("click", () => openParamModal("estado_pizarra"));
-
-	if (btnEditUniversidad) {
-		btnEditUniversidad.addEventListener("click", () => {
-			universidadState.originalValue = inputUniversidad?.value?.trim() || "";
-			setUniversidadMode(true);
-		});
-	}
-
-	if (btnCancelUniversidad) {
-		btnCancelUniversidad.addEventListener("click", () => {
-			if (inputUniversidad) inputUniversidad.value = universidadState.originalValue;
-			setUniversidadMode(false);
-		});
-	}
-
-	if (btnSaveUniversidad) {
-		btnSaveUniversidad.addEventListener("click", async () => {
-			const nombre = inputUniversidad?.value?.trim() || "";
-			if (!nombre) {
-				notify("El nombre de la universidad es obligatorio.", true);
-				return;
-			}
-			try {
-				await api.send("/api/universidad", "PATCH", { "nombre_universidad": nombre });
-				applyUniversidadValue(nombre);
-				notify("Universidad guardada correctamente.");
-			} catch (error) {
-				notify(error.message, true);
-			}
-		});
-	}
-
-	if (inputUniversidad) {
-		inputUniversidad.addEventListener("keydown", (event) => {
-			if (!universidadState.isEditing) return;
-			if (event.key === "Escape") {
-				event.preventDefault();
-				if (btnCancelUniversidad) btnCancelUniversidad.click();
-			}
-		});
-	}
-
-	const modalDeletePersonalConfirmEl = document.getElementById("modalConfirmarEliminacionPersonal");
-	const modalDeletePersonalConfirm = modalDeletePersonalConfirmEl ? new bootstrap.Modal(modalDeletePersonalConfirmEl) : null;
-	const modalDeletePersonalTitle = document.getElementById("modalConfirmarEliminacionPersonalLabel");
-	const modalDeletePersonalBody = document.getElementById("modalConfirmarEliminacionPersonalBody");
-	const btnConfirmDeletePersonal = document.getElementById("btn-confirmar-eliminacion-personal");
-
-	async function askDeletePersonalWithImpact(admin) {
-		if (!admin || !modalDeletePersonalConfirm || !modalDeletePersonalBody || !btnConfirmDeletePersonal) {
-			return false;
-		}
-
-		const response = await api.get(`/api/administradores/${admin.id}/impacto`);
-		const impact = response.data || {};
-		const items = Number(impact.items || 0);
-		const areas = Number(impact.areas || 0);
-		const hasRelations = items > 0 || areas > 0;
-
-		modalDeletePersonalTitle.textContent = hasRelations
-			? `Advertencia de eliminación en cascada (Personal)`
-			: `Confirmar eliminación de personal`;
-
-		modalDeletePersonalBody.innerHTML = hasRelations
-			? `
-				<div class="alert alert-warning mb-2">
-					<strong>Ya existen datos relacionados al personal.</strong>
-				</div>
-				<ul class="mb-2">
-					<li>Áreas asociadas: <strong>${areas}</strong></li>
-					<li>Ítems de inventario asignados: <strong>${items}</strong></li>
-				</ul>
-				<p class="mb-1">Si eliminas a <strong>${escapeHtmlText(admin.nombre)}</strong>, se perderá su asignación en las áreas y en el inventario (quedarán vacíos).</p>
-				<p class="text-muted small mb-0">Recomendación: si no deseas afectar reportes existentes, edita sus datos en lugar de Eliminar.</p>
-			`
-			: `<p class="mb-0">¿Seguro que deseas eliminar a <strong>${escapeHtmlText(admin.nombre)}</strong>?</p>`;
-
-		return new Promise((resolve) => {
-			let resolved = false;
-			const onConfirm = () => {
-				if (resolved) return;
-				resolved = true;
-				cleanup();
-				resolve(true);
-				modalDeletePersonalConfirm.hide();
-			};
-			const onHidden = () => {
-				if (resolved) return;
-				resolved = true;
-				cleanup();
-				resolve(false);
-			};
-			const cleanup = () => {
-				btnConfirmDeletePersonal.removeEventListener("click", onConfirm);
-				modalDeletePersonalConfirmEl.removeEventListener("hidden.bs.modal", onHidden);
-			};
-
-			btnConfirmDeletePersonal.addEventListener("click", onConfirm);
-			modalDeletePersonalConfirmEl.addEventListener("hidden.bs.modal", onHidden);
-			modalDeletePersonalConfirm.show();
-		});
-	}
-
-	const personalContainer = document.getElementById("administradores-container");
-	const formPersonal = document.getElementById("form-personal");
-	const inputPersonalNombre = document.getElementById("personal-nombre");
-	const inputPersonalCargo = document.getElementById("personal-cargo");
-	const inputPersonalFacultad = document.getElementById("personal-facultad");
-	const inputPersonalTitulo = document.getElementById("personal-titulo");
-
-	function buildAdminPayloadFromInputs(inputs) {
-		return {
-			nombre: (inputs.nombre?.value || "").trim(),
-			cargo: (inputs.cargo?.value || "").trim(),
-			facultad: (inputs.facultad?.value || "").trim(),
-			titulo_academico: (inputs.titulo?.value || "").trim(),
-			email: null,
-			telefono: null,
-		};
-	}
-
-	function setAdminCardEditMode(card, editing) {
-		card.querySelectorAll("[data-personal-field]").forEach((input) => {
-			input.readOnly = !editing;
-		});
-		const btnEditar = card.querySelector(".btn-admin-edit");
-		const btnGuardar = card.querySelector(".btn-admin-save");
-		const btnCancelar = card.querySelector(".btn-admin-cancel");
-		if (btnEditar) btnEditar.classList.toggle("d-none", editing);
-		if (btnGuardar) btnGuardar.classList.toggle("d-none", !editing);
-		if (btnCancelar) btnCancelar.classList.toggle("d-none", !editing);
-	}
-
-	function cacheOriginalAdminValues(card) {
-		const cache = {};
-		card.querySelectorAll("[data-personal-field]").forEach((input) => {
-			cache[input.dataset.personalField] = input.value;
-		});
-		card.dataset.originalValues = JSON.stringify(cache);
-	}
-
-	function restoreOriginalAdminValues(card) {
-		let cache = {};
-		try {
-			cache = JSON.parse(card.dataset.originalValues || "{}");
-		} catch (_error) {
-			cache = {};
-		}
-		card.querySelectorAll("[data-personal-field]").forEach((input) => {
-			input.value = cache[input.dataset.personalField] || "";
-		});
-	}
-
-	function renderAdministradores(admins) {
-		if (!personalContainer) return;
-		personalContainer.innerHTML = "";
-		if (!admins.length) {
-			personalContainer.innerHTML = '<div class="col-12"><p class="text-muted mb-0">No hay personal registrado.</p></div>';
-			return;
-		}
-
-		admins.forEach((admin) => {
-			const col = document.createElement("div");
-			col.className = "col-md-6";
-			col.innerHTML = `
-				<div class="personal-card" data-admin-id="${admin.id}">
-					<div class="personal-card-head d-flex justify-content-end">
-						<div class="personal-actions">
-							<button type="button" class="btn btn-link btn-sm p-0 btn-admin-edit" title="Editar"><i class="bi bi-pencil"></i></button>
-							<button type="button" class="btn btn-link btn-sm p-0 text-success d-none btn-admin-save" title="Guardar"><i class="bi bi-check-lg"></i></button>
-							<button type="button" class="btn btn-link btn-sm p-0 text-secondary d-none btn-admin-cancel" title="Cancelar"><i class="bi bi-x-lg"></i></button>
-							<button type="button" class="btn btn-link btn-sm p-0 text-danger btn-admin-delete" title="Eliminar"><i class="bi bi-trash"></i></button>
-						</div>
-					</div>
-					<div class="personal-inline-form row">
-						<div class="col-12"> <strong>Nombre:</strong> <input class="form-control" data-personal-field="nombre" value="${escapeHtmlText(admin.nombre || "")}" readonly></div>
-						<div class="col-12"> <strong>Cargo:</strong> <input class="form-control" data-personal-field="cargo" value="${escapeHtmlText(admin.cargo || "")}" readonly></div>
-						<div class="col-12"> <strong>Facultad:</strong> <input class="form-control" data-personal-field="facultad" value="${escapeHtmlText(admin.facultad || "")}" readonly></div>
-						<div class="col-12"> <strong>Título Académico:</strong> <input class="form-control" data-personal-field="titulo" value="${escapeHtmlText(admin.titulo_academico || "")}" readonly></div>
-					</div>
-				</div>
-			`;
-			personalContainer.appendChild(col);
-
-			const card = col.querySelector(".personal-card");
-			if (!card) return;
-			cacheOriginalAdminValues(card);
-
-			const btnEdit = card.querySelector(".btn-admin-edit");
-			const btnSave = card.querySelector(".btn-admin-save");
-			const btnCancel = card.querySelector(".btn-admin-cancel");
-			const btnDelete = card.querySelector(".btn-admin-delete");
-
-			btnEdit?.addEventListener("click", () => {
-				cacheOriginalAdminValues(card);
-				setAdminCardEditMode(card, true);
-				card.querySelector("[data-personal-field='nombre']")?.focus();
-			});
-
-			btnCancel?.addEventListener("click", () => {
-				restoreOriginalAdminValues(card);
-				setAdminCardEditMode(card, false);
-			});
-
-			btnSave?.addEventListener("click", async () => {
-				const payload = buildAdminPayloadFromInputs({
-					nombre: card.querySelector("[data-personal-field='nombre']"),
-					cargo: card.querySelector("[data-personal-field='cargo']"),
-					facultad: card.querySelector("[data-personal-field='facultad']"),
-					titulo: card.querySelector("[data-personal-field='titulo']"),
-				});
-				if (!payload.nombre) {
-					notify("El nombre es obligatorio.", true);
-					return;
-				}
-				try {
-					await api.send(`/api/administradores/${admin.id}`, "PATCH", payload);
-					await loadAdministradores();
-				} catch (error) {
-					notify(error.message, true);
-				}
-			});
-
-			btnDelete?.addEventListener("click", async () => {
-				try {
-					const accepted = await askDeletePersonalWithImpact(admin);
-					if (!accepted) return;
-					
-					await api.send(`/api/administradores/${admin.id}`, "DELETE", {});
-					await loadAdministradores();
-					notify("Registro eliminado.");
-				} catch (error) {
-					notify(error.message, true);
-				}
-			});
-		});
-	}
-
-	async function loadAdministradores() {
-		try {
-			const response = await api.get("/api/administradores");
-			renderAdministradores(response.data || []);
-		} catch (error) {
-			if (personalContainer) {
-				personalContainer.innerHTML = '<div class="col-12"><p class="text-danger mb-0">No se pudo cargar el personal.</p></div>';
-			}
-		}
-	}
-
-	if (formPersonal) {
-		formPersonal.addEventListener("submit", async (event) => {
-			event.preventDefault();
-			const payload = buildAdminPayloadFromInputs({
-				nombre: inputPersonalNombre,
-				cargo: inputPersonalCargo,
-				facultad: inputPersonalFacultad,
-				titulo: inputPersonalTitulo,
-			});
-			if (!payload.nombre) {
-				notify("El nombre es obligatorio.", true);
-				return;
-			}
-			try {
-				await api.send("/api/administradores", "POST", payload);
-				formPersonal.reset();
-				await loadAdministradores();
-				notify("Personal registrado correctamente.");
-			} catch (error) {
-				notify(error.message, true);
-			}
-		});
-	}
+	const personalModule = typeof window.initConfigPersonalSection === "function"
+		? window.initConfigPersonalSection()
+		: null;
 
 	try {
-		await loadParametros();
-		await loadAdministradores();
+		if (typeof parametrosModule?.loadParametros === "function") {
+			await parametrosModule.loadParametros();
+		}
+		if (typeof personalModule?.loadAdministradores === "function") {
+			await personalModule.loadAdministradores();
+		}
 	} catch (error) {
 		console.error("Error initializing parametros:", error);
 	}
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-	// Prevenir ingreso de valores negativos y caracteres no deseados en campos numéricos
-	document.addEventListener('keydown', (e) => {
-		if (e.target.tagName === 'INPUT' && e.target.type === 'number') {
-			if (e.key === '-' || e.key === 'e' || e.key === 'E' || e.key === '+') {
-				e.preventDefault();
-			}
-		}
-	});
-
-	// Limpiar el valor si el usuario logra pegar un número negativo
-	document.addEventListener('input', (e) => {
-		if (e.target.tagName === 'INPUT' && e.target.type === 'number') {
-			if (e.target.value && parseFloat(e.target.value) < 0) {
-				e.target.value = Math.abs(parseFloat(e.target.value));
-			}
-		}
-	});
+	if (typeof window.bindSettingsNumericInputGuards === "function") {
+		window.bindSettingsNumericInputGuards();
+	}
 
 	await initSettingsPage();
 });

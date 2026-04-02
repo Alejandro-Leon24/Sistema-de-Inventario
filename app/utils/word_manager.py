@@ -3,6 +3,8 @@ import re
 import json
 import logging
 import platform
+import shutil
+import subprocess
 import zipfile
 import xml.etree.ElementTree as ET
 import datetime
@@ -11,6 +13,8 @@ import threading
 from docxtpl import DocxTemplate
 from docx import Document
 from docx.shared import Pt
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 # docx2pdf works perfectly on windows if MS Word is installed. 
 # We wrap it in a try-except to log an error gracefully if MS Word is missing.
 try:
@@ -23,6 +27,11 @@ try:
 except ImportError:
     mammoth = None
 
+try:
+    import pythoncom
+except ImportError:
+    pythoncom = None
+
 logger = logging.getLogger(__name__)
 PDF_CONVERT_LOCK = threading.Lock()
 
@@ -31,6 +40,62 @@ _JINJA_TAG_NORMALIZE_PATTERNS = [
     (re.compile(r"\{\%\s*end\s+if\s*\%\}", re.IGNORECASE), "{% endif %}"),
     (re.compile(r"\{\%\s*end\s+block\s*\%\}", re.IGNORECASE), "{% endblock %}"),
 ]
+
+
+def _find_libreoffice_binary():
+    for candidate in ("libreoffice", "soffice", "soffice.exe"):
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return None
+
+
+def _convert_docx_to_pdf_with_libreoffice(docx_path, pdf_path):
+    binary = _find_libreoffice_binary()
+    if not binary:
+        return False, "LibreOffice no está instalado o no está en PATH."
+
+    out_dir = os.path.dirname(pdf_path)
+    basename = os.path.splitext(os.path.basename(docx_path))[0]
+    generated_pdf = os.path.join(out_dir, f"{basename}.pdf")
+
+    cmd = [
+        binary,
+        "--headless",
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        out_dir,
+        docx_path,
+    ]
+
+    try:
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+    except Exception as exc:
+        return False, f"Falló la ejecución de LibreOffice: {exc}"
+
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        detail = stderr or stdout or f"Código de salida {completed.returncode}"
+        return False, f"LibreOffice no pudo convertir el DOCX a PDF. {detail}"
+
+    if not os.path.exists(generated_pdf):
+        return False, "LibreOffice finalizó, pero no se encontró el PDF generado."
+
+    try:
+        if os.path.abspath(generated_pdf) != os.path.abspath(pdf_path):
+            os.replace(generated_pdf, pdf_path)
+    except Exception as exc:
+        return False, f"No se pudo mover el PDF convertido a su destino final: {exc}"
+
+    return True, None
+
+
+def get_preview_unavailable_reason():
+    if mammoth is None:
+        return "No se pudo mostrar la vista previa. Instala mammoth con: pip install mammoth"
+    return None
 
 
 def _normalize_jinja_in_docx(template_path):
@@ -67,12 +132,22 @@ TABLE_STYLES_CONFIG = {
     # Aquí puedes personalizar cómo se renderiza la tabla generada dinámicamente
     "font_size": 10,
     "font_name": "Arial",
-    "header_bg_color": "EFEFEF",
+    "header_bg_color": "D9EAF7",
     "header_font_color": "000000",
     "header_font_bold": True,
     "border_color": "000000",
     "border_size": 4  # tamaño estándar en docx
 }
+
+
+def _set_cell_shading(cell, fill_color_hex):
+    tc = cell._tc
+    tc_pr = tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), str(fill_color_hex or "D9EAF7"))
+    tc_pr.append(shd)
 
 def extract_variables_from_template(file_path):
     """
@@ -178,9 +253,37 @@ def configure_table_data(extraction_data):
     """
     if not extraction_data:
         return []
-    
-    # Podrías agregar más manipulación base según lo que requieras aquí con TABLE_STYLES_CONFIG
-    return extraction_data
+
+    if not isinstance(extraction_data, list):
+        return []
+
+    normalized_rows = []
+    for raw_row in extraction_data:
+        if not isinstance(raw_row, dict):
+            continue
+
+        normalized_row = {}
+        for key, value in raw_row.items():
+            normalized_key = str(key).strip()
+            if not normalized_key:
+                continue
+
+            if value is None:
+                normalized_row[normalized_key] = ""
+            elif isinstance(value, bool):
+                normalized_row[normalized_key] = "Si" if value else "No"
+            elif isinstance(value, float):
+                normalized_row[normalized_key] = f"{value:.2f}".rstrip("0").rstrip(".")
+            else:
+                text_value = str(value).strip()
+                if text_value.lower() in {"none", "null", "nan", "undefined"}:
+                    text_value = ""
+                normalized_row[normalized_key] = text_value
+
+        if normalized_row:
+            normalized_rows.append(normalized_row)
+
+    return normalized_rows
 
 def build_dynamic_table_context(table_rows, table_columns):
     """
@@ -209,7 +312,18 @@ def build_dynamic_table_context(table_rows, table_columns):
 
     filas = []
     for row in table_rows:
-        celdas = [row.get(col["id"], "-") for col in columnas]
+        celdas = []
+        for col in columnas:
+            raw_value = row.get(col["id"], "-")
+            if raw_value is None:
+                celdas.append("-")
+            elif isinstance(raw_value, bool):
+                celdas.append("Si" if raw_value else "No")
+            else:
+                text = str(raw_value).strip()
+                if text.lower() in {"none", "null", "nan", "undefined"}:
+                    text = ""
+                celdas.append(text if text else "-")
         filas.append({"celdas": celdas})
 
     return columnas, filas
@@ -244,9 +358,10 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns):
     # Encabezados
     header_cells = table.rows[0].cells
     for idx, col in enumerate(columnas):
+        _set_cell_shading(header_cells[idx], TABLE_STYLES_CONFIG.get("header_bg_color", "D9EAF7"))
         run = header_cells[idx].paragraphs[0].add_run(str(col.get("label", "")))
-        run.bold = True
-        run.font.size = Pt(10)
+        run.bold = bool(TABLE_STYLES_CONFIG.get("header_font_bold", True))
+        run.font.size = Pt(int(TABLE_STYLES_CONFIG.get("font_size", 10)))
 
     # Filas de datos
     for fila in filas:
@@ -340,7 +455,9 @@ def generate_acta(
         logger.error(f"Error guardando DOCX en {docx_path}: {e}")
         return None, None
         
-    # Guardar pdf (Asume Windows con MS Word instalado para docx2pdf)
+    # Guardar PDF con fallback multiplataforma:
+    # 1) Word/docx2pdf en Windows
+    # 2) LibreOffice headless en cualquier SO
     gen_pdf = False
     converter = convert
     if platform.system() == "Windows" and not converter:
@@ -351,18 +468,35 @@ def generate_acta(
         except Exception:
             converter = None
 
-    if generate_pdf and platform.system() == "Windows" and converter:
-        try:
-            # requiere ruta absoluta para ambos parms!
-            abs_docx = os.path.abspath(docx_path)
-            abs_pdf = os.path.abspath(pdf_path)
-            # Word COM conversion is not reliable in parallel; serialize calls.
+    if generate_pdf:
+        abs_docx = os.path.abspath(docx_path)
+        abs_pdf = os.path.abspath(pdf_path)
+
+        if platform.system() == "Windows" and converter:
+            try:
+                # Word COM conversion is not reliable in parallel; serialize calls.
+                with PDF_CONVERT_LOCK:
+                    if pythoncom:
+                        pythoncom.CoInitialize()
+                    converter(abs_docx, abs_pdf)
+                    if pythoncom:
+                        pythoncom.CoUninitialize()
+                gen_pdf = True
+            except Exception as e:
+                try:
+                    if pythoncom:
+                        pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+                logger.error(f"Error convirtiendo DOCX a PDF con Word/docx2pdf. Detalle: {e}")
+                gen_pdf = False
+
+        if not gen_pdf:
             with PDF_CONVERT_LOCK:
-                converter(abs_docx, abs_pdf)
-            gen_pdf = True
-        except Exception as e:
-            logger.error(f"Error convirtiendo de DOCX a PDF (Word podría no estar instalado o abierto). Detalle: {e}")
-            gen_pdf = False
+                lo_ok, lo_error = _convert_docx_to_pdf_with_libreoffice(abs_docx, abs_pdf)
+            gen_pdf = lo_ok
+            if not gen_pdf:
+                logger.warning(f"No fue posible convertir DOCX a PDF. {lo_error}")
             
     # Retornar rutas locales (absolutas preferiblemente o directas)
     return docx_path, pdf_path if gen_pdf else None

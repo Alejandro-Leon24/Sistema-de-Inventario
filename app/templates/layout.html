@@ -24,23 +24,52 @@
             </button>
 
             <div class="collapse navbar-collapse justify-content-end" id="mainNavbar">
+                {% set current_endpoint = request.endpoint or '' %}
+                {% set current_path = request.path or '/' %}
+                {% set is_inicio = current_endpoint in ['index', 'ui.index'] or current_path == '/' %}
+                {% set is_informe = current_endpoint in ['informe', 'ui.informe']
+                    or current_path.startswith('/informe')
+                    or current_path.startswith('/api/informes')
+                    or current_path.startswith('/api/upload-word-template')
+                    or current_path.startswith('/api/check-word-template')
+                    or current_path.startswith('/api/historial')
+                    or current_path.startswith('/files/inventario/actas')
+                %}
+                {% set is_inventario = current_endpoint in ['inventario_list', 'ui.inventario_list']
+                    or current_path.startswith('/inventario-list')
+                    or current_path.startswith('/inventario-form')
+                    or current_path.startswith('/api/inventario')
+                    or current_path.startswith('/api/preferencias-columnas')
+                    or current_path.startswith('/api/column-mappings')
+                %}
+                {% set is_ajustes = current_endpoint in ['ajustes', 'ui.ajustes']
+                    or current_path.startswith('/ajustes')
+                    or current_path.startswith('/api/parametros')
+                    or current_path.startswith('/api/universidad')
+                    or current_path.startswith('/api/administradores')
+                    or current_path.startswith('/api/personal')
+                    or current_path.startswith('/api/estructura')
+                    or current_path.startswith('/api/bloques')
+                    or current_path.startswith('/api/pisos')
+                    or current_path.startswith('/api/areas')
+                %}
                 <ul class="navbar-nav mb-2 mb-lg-0">
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}"
-                            {% if request.endpoint == 'index' %}aria-current="page"{% endif %}
+                        <a class="nav-link {% if is_inicio %}active{% endif %}"
+                            {% if is_inicio %}aria-current="page"{% endif %}
                             href="{{ url_for('index') }}">Inicio</a>
                     </li>
-                    <li class="nav-item"><a class="nav-link {% if request.endpoint == 'informe' %}active{% endif %}"
-                        {% if request.endpoint == 'informe' %}aria-current="page"{% endif %}
+                    <li class="nav-item"><a class="nav-link {% if is_informe %}active{% endif %}"
+                        {% if is_informe %}aria-current="page"{% endif %}
                         href="{{ url_for('informe') }}">Generar Actas</a></li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'inventario_list' %}active{% endif %}"
-                            {% if request.endpoint == 'inventario_list' %}aria-current="page"{% endif %}
+                        <a class="nav-link {% if is_inventario %}active{% endif %}"
+                            {% if is_inventario %}aria-current="page"{% endif %}
                             href="{{ url_for('inventario_list') }}">Inventario</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'ajustes' %}active{% endif %}"
-                            {% if request.endpoint == 'ajustes' %}aria-current="page"{% endif %}
+                        <a class="nav-link {% if is_ajustes %}active{% endif %}"
+                            {% if is_ajustes %}aria-current="page"{% endif %}
                             href="{{ url_for('ajustes') }}">Configuración</a>
                     </li>
                 </ul>

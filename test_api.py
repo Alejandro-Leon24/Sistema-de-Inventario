@@ -1,58 +1,43 @@
-import json
-import urllib.request
+import pytest
 
-# Crear algunos estados de TEST
-estados = [
-    {"nombre": "Bueno", "descripcion": "En buen estado"},
-    {"nombre": "Regular", "descripcion": "En estado regular"},
-    {"nombre": "Dañado", "descripcion": "Dañado o inservible"},
-]
+from app.app import app as flask_app, BASE_DIR
+from database.controller import init_schema
 
-for estado in estados:
-    data = json.dumps(estado).encode('utf-8')
-    req = urllib.request.Request('http://localhost:5000/api/parametros/estados', 
-                                   data=data, 
-                                   headers={'Content-Type': 'application/json'},
-                                   method='POST')
-    try:
-        with urllib.request.urlopen(req) as response:
-            print(f"Created: {response.read().decode()}")
-    except Exception as e:
-        print(f"Error: {e}")
 
-# Crear condiciones
-condiciones = [
-    {"nombre": "Excelente", "descripcion": "Condición excelente"},
-    {"nombre": "Buena", "descripcion": "Condición buena"},
-    {"nombre": "Aceptable", "descripcion": "Condición aceptable"},
-]
+@pytest.fixture()
+def client(tmp_path):
+    db_path = tmp_path / "test_inventario.db"
+    flask_app.config["TESTING"] = True
+    flask_app.config["DATABASE"] = db_path
 
-for condicion in condiciones:
-    data = json.dumps(condicion).encode('utf-8')
-    req = urllib.request.Request('http://localhost:5000/api/parametros/condiciones', 
-                                   data=data, 
-                                   headers={'Content-Type': 'application/json'},
-                                   method='POST')
-    try:
-        with urllib.request.urlopen(req) as response:
-            print(f"Created condition: {response.read().decode()}")
-    except Exception as e:
-        print(f"Error: {e}")
+    with flask_app.app_context():
+        init_schema(BASE_DIR)
 
-# Verificar que se crearon
-try:
-    with urllib.request.urlopen('http://localhost:5000/api/parametros/estados') as response:
-        data = json.loads(response.read().decode())
-        print("\nEstados creados:")
-        print(json.dumps(data, indent=2))
-except Exception as e:
-    print(f"Error getting states: {e}")
+    with flask_app.test_client() as test_client:
+        yield test_client
 
-# Verificar condiciones
-try:
-    with urllib.request.urlopen('http://localhost:5000/api/parametros/condiciones') as response:
-        data = json.loads(response.read().decode())
-        print("\nCondiciones creadas:")
-        print(json.dumps(data, indent=2))
-except Exception as e:
-    print(f"Error getting conditions: {e}")
+
+def test_create_and_list_estados(client):
+    payload = {"nombre": "Estado QA", "descripcion": "Creado por pytest"}
+    create_response = client.post("/api/parametros/estados", json=payload)
+    assert create_response.status_code in (201, 409)
+
+    list_response = client.get("/api/parametros/estados")
+    assert list_response.status_code == 200
+    data = list_response.get_json()
+    assert "data" in data
+    assert isinstance(data["data"], list)
+    assert any((row.get("nombre") or "").lower() == "estado qa" for row in data["data"])
+
+
+def test_create_and_list_condiciones(client):
+    payload = {"nombre": "Condicion QA", "descripcion": "Creado por pytest"}
+    create_response = client.post("/api/parametros/condiciones", json=payload)
+    assert create_response.status_code in (201, 409)
+
+    list_response = client.get("/api/parametros/condiciones")
+    assert list_response.status_code == 200
+    data = list_response.get_json()
+    assert "data" in data
+    assert isinstance(data["data"], list)
+    assert any((row.get("nombre") or "").lower() == "condicion qa" for row in data["data"])

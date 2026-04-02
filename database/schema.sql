@@ -1,9 +1,3 @@
-CREATE TABLE IF NOT EXISTS Persona (
-    name TEXT,
-    permisos INTEGER,
-    edad INTEGER
-);
-
 CREATE TABLE IF NOT EXISTS bloques (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT NOT NULL UNIQUE,
@@ -197,4 +191,14 @@ CREATE TABLE IF NOT EXISTS administradores (
     activo INTEGER DEFAULT 1,
     creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS historial_actas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo_acta TEXT NOT NULL,
+    numero_acta TEXT UNIQUE,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    datos_json TEXT,
+    docx_path TEXT,
+    pdf_path TEXT
 );

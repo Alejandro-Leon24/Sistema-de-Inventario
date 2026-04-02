@@ -1,3 +1,16 @@
+VALID_PARAM_TYPES = [
+    "estados",
+    "condiciones",
+    "cuentas",
+    "si_no",
+    "estado_puerta",
+    "cerraduras",
+    "estado_piso",
+    "material_techo",
+    "material_puerta",
+    "estado_pizarra",
+]
+
 INVENTORY_EXPORT_COLUMNS = [
     ("item_numero", "ITEM"),
     ("cod_inventario", "CÓD. INV"),
@@ -78,4 +91,10 @@ AREA_EXPORT_COLUMNS = [
     ("capacidad_distanciamiento", "CAPACIDAD DISTANCIAMIENTO"),
     ("ambiente_apto_retorno", "AMBIENTE APTO RETORNO"),
     ("observaciones_detalle", "OBSERVACIONES DETALLE"),
+]
+
+AREA_DETAILS_KEYS = [
+    column
+    for column, _label in AREA_EXPORT_COLUMNS
+    if column not in {"ubicacion", "ambiente_aprendizaje"}
 ]
