@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import threading
 import hashlib
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -12,18 +14,23 @@ import werkzeug.utils
 from flask import Blueprint, jsonify, request, send_file
 
 from database.controller import (
+    count_historial_by_template_snapshot,
     delete_historial_acta,
     get_historial_actas,
     get_max_numero_acta_for_year,
     get_next_numero_acta,
+    get_next_numero_informe_area,
     numero_acta_exists,
+    reserve_numeros_informe_area,
     get_or_create_personal,
     save_historial_acta,
 )
+from database.db import get_db
 
 try:
     from app.utils.word_manager import (
         extract_variables_from_template,
+        generate_area_summary_pdf_fallback,
         generate_acta,
         get_preview_unavailable_reason,
         render_docx_preview_html,
@@ -32,6 +39,7 @@ try:
 except ModuleNotFoundError:
     from utils.word_manager import (
         extract_variables_from_template,
+        generate_area_summary_pdf_fallback,
         generate_acta,
         get_preview_unavailable_reason,
         render_docx_preview_html,
@@ -51,11 +59,90 @@ PREVIEW_OUTPUT_ROOT = os.environ.get(
     "INVENTARIO_PREVIEW_ROOT",
     os.path.join(tempfile.gettempdir(), "inventario_preview"),
 )
+TEMPLATE_HISTORY_ROOT = os.path.join(UPLOAD_FOLDER, "_historial")
+AREA_REPORTS_OUTPUT_ROOT = os.path.join(ACTAS_OUTPUT_ROOT, "informes-area")
 PREVIEW_CACHE = {}
 PREVIEW_CACHE_LOCK = threading.Lock()
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(ACTAS_OUTPUT_ROOT, exist_ok=True)
 os.makedirs(PREVIEW_OUTPUT_ROOT, exist_ok=True)
+os.makedirs(TEMPLATE_HISTORY_ROOT, exist_ok=True)
+os.makedirs(AREA_REPORTS_OUTPUT_ROOT, exist_ok=True)
+
+
+def _safe_filename_part(text):
+    value = str(text or "").strip().lower()
+    value = re.sub(r"[^a-z0-9_-]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value or "sin-numero"
+
+
+def _get_target_areas_for_report(scope, area_id=None, piso_id=None, bloque_id=None):
+    db = get_db()
+    scope_normalized = str(scope or "area").strip().lower()
+    params = []
+    where = ""
+
+    if scope_normalized == "area":
+        if not area_id:
+            raise ValueError("Debe seleccionar un area.")
+        where = "WHERE a.id = ?"
+        params = [int(area_id)]
+    elif scope_normalized == "piso":
+        if not piso_id:
+            raise ValueError("Debe seleccionar un piso.")
+        where = "WHERE p.id = ?"
+        params = [int(piso_id)]
+    elif scope_normalized == "bloque":
+        if not bloque_id:
+            raise ValueError("Debe seleccionar un bloque.")
+        where = "WHERE b.id = ?"
+        params = [int(bloque_id)]
+    else:
+        raise ValueError("Scope invalido. Use area, piso o bloque.")
+
+    rows = db.execute(
+        f"""
+        SELECT
+            a.id AS area_id,
+            a.nombre AS area_nombre,
+            p.id AS piso_id,
+            p.nombre AS piso_nombre,
+            b.id AS bloque_id,
+            b.nombre AS bloque_nombre
+        FROM areas a
+        JOIN pisos p ON p.id = a.piso_id
+        JOIN bloques b ON b.id = p.bloque_id
+        {where}
+        ORDER BY b.nombre ASC, p.nombre ASC, a.nombre ASC
+        """,
+        tuple(params),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _build_area_summary_rows(area_id):
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            COALESCE(NULLIF(TRIM(descripcion), ''), 'SIN DESCRIPCION') AS descripcion,
+            SUM(COALESCE(cantidad, 1)) AS cantidad
+        FROM inventario_items
+        WHERE area_id = ?
+        GROUP BY COALESCE(NULLIF(TRIM(descripcion), ''), 'SIN DESCRIPCION')
+        ORDER BY descripcion ASC
+        """,
+        (int(area_id),),
+    ).fetchall()
+
+    table_data = [
+        {"descripcion": str(row["descripcion"]), "cantidad": int(row["cantidad"] or 0)}
+        for row in rows
+    ]
+    total_bienes = sum(int(item["cantidad"] or 0) for item in table_data)
+    table_data.append({"descripcion": "TOTAL DE BIENES", "cantidad": total_bienes})
+    return table_data, total_bienes
 
 
 def is_output_path_allowed(path):
@@ -65,6 +152,59 @@ def is_output_path_allowed(path):
     actas_root = os.path.abspath(ACTAS_OUTPUT_ROOT)
     preview_root = os.path.abspath(PREVIEW_OUTPUT_ROOT)
     return real_path.startswith(actas_root) or real_path.startswith(preview_root)
+
+
+def is_template_history_path_allowed(path):
+    if not path:
+        return False
+    real_path = os.path.abspath(path)
+    history_root = os.path.abspath(TEMPLATE_HISTORY_ROOT)
+    return real_path.startswith(history_root)
+
+
+def _safe_remove_file(path, allowed_checker):
+    if not path:
+        return False
+    if not allowed_checker(path):
+        return False
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            return True
+    except Exception as exc:
+        logger.warning("No se pudo eliminar archivo %s: %s", path, exc)
+    return False
+
+
+def _cleanup_empty_parent_dirs(path, stop_at):
+    current = os.path.abspath(os.path.dirname(path or ""))
+    stop_dir = os.path.abspath(stop_at)
+    while current.startswith(stop_dir) and current != stop_dir:
+        try:
+            if os.path.isdir(current) and not os.listdir(current):
+                os.rmdir(current)
+                current = os.path.abspath(os.path.dirname(current))
+                continue
+        except Exception:
+            pass
+        break
+
+
+def _snapshot_template_for_historial(tipo, template_path):
+    tipo_safe = werkzeug.utils.secure_filename(str(tipo or "general")) or "general"
+    with open(template_path, "rb") as f:
+        template_bytes = f.read()
+
+    template_hash = hashlib.sha1(template_bytes).hexdigest()
+    target_dir = os.path.join(TEMPLATE_HISTORY_ROOT, tipo_safe)
+    os.makedirs(target_dir, exist_ok=True)
+    snapshot_path = os.path.join(target_dir, f"{template_hash}.docx")
+
+    if not os.path.exists(snapshot_path):
+        shutil.copy2(template_path, snapshot_path)
+
+    variables = extract_variables_from_template(snapshot_path)
+    return template_hash, snapshot_path, variables
 
 
 def _client_preview_key(req):
@@ -269,7 +409,16 @@ def api_generar_informe():
         if campo in context_data and context_data[campo]:
             get_or_create_personal(context_data[campo])
 
+    requested_snapshot_path = str(payload.get("template_snapshot_path") or "").strip()
     template_path = os.path.join(UPLOAD_FOLDER, f"{tipo}.docx")
+    if (
+        not vista_previa
+        and requested_snapshot_path
+        and is_template_history_path_allowed(requested_snapshot_path)
+        and os.path.exists(requested_snapshot_path)
+    ):
+        template_path = requested_snapshot_path
+
     if not os.path.exists(template_path):
         return jsonify({"success": False, "error": "No existe plantilla cargada para este tipo."}), 404
 
@@ -282,8 +431,7 @@ def api_generar_informe():
         if not vista_previa:
             folder_name = f"acta-{tipo_slug}"
             output_dir = os.path.join(ACTAS_OUTPUT_ROOT, folder_name)
-            fecha_hoy = datetime.now().strftime("%d-%m-%Y")
-            doc_name = f"acta-{tipo_slug}-{fecha_hoy}"
+            doc_name = f"acta-{tipo_slug}-{_safe_filename_part(numero_acta)}"
         else:
             client_key = _client_preview_key(request)
             output_dir = os.path.join(PREVIEW_OUTPUT_ROOT, f"acta-{tipo_slug}", client_key)
@@ -324,7 +472,7 @@ def api_generar_informe():
             generate_pdf=generate_pdf,
             doc_name=doc_name,
             use_date_subfolder=False,
-            include_time_suffix=True,
+            include_time_suffix=bool(vista_previa),
         )
 
         if not docx_path:
@@ -347,12 +495,29 @@ def api_generar_informe():
             )
 
         if not vista_previa:
+            plantilla_hash, plantilla_snapshot_path, plantilla_variables = _snapshot_template_for_historial(
+                tipo,
+                template_path,
+            )
             datos_completos = {
                 "formulario": context_data_raw,
                 "tabla": tabla_data,
                 "columnas": tabla_columnas,
+                "plantilla": {
+                    "hash": plantilla_hash,
+                    "snapshot_path": plantilla_snapshot_path,
+                    "variables": plantilla_variables,
+                },
             }
-            save_historial_acta(tipo, json.dumps(datos_completos), docx_path, pdf_path, numero_acta=numero_acta)
+            save_historial_acta(
+                tipo,
+                json.dumps(datos_completos),
+                docx_path,
+                pdf_path,
+                numero_acta=numero_acta,
+                plantilla_hash=plantilla_hash,
+                plantilla_snapshot_path=plantilla_snapshot_path,
+            )
             publish_event("actas_changed", {"tipo": tipo})
         else:
             with PREVIEW_CACHE_LOCK:
@@ -441,8 +606,152 @@ def api_numero_acta_validar():
     )
 
 
+@documents_bp.route("/api/informes/areas/numero-acta/siguiente", methods=["GET"])
+def api_numero_informe_area_siguiente():
+    current_year = datetime.now().year
+    next_num = get_next_numero_informe_area(current_year)
+    return jsonify({"success": True, "numero_acta": next_num, "year": current_year})
+
+
+@documents_bp.route("/api/informes/areas/generar-lote", methods=["POST"])
+def api_generar_informes_areas_lote():
+    payload = request.json or {}
+    scope = str(payload.get("scope") or "area").strip().lower()
+    area_id = payload.get("area_id")
+    piso_id = payload.get("piso_id")
+    bloque_id = payload.get("bloque_id")
+
+    template_path = os.path.join(UPLOAD_FOLDER, "aula.docx")
+    if not os.path.exists(template_path):
+        return jsonify({"success": False, "error": "No existe plantilla cargada para el tipo aula."}), 404
+
+    try:
+        target_areas = _get_target_areas_for_report(
+            scope=scope,
+            area_id=area_id,
+            piso_id=piso_id,
+            bloque_id=bloque_id,
+        )
+    except ValueError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+    if not target_areas:
+        return jsonify({"success": False, "error": "No se encontraron areas para el criterio seleccionado."}), 404
+
+    current_year = datetime.now().year
+    numeros_acta = reserve_numeros_informe_area(current_year, len(target_areas))
+
+    batch_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    lot_dir = os.path.join(AREA_REPORTS_OUTPUT_ROOT, f"lote-{batch_stamp}")
+    os.makedirs(lot_dir, exist_ok=True)
+
+    generated_pdfs = []
+    generated_docx = []
+
+    for idx, area in enumerate(target_areas):
+        numero_acta = numeros_acta[idx]
+        area_nombre = str(area.get("area_nombre") or "AREA SIN NOMBRE")
+        table_data, total_bienes = _build_area_summary_rows(area.get("area_id"))
+
+        context_data = {
+            "numero_acta": numero_acta,
+            "nombre_area": area_nombre,
+            "piso": area.get("piso_nombre"),
+            "bloque": area.get("bloque_nombre"),
+            "total_bienes": total_bienes,
+            "titulo_acta": f"{area_nombre} ACTA No.{numero_acta}",
+        }
+        table_columns = [
+            {"id": "descripcion", "label": "DESCRIPCION"},
+            {"id": "cantidad", "label": "CANTIDAD"},
+        ]
+        doc_name = f"acta-aula-{_safe_filename_part(numero_acta)}"
+
+        docx_path, pdf_path = generate_acta(
+            template_path=template_path,
+            context_data=context_data,
+            table_data=table_data,
+            table_columns=table_columns,
+            output_dir=lot_dir,
+            doc_name=doc_name,
+            generate_pdf=True,
+            use_date_subfolder=False,
+            include_time_suffix=False,
+        )
+
+        if not docx_path:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": f"No se pudo generar DOCX para el area {area_nombre}.",
+                }
+            ), 500
+        if not pdf_path:
+            fallback_pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
+            ok_fallback, fallback_error = generate_area_summary_pdf_fallback(
+                pdf_path=fallback_pdf_path,
+                titulo_acta=context_data.get("titulo_acta"),
+                table_rows=table_data,
+            )
+            if not ok_fallback:
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            f"No se pudo convertir a PDF el informe del area {area_nombre}. "
+                            f"Detalle: {fallback_error or 'sin detalle.'}"
+                        ),
+                    }
+                ), 500
+            pdf_path = fallback_pdf_path
+
+        generated_docx.append(docx_path)
+        generated_pdfs.append(pdf_path)
+
+    zip_path = os.path.join(lot_dir, "informes-area.zip")
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
+        for pdf_path in generated_pdfs:
+            zipf.write(pdf_path, arcname=os.path.basename(pdf_path))
+
+    # Limpieza: mantenemos zip + pdf y eliminamos docx intermedios.
+    for docx_path in generated_docx:
+        _safe_remove_file(docx_path, is_output_path_allowed)
+
+    publish_event(
+        "areas_reports_changed",
+        {
+            "scope": scope,
+            "generated": len(generated_pdfs),
+            "next_numero_acta": get_next_numero_informe_area(current_year),
+        },
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "scope": scope,
+            "total_generated": len(generated_pdfs),
+            "zip_path": zip_path,
+            "start_numero_acta": numeros_acta[0],
+            "end_numero_acta": numeros_acta[-1],
+            "next_numero_acta": get_next_numero_informe_area(current_year),
+        }
+    )
+
+
 @documents_bp.route("/api/historial/<int:acta_id>", methods=["DELETE"])
 def api_delete_historial(acta_id):
-    delete_historial_acta(acta_id)
+    deleted = delete_historial_acta(acta_id)
+
+    if deleted:
+        _safe_remove_file(deleted.get("docx_path"), is_output_path_allowed)
+        _safe_remove_file(deleted.get("pdf_path"), is_output_path_allowed)
+
+        snapshot_path = deleted.get("plantilla_snapshot_path")
+        if snapshot_path:
+            remaining_refs = count_historial_by_template_snapshot(snapshot_path)
+            if remaining_refs <= 0 and _safe_remove_file(snapshot_path, is_template_history_path_allowed):
+                _cleanup_empty_parent_dirs(snapshot_path, TEMPLATE_HISTORY_ROOT)
+
     publish_event("actas_changed", {"acta_id": acta_id, "action": "delete"})
     return jsonify({"success": True})

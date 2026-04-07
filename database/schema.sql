@@ -200,5 +200,15 @@ CREATE TABLE IF NOT EXISTS historial_actas (
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     datos_json TEXT,
     docx_path TEXT,
-    pdf_path TEXT
+    pdf_path TEXT,
+    plantilla_hash TEXT,
+    plantilla_snapshot_path TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_historial_actas_plantilla_snapshot_path ON historial_actas(plantilla_snapshot_path);
+
+CREATE TABLE IF NOT EXISTS secuencia_informes_area (
+    anio INTEGER PRIMARY KEY,
+    ultimo_numero INTEGER NOT NULL DEFAULT 0,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

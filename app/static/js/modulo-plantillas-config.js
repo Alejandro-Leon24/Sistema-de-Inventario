@@ -14,7 +14,7 @@ const PLANTILLAS_REQUIRED_VARS = {
     bajas: ["numero_acta"],
     traspaso: ["numero_acta"],
     "fin-gestion": ["numero_acta"],
-    aula: ["numero_acta"],
+    aula: ["numero_acta", "titulo_acta", "tabla_dinamica"],
 };
 
 let plantillasEventSource = null;
@@ -139,6 +139,12 @@ function pintarEstadoVariables(tipo, container, foundVariables = [], plantillaEx
     const required = PLANTILLAS_REQUIRED_VARS[tipo] || [];
     const basicas = varsBasicas(foundVariables);
     const basicasSet = new Set(basicas);
+    const allFoundSet = new Set(
+        (foundVariables || [])
+            .filter((v) => typeof v === "string")
+            .map((v) => normalizeVarName(v))
+            .filter(Boolean)
+    );
 
     container.innerHTML = '<strong class="mb-2 d-block text-dark mt-2">Variables Obligatorias:</strong>';
 
@@ -152,7 +158,7 @@ function pintarEstadoVariables(tipo, container, foundVariables = [], plantillaEx
     required.forEach((v) => {
         const span = document.createElement("span");
         span.textContent = `{{${v}}}`;
-        const ok = plantillaExiste && isRequiredVarPresent(tipo, v, basicasSet);
+        const ok = plantillaExiste && isRequiredVarPresent(tipo, v, allFoundSet.size ? allFoundSet : basicasSet);
         span.className = ok
             ? "badge bg-success me-2 mb-2 p-2 shadow-sm"
             : "badge bg-danger me-2 mb-2 p-2 shadow-sm";

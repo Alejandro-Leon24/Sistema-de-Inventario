@@ -32,6 +32,13 @@ try:
 except ImportError:
     pythoncom = None
 
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+except ImportError:
+    A4 = None
+    canvas = None
+
 logger = logging.getLogger(__name__)
 PDF_CONVERT_LOCK = threading.Lock()
 
@@ -98,6 +105,71 @@ def get_preview_unavailable_reason():
     return None
 
 
+def generate_area_summary_pdf_fallback(pdf_path, titulo_acta, table_rows):
+    """
+    Fallback puro Python para generar PDF cuando no hay Word/LibreOffice.
+    table_rows: [{'descripcion': str, 'cantidad': int}, ...]
+    """
+    if not canvas or not A4:
+        return False, "No está instalada la librería reportlab."
+
+    try:
+        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        c = canvas.Canvas(pdf_path, pagesize=A4)
+        page_w, page_h = A4
+
+        margin_x = 42
+        y = page_h - 56
+
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(margin_x, y, str(titulo_acta or "ACTA"))
+        y -= 24
+
+        # Encabezado de tabla
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(margin_x, y, "DESCRIPCION")
+        c.drawRightString(page_w - margin_x, y, "CANTIDAD")
+        y -= 8
+        c.line(margin_x, y, page_w - margin_x, y)
+        y -= 14
+
+        c.setFont("Helvetica", 10)
+        for row in table_rows or []:
+            descripcion = str((row or {}).get("descripcion") or "-")
+            cantidad = str((row or {}).get("cantidad") or 0)
+
+            if y < 60:
+                c.showPage()
+                y = page_h - 56
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(margin_x, y, "DESCRIPCION")
+                c.drawRightString(page_w - margin_x, y, "CANTIDAD")
+                y -= 8
+                c.line(margin_x, y, page_w - margin_x, y)
+                y -= 14
+                c.setFont("Helvetica", 10)
+
+            # recorte simple de linea larga
+            if len(descripcion) > 95:
+                descripcion = f"{descripcion[:92]}..."
+
+            is_total = descripcion.strip().upper() == "TOTAL DE BIENES"
+            if is_total:
+                c.setFont("Helvetica-Bold", 10)
+
+            c.drawString(margin_x, y, descripcion)
+            c.drawRightString(page_w - margin_x, y, cantidad)
+            y -= 14
+
+            if is_total:
+                c.setFont("Helvetica", 10)
+
+        c.save()
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
 def _normalize_jinja_in_docx(template_path):
     """
     Crea una copia temporal del DOCX corrigiendo variantes comunes de tags Jinja
@@ -156,7 +228,7 @@ def extract_variables_from_template(file_path):
     """
     pattern = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_\.-]*)\s*\}\}")
 
-    internal_vars = {"tabla_items", "tabla_columnas", "tabla_filas", "tabla_dinamica", "celda"}
+    internal_vars = {"tabla_items", "tabla_columnas", "tabla_filas", "celda"}
 
     def _normalize(found):
         normalized = []
@@ -353,7 +425,13 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns):
             return None
         raise
     table = subdoc.add_table(rows=1, cols=len(columnas))
-    table.style = "Table Grid"
+    # Algunas plantillas no incluyen el estilo en ingles; degradamos con fallback seguro.
+    for style_name in ("Table Grid", "Tabla con cuadricula", "Tabla con cuadrícula"):
+        try:
+            table.style = style_name
+            break
+        except Exception:
+            continue
 
     # Encabezados
     header_cells = table.rows[0].cells

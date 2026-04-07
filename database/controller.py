@@ -160,6 +160,8 @@ def init_schema(base_dir: Path):
     _ensure_inventory_search_indexes()
     _ensure_inventory_fts()
     _ensure_historial_actas_numero_column()
+    _ensure_historial_actas_template_columns()
+    _ensure_informes_area_sequence_table()
     _seed_default_param_values()
 
 
@@ -171,6 +173,35 @@ def _ensure_historial_actas_numero_column():
         db.execute("ALTER TABLE historial_actas ADD COLUMN numero_acta TEXT")
 
     db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_numero_acta ON historial_actas(numero_acta)")
+    db.commit()
+
+
+def _ensure_historial_actas_template_columns():
+    db = get_db()
+    existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(historial_actas)").fetchall()}
+
+    if "plantilla_hash" not in existing_columns:
+        db.execute("ALTER TABLE historial_actas ADD COLUMN plantilla_hash TEXT")
+    if "plantilla_snapshot_path" not in existing_columns:
+        db.execute("ALTER TABLE historial_actas ADD COLUMN plantilla_snapshot_path TEXT")
+
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_historial_actas_plantilla_snapshot_path ON historial_actas(plantilla_snapshot_path)"
+    )
+    db.commit()
+
+
+def _ensure_informes_area_sequence_table():
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS secuencia_informes_area (
+            anio INTEGER PRIMARY KEY,
+            ultimo_numero INTEGER NOT NULL DEFAULT 0,
+            actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
     db.commit()
 
 
@@ -1614,11 +1645,37 @@ def get_or_create_personal(nombre, cargo=None):
     return cursor.lastrowid
 
 # --- HISTORIAL DE ACTAS ---
-def save_historial_acta(tipo_acta, datos_json, docx_path, pdf_path, numero_acta=None):
+def save_historial_acta(
+    tipo_acta,
+    datos_json,
+    docx_path,
+    pdf_path,
+    numero_acta=None,
+    plantilla_hash=None,
+    plantilla_snapshot_path=None,
+):
     db = get_db()
     cursor = db.execute(
-        "INSERT INTO historial_actas (tipo_acta, numero_acta, datos_json, docx_path, pdf_path) VALUES (?, ?, ?, ?, ?)",
-        (tipo_acta, numero_acta, datos_json, docx_path, pdf_path)
+        """
+        INSERT INTO historial_actas (
+            tipo_acta,
+            numero_acta,
+            datos_json,
+            docx_path,
+            pdf_path,
+            plantilla_hash,
+            plantilla_snapshot_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            tipo_acta,
+            numero_acta,
+            datos_json,
+            docx_path,
+            pdf_path,
+            plantilla_hash,
+            plantilla_snapshot_path,
+        ),
     )
     db.commit()
     return cursor.lastrowid
@@ -1667,13 +1724,88 @@ def numero_acta_exists(numero_acta):
 
 def get_historial_actas(tipo_acta=None):
     db = get_db()
+    order_sql = """
+        ORDER BY
+            CASE
+                WHEN numero_acta IS NOT NULL AND instr(numero_acta, '-') > 0 THEN CAST(substr(numero_acta, instr(numero_acta, '-') + 1) AS INTEGER)
+                ELSE 0
+            END DESC,
+            CASE
+                WHEN numero_acta IS NOT NULL AND instr(numero_acta, '-') > 0 THEN CAST(substr(numero_acta, 1, instr(numero_acta, '-') - 1) AS INTEGER)
+                ELSE 0
+            END DESC,
+            id DESC
+    """
     if tipo_acta:
-        rows = db.execute("SELECT * FROM historial_actas WHERE tipo_acta = ? ORDER BY id DESC", (tipo_acta,)).fetchall()
+        rows = db.execute(
+            f"SELECT * FROM historial_actas WHERE tipo_acta = ? {order_sql}",
+            (tipo_acta,),
+        ).fetchall()
     else:
-        rows = db.execute("SELECT * FROM historial_actas ORDER BY id DESC").fetchall()
+        rows = db.execute(f"SELECT * FROM historial_actas {order_sql}").fetchall()
     return [dict(row) for row in rows]
+
+
+def count_historial_by_template_snapshot(plantilla_snapshot_path):
+    db = get_db()
+    row = db.execute(
+        "SELECT COUNT(1) AS total FROM historial_actas WHERE plantilla_snapshot_path = ?",
+        (str(plantilla_snapshot_path or "").strip(),),
+    ).fetchone()
+    return int(row["total"] or 0)
+
+
+def get_next_numero_informe_area(year):
+    db = get_db()
+    target_year = int(year)
+    row = db.execute(
+        "SELECT ultimo_numero FROM secuencia_informes_area WHERE anio = ?",
+        (target_year,),
+    ).fetchone()
+    next_num = (int(row["ultimo_numero"]) + 1) if row else 1
+    return f"{next_num:03d}-{target_year}"
+
+
+def reserve_numeros_informe_area(year, count):
+    safe_count = max(int(count or 0), 0)
+    if safe_count <= 0:
+        return []
+
+    db = get_db()
+    target_year = int(year)
+
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row = db.execute(
+            "SELECT ultimo_numero FROM secuencia_informes_area WHERE anio = ?",
+            (target_year,),
+        ).fetchone()
+        last_num = int(row["ultimo_numero"]) if row else 0
+        next_last = last_num + safe_count
+
+        if row:
+            db.execute(
+                "UPDATE secuencia_informes_area SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE anio = ?",
+                (next_last, target_year),
+            )
+        else:
+            db.execute(
+                "INSERT INTO secuencia_informes_area (anio, ultimo_numero) VALUES (?, ?)",
+                (target_year, next_last),
+            )
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return [f"{n:03d}-{target_year}" for n in range(last_num + 1, next_last + 1)]
+
 
 def delete_historial_acta(acta_id):
     db = get_db()
+    row = db.execute("SELECT * FROM historial_actas WHERE id = ?", (acta_id,)).fetchone()
+    deleted = dict(row) if row else None
     db.execute("DELETE FROM historial_actas WHERE id = ?", (acta_id,))
     db.commit()
+    return deleted

@@ -29,6 +29,85 @@ let downloadProgressValue = 0;
 let isGeneratingActa = false;
 let closeDownloadModalTimer = null;
 let informeEventSource = null;
+let activeHistorialTemplateSnapshotPath = null;
+
+function shouldRefreshNumeroActaInput(input, force = false) {
+    if (!input) return false;
+    if (force) return true;
+
+    const current = String(input.value || "").trim();
+    if (!current) return true;
+
+    const lastAuto = String(input.dataset.lastAutoNumeroActa || "").trim();
+    // Si el usuario sigue con el valor autocompletado, se puede refrescar en caliente.
+    return Boolean(lastAuto) && current === lastAuto;
+}
+
+function setNumeroActaInputValue(input, value, markAsAuto = true) {
+    if (!input) return;
+    input.value = String(value || "").trim();
+    if (markAsAuto) {
+        input.dataset.lastAutoNumeroActa = input.value;
+    }
+}
+
+function initNumeroActaTracking() {
+    document.querySelectorAll('input[name="numero_acta"]').forEach((input) => {
+        input.addEventListener("input", () => {
+            const current = String(input.value || "").trim();
+            if (!current) {
+                input.dataset.lastAutoNumeroActa = "";
+                return;
+            }
+            const lastAuto = String(input.dataset.lastAutoNumeroActa || "").trim();
+            if (lastAuto && current === lastAuto) return;
+            // Usuario modifico manualmente: ya no se sobreescribe en refresh suave.
+            input.dataset.lastAutoNumeroActa = "";
+        });
+    });
+}
+
+async function refreshNumeroActaFormularioActivo(force = false) {
+    const activeBtn = document.querySelector(".settings-menu-btn.active");
+    const tipo = (activeBtn?.id || "tab-entrega").replace("tab-", "");
+    const form = document.getElementById(`form-${tipo}`);
+    if (!form) return;
+
+    if (tipo === "aula") {
+        await refreshNumeroActaAula(force);
+        return;
+    }
+
+    const input = form.querySelector('input[name="numero_acta"]');
+    if (!input) return;
+    if (!shouldRefreshNumeroActaInput(input, force)) return;
+
+    const nextNumero = await obtenerNumeroActaSiguiente();
+    if (nextNumero) setNumeroActaInputValue(input, nextNumero, true);
+}
+
+async function obtenerNumeroActaAulaSiguiente() {
+    try {
+        const response = await fetch("/api/informes/areas/numero-acta/siguiente");
+        const payload = await response.json();
+        if (!response.ok || !payload.success) return null;
+        return payload.numero_acta || null;
+    } catch (_err) {
+        return null;
+    }
+}
+
+async function refreshNumeroActaAula(force = false) {
+    const input = document.querySelector('#form-aula input[name="numero_acta"]');
+    if (!input) return;
+    if (!shouldRefreshNumeroActaInput(input, force)) return;
+
+    const nextNumero = await obtenerNumeroActaAulaSiguiente();
+    if (nextNumero) {
+        setNumeroActaInputValue(input, nextNumero, true);
+        updateAulaBatchPreviewCard();
+    }
+}
 
 async function obtenerNumeroActaSiguiente() {
     try {
@@ -49,7 +128,7 @@ async function autocompletarNumeroActa(form) {
 
     const nextNumero = await obtenerNumeroActaSiguiente();
     if (nextNumero) {
-        input.value = nextNumero;
+        setNumeroActaInputValue(input, nextNumero, true);
     }
 }
 
@@ -89,26 +168,229 @@ async function validarNumeroActa(numeroActa) {
 }
 
 function initNumeroActaOnTabs() {
-    const refreshActiveFormNumero = async () => {
-        const activeBtn = document.querySelector(".settings-menu-btn.active");
-        const tipo = (activeBtn?.id || "tab-entrega").replace("tab-", "");
-        const form = document.getElementById(`form-${tipo}`);
-        await autocompletarNumeroActa(form);
-    };
-
-    refreshActiveFormNumero();
+    refreshNumeroActaFormularioActivo(false);
     document.querySelectorAll(".settings-menu-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
             setTimeout(() => {
-                refreshActiveFormNumero();
+                refreshNumeroActaFormularioActivo(false);
             }, 20);
         });
     });
 }
 
+function getAulaBatchScopePayload() {
+    const scope = String(document.getElementById("aula-scope")?.value || "area").trim().toLowerCase();
+    const bloqueId = Number(document.getElementById("aula-bloque")?.value || 0);
+    const pisoId = Number(document.getElementById("aula-piso")?.value || 0);
+    const areaId = Number(document.getElementById("aula-area")?.value || 0);
+
+    if (scope === "bloque" && !bloqueId) {
+        return { error: "Seleccione un bloque para generar informes por bloque." };
+    }
+    if (scope === "piso" && !pisoId) {
+        return { error: "Seleccione un piso para generar informes por piso." };
+    }
+    if (scope === "area" && !areaId) {
+        return { error: "Seleccione un área para generar el informe." };
+    }
+
+    return {
+        scope,
+        bloque_id: bloqueId || null,
+        piso_id: pisoId || null,
+        area_id: areaId || null,
+    };
+}
+
+function applyAulaScopeMode() {
+    const scope = String(document.getElementById("aula-scope")?.value || "area").trim().toLowerCase();
+    const bloqueSel = document.getElementById("aula-bloque");
+    const pisoSel = document.getElementById("aula-piso");
+    const areaSel = document.getElementById("aula-area");
+    if (!bloqueSel || !pisoSel || !areaSel) return;
+
+    if (scope === "bloque") {
+        pisoSel.value = "";
+        areaSel.value = "";
+        pisoSel.disabled = true;
+        areaSel.disabled = true;
+        return;
+    }
+
+    if (scope === "piso") {
+        areaSel.value = "";
+        pisoSel.disabled = !String(bloqueSel.value || "").trim();
+        areaSel.disabled = true;
+        return;
+    }
+
+    // scope area
+    pisoSel.disabled = !String(bloqueSel.value || "").trim();
+    areaSel.disabled = !String(pisoSel.value || "").trim();
+}
+
+function getAulaBatchTargetCount() {
+    const scope = String(document.getElementById("aula-scope")?.value || "area").trim().toLowerCase();
+    const bloqueId = Number(document.getElementById("aula-bloque")?.value || 0);
+    const pisoId = Number(document.getElementById("aula-piso")?.value || 0);
+    const areaId = Number(document.getElementById("aula-area")?.value || 0);
+
+    if (scope === "bloque") {
+        const bloque = structureData.find((b) => Number(b.id) === bloqueId);
+        if (!bloque) return 0;
+        return (bloque.pisos || []).reduce((acc, piso) => acc + ((piso.areas || []).length), 0);
+    }
+
+    if (scope === "piso") {
+        for (const bloque of structureData) {
+            const piso = (bloque.pisos || []).find((p) => Number(p.id) === pisoId);
+            if (piso) return (piso.areas || []).length;
+        }
+        return 0;
+    }
+
+    return areaId > 0 ? 1 : 0;
+}
+
+function parseNumeroActa(value) {
+    const text = String(value || "").trim();
+    const parts = text.split("-");
+    if (parts.length !== 2) return null;
+
+    const seq = Number(parts[0]);
+    const year = Number(parts[1]);
+    if (!Number.isFinite(seq) || !Number.isFinite(year) || seq <= 0 || year <= 0) return null;
+    return { seq, year };
+}
+
+function buildNumeroActaRange(startNumeroActa, count) {
+    const parsed = parseNumeroActa(startNumeroActa);
+    const safeCount = Math.max(Number(count || 0), 0);
+    if (!parsed || safeCount <= 0) return null;
+
+    const start = `${String(parsed.seq).padStart(3, "0")}-${parsed.year}`;
+    const endSeq = parsed.seq + safeCount - 1;
+    const end = `${String(endSeq).padStart(3, "0")}-${parsed.year}`;
+    return { start, end };
+}
+
+function updateAulaBatchPreviewCard() {
+    applyAulaScopeMode();
+    const countEl = document.getElementById("aula-batch-preview-count");
+    const labelEl = document.getElementById("aula-batch-preview-label");
+    const scope = String(document.getElementById("aula-scope")?.value || "area").trim().toLowerCase();
+    const count = getAulaBatchTargetCount();
+    const currentNumeroActa = String(document.querySelector('#form-aula input[name="numero_acta"]')?.value || "").trim();
+    const estimatedRange = buildNumeroActaRange(currentNumeroActa, count);
+
+    if (countEl) {
+        countEl.textContent = String(count);
+        countEl.classList.remove("bg-secondary", "bg-danger", "bg-success");
+        countEl.classList.add(count > 0 ? "bg-success" : "bg-danger");
+    }
+
+    if (labelEl) {
+        if (count <= 0) {
+            labelEl.textContent = "No hay áreas seleccionadas para generar.";
+        } else {
+            const scopeText = scope === "bloque" ? "bloque" : scope === "piso" ? "piso" : "área";
+            if (estimatedRange) {
+                labelEl.textContent = `Se generarán ${count} PDF(s) por ${scopeText}. Rango estimado: ${estimatedRange.start} a ${estimatedRange.end}.`;
+            } else {
+                labelEl.textContent = `Se generarán ${count} PDF(s) por ${scopeText}.`;
+            }
+        }
+    }
+
+    document.querySelectorAll(".btn-generar-lote-aula").forEach((btn) => {
+        btn.disabled = count <= 0;
+    });
+}
+
+async function generarLoteAula() {
+    const scopePayload = getAulaBatchScopePayload();
+    if (scopePayload.error) {
+        notify(scopePayload.error, true);
+        return;
+    }
+
+    // Si no existe plantilla de Aula, no mostramos modal de progreso.
+    try {
+        const plantillaRes = await fetch("/api/plantillas/estado?tipo=aula");
+        const plantillaPayload = await plantillaRes.json();
+        if (!plantillaRes.ok || !plantillaPayload.success || !plantillaPayload.existe) {
+            notify("No existe plantilla cargada para Aula. Cárguela en Configuración.", true);
+            return;
+        }
+    } catch (_err) {
+        notify("No se pudo verificar la plantilla de Aula.", true);
+        return;
+    }
+
+    const modal = showDownloadProgressModal();
+    startDownloadProgress();
+    try {
+        notify("Generando PDFs masivos por ubicación...");
+        const response = await fetch("/api/informes/areas/generar-lote", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(scopePayload),
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            notify(result.error || "No se pudo generar el lote de informes.", true);
+            return;
+        }
+
+        finishDownloadProgress();
+        if (result.zip_path) {
+            const a = document.createElement("a");
+            a.href = `/api/descargar?path=${encodeURIComponent(result.zip_path)}`;
+            a.style.display = "none";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        if (result.next_numero_acta) {
+            const aulaInput = document.querySelector('#form-aula input[name="numero_acta"]');
+            setNumeroActaInputValue(aulaInput, result.next_numero_acta, true);
+            updateAulaBatchPreviewCard();
+        } else {
+            await refreshNumeroActaAula(true);
+        }
+
+        notify(
+            `Se generaron ${result.total_generated || 0} PDFs (${result.start_numero_acta || "-"} a ${result.end_numero_acta || "-"}).`
+        );
+    } catch (_err) {
+        notify("Error de red al generar informes masivos por ubicación.", true);
+    } finally {
+        clearTimeout(closeDownloadModalTimer);
+        closeDownloadModalTimer = setTimeout(() => {
+            hideDownloadProgressModal(modal);
+        }, 300);
+    }
+}
+
 function setupTabs() {
     const tabs = document.querySelectorAll(".settings-menu-btn");
     const sections = document.querySelectorAll(".tab-section");
+    const formContainer = document.getElementById("form-container");
+    const previewColumn = document.getElementById("preview-column");
+
+    const applyTabLayout = (targetId) => {
+        const isAula = targetId === "sec-aula";
+        if (previewColumn) {
+            previewColumn.classList.toggle("d-none", isAula);
+        }
+        if (formContainer) {
+            formContainer.classList.toggle("col-lg-6", !isAula);
+            formContainer.classList.toggle("col-lg-10", isAula);
+            formContainer.classList.toggle("border-end", !isAula);
+        }
+    };
 
     tabs.forEach((tab) => {
         tab.addEventListener("click", (e) => {
@@ -118,8 +400,12 @@ function setupTabs() {
             tab.classList.add("active");
             const targetId = tab.getAttribute("data-target");
             document.getElementById(targetId)?.classList.remove("d-none");
+            applyTabLayout(targetId);
         });
     });
+
+    const activeTarget = document.querySelector(".settings-menu-btn.active")?.getAttribute("data-target") || "sec-entrega";
+    applyTabLayout(activeTarget);
 }
 
 function populateLocationSelects() {
@@ -153,6 +439,7 @@ function populateLocationSelects() {
                 opt.textContent = piso.nombre;
                 selPiso.appendChild(opt);
             });
+            if (pre === "aula") updateAulaBatchPreviewCard();
         });
 
         selPiso.addEventListener("change", () => {
@@ -169,7 +456,14 @@ function populateLocationSelects() {
                 opt.textContent = area.nombre;
                 selArea.appendChild(opt);
             });
+            if (pre === "aula") updateAulaBatchPreviewCard();
         });
+
+        if (pre === "aula") {
+            selArea.addEventListener("change", () => {
+                updateAulaBatchPreviewCard();
+            });
+        }
     });
 }
 
@@ -192,21 +486,39 @@ function showDownloadProgressModal() {
 
 function hideDownloadProgressModal(modal) {
     const modalEl = document.getElementById("modalDescargaProgress");
-    if (modal) {
-        modal.hide();
-    } else if (modalEl) {
-        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
-    }
+    if (!modalEl) return;
 
-    // Fallback defensivo por si bootstrap deja backdrop colgado.
+    const instance = modal || bootstrap.Modal.getOrCreateInstance(modalEl);
+    let hiddenHandled = false;
+    modalEl.addEventListener(
+        "hidden.bs.modal",
+        () => {
+            hiddenHandled = true;
+            // Limpieza conservadora: solo si no hay ningun otro modal visible.
+            const hasVisibleModal = Boolean(document.querySelector(".modal.show"));
+            if (!hasVisibleModal) {
+                document.body.classList.remove("modal-open");
+                document.body.style.removeProperty("padding-right");
+                document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
+            }
+        },
+        { once: true }
+    );
+
+    instance.hide();
+
+    // Fallback para escenarios donde hidden.bs.modal no se dispara correctamente.
     setTimeout(() => {
-        if (!modalEl) return;
+        if (hiddenHandled) return;
         modalEl.classList.remove("show");
         modalEl.style.display = "none";
-        document.body.classList.remove("modal-open");
-        document.body.style.removeProperty("padding-right");
-        document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
-    }, 20);
+        const hasVisibleModal = Boolean(document.querySelector(".modal.show"));
+        if (!hasVisibleModal) {
+            document.body.classList.remove("modal-open");
+            document.body.style.removeProperty("padding-right");
+            document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
+        }
+    }, 700);
 }
 
 function startDownloadProgress() {
@@ -277,6 +589,18 @@ function mapTipoToTabId(tipo) {
     return "tab-entrega";
 }
 
+function hideResultadoTabla(container) {
+    if (!container) return;
+    container.innerHTML = "";
+    container.classList.add("d-none");
+}
+
+function showResultadoTabla(container, html) {
+    if (!container) return;
+    container.innerHTML = String(html || "");
+    container.classList.remove("d-none");
+}
+
 function fillActaFormFromData(tipo, formularioData) {
     const tabId = mapTipoToTabId(tipo);
     document.getElementById(tabId)?.click();
@@ -329,13 +653,24 @@ function applyHistorialPayloadToEditor(record) {
     fillActaFormFromData(record.tipo_acta, parsed.formulario || {});
     window._globalSelectedTableRows = Array.isArray(parsed.tabla) ? parsed.tabla : [];
     window._globalSelectedColumns = Array.isArray(parsed.columnas) ? parsed.columnas : [];
+    activeHistorialTemplateSnapshotPath =
+        (record && record.plantilla_snapshot_path) ||
+        (parsed && parsed.plantilla && parsed.plantilla.snapshot_path) ||
+        null;
 
     const activeTarget = document.querySelector(".settings-menu-btn.active")?.getAttribute("data-target");
     const targetDiv = activeTarget ? document.querySelector(`#${activeTarget} .resultado-tabla-container`) : null;
     if (targetDiv) {
         const rows = window._globalSelectedTableRows.length;
         const cols = window._globalSelectedColumns.length;
-        targetDiv.innerHTML = `<div class="alert alert-info d-inline-block p-2 px-4 shadow-sm mb-0"><i class="bi bi-pencil-square me-2"></i>Acta cargada para edición: <strong>${rows}</strong> filas y <strong>${cols}</strong> columnas.</div>`;
+        if (rows > 0 && cols > 0) {
+            showResultadoTabla(
+                targetDiv,
+                `<div class="alert alert-info d-inline-block p-2 px-4 shadow-sm mb-0"><i class="bi bi-pencil-square me-2"></i>Acta cargada para edición: <strong>${rows}</strong> filas y <strong>${cols}</strong> columnas.</div>`
+            );
+        } else {
+            hideResultadoTabla(targetDiv);
+        }
     }
 
     if (typeof window.queueInformePreview === "function") {
@@ -378,8 +713,8 @@ async function cargarHistorialActas() {
             tdN.className = "fw-bold";
             tdN.textContent = String(idx + 1);
 
-            const tdFecha = document.createElement("td");
-            tdFecha.textContent = formatFechaActa(item.fecha);
+            const tdNumeroActa = document.createElement("td");
+            tdNumeroActa.textContent = String(item?.numero_acta || "-");
 
             const tdActions = document.createElement("td");
             tdActions.className = "text-end";
@@ -407,11 +742,35 @@ async function cargarHistorialActas() {
                 bootstrap.Modal.getInstance(modalEl)?.hide();
             });
 
+            const btnDelete = document.createElement("button");
+            btnDelete.className = "btn btn-sm btn-outline-danger ms-2";
+            btnDelete.innerHTML = '<i class="bi bi-trash me-1"></i>Borrar';
+            btnDelete.addEventListener("click", async () => {
+                const numeroActa = String(item?.numero_acta || "").trim() || `#${item?.id || ""}`;
+                const ok = window.confirm(`Se eliminará el acta ${numeroActa} del historial. ¿Desea continuar?`);
+                if (!ok) return;
+
+                try {
+                    const res = await fetch(`/api/historial/${item.id}`, { method: "DELETE" });
+                    const payloadDelete = await res.json();
+                    if (!res.ok || !payloadDelete.success) {
+                        notify(payloadDelete.error || "No se pudo eliminar el acta.", true);
+                        return;
+                    }
+                    notify(`Acta ${numeroActa} eliminada del historial.`);
+                    await refreshNumeroActaFormularioActivo(true);
+                    await cargarHistorialActas();
+                } catch (_err) {
+                    notify("Error de red al eliminar acta.", true);
+                }
+            });
+
             tdActions.appendChild(btnDownload);
             tdActions.appendChild(btnEdit);
+            tdActions.appendChild(btnDelete);
 
             tr.appendChild(tdN);
-            tr.appendChild(tdFecha);
+            tr.appendChild(tdNumeroActa);
             tr.appendChild(tdActions);
             tbody.appendChild(tr);
         });
@@ -447,6 +806,11 @@ function initInformeSSE() {
             if (modalEl && modalEl.classList.contains("show")) {
                 await cargarHistorialActas();
             }
+            await refreshNumeroActaFormularioActivo(false);
+        });
+
+        informeEventSource.addEventListener("areas_reports_changed", async () => {
+            await refreshNumeroActaAula(false);
         });
 
         informeEventSource.addEventListener("connected", () => {
@@ -639,7 +1003,14 @@ function setupExtraccionModal() {
         const active = document.querySelector(".settings-menu-btn.active")?.getAttribute("data-target");
         const targetDiv = active ? document.querySelector(`#${active} .resultado-tabla-container`) : null;
         if (targetDiv) {
-            targetDiv.innerHTML = `<div class="alert alert-success d-inline-block p-2 px-4 shadow-sm mb-0"><i class="bi bi-check2-circle me-2"></i>Se extrajeron <strong>${selectedItemIds.size}</strong> filas y <strong>${selectedColumns.length}</strong> columnas.</div>`;
+            if (selectedItemIds.size > 0 && selectedColumns.length > 0) {
+                showResultadoTabla(
+                    targetDiv,
+                    `<div class="alert alert-success d-inline-block p-2 px-4 shadow-sm mb-0"><i class="bi bi-check2-circle me-2"></i>Se extrajeron <strong>${selectedItemIds.size}</strong> filas y <strong>${selectedColumns.length}</strong> columnas.</div>`
+                );
+            } else {
+                hideResultadoTabla(targetDiv);
+            }
         }
 
         notify(`${selectedItemIds.size} ítems seleccionados y guardados temporalmente para el acta.`);
@@ -685,6 +1056,8 @@ async function cargarPersonalDatalist() {
 
 document.addEventListener("DOMContentLoaded", async () => {
     setupTabs();
+    initNumeroActaTracking();
+    document.querySelectorAll(".resultado-tabla-container").forEach((el) => hideResultadoTabla(el));
 
     try {
         const response = await api.get("/api/estructura");
@@ -699,6 +1072,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     setupHistorialModal();
     initInformeSSE();
     initNumeroActaOnTabs();
+    refreshNumeroActaAula(false);
+    updateAulaBatchPreviewCard();
+
+    document.getElementById("aula-scope")?.addEventListener("change", () => {
+        updateAulaBatchPreviewCard();
+    });
+
+    applyAulaScopeMode();
 
     const getTipoActivo = () => {
         const activeBtn = document.querySelector(".settings-menu-btn.active");
@@ -761,6 +1142,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                     datos_tabla: datosTabla,
                     datos_columnas: datosColumnas,
                     vista_previa: false,
+                    template_snapshot_path: activeHistorialTemplateSnapshotPath || undefined,
                 }),
             });
 
@@ -775,6 +1157,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
             if (result.docx_path) triggerFileDownload(result.docx_path);
             notify("Acta DOCX generada y descarga iniciada.");
+            activeHistorialTemplateSnapshotPath = null;
+            await refreshNumeroActaFormularioActivo(true);
         } catch (err) {
             console.error(err);
             notify("Error de red al generar y descargar el acta.", true);
@@ -795,6 +1179,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         btn.addEventListener("click", async (e) => {
             e.preventDefault();
             await generarYDescargarActa();
+        });
+    });
+
+    document.querySelectorAll(".btn-generar-lote-aula").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            await generarLoteAula();
         });
     });
 });

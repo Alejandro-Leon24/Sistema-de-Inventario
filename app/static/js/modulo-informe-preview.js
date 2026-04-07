@@ -14,7 +14,7 @@ const REQUIRED_VARS_INFORME = {
     bajas: ["numero_acta"],
     traspaso: ["numero_acta"],
     "fin-gestion": ["numero_acta"],
-    aula: ["numero_acta"],
+    aula: ["numero_acta", "titulo_acta", "tabla_dinamica"],
 };
 
 let previewTimer = null;
@@ -147,7 +147,7 @@ async function cargarCamposDinamicosActa(tipo) {
 
         const title = document.createElement("div");
         title.className = "col-12";
-        title.innerHTML = '<h6 class="fw-bold text-primary mt-3 mb-0 border-bottom pb-2"><i class="bi bi-stars me-2"></i>Campos Adicionales Detectados</h6>';
+        title.innerHTML = '<h6 class="fw-bold text-primary mb-0 border-bottom pb-2"><i class="bi bi-stars me-2"></i>Campos Adicionales Detectados</h6>';
         container.appendChild(title);
 
         extras.forEach((ext) => {
@@ -197,6 +197,10 @@ async function triggerPreview() {
     }
 
     const tipo = getActiveTipoActa();
+    if (tipo === "aula") {
+        setPreviewUiState("idle");
+        return;
+    }
     const payload = buildPreviewPayload(tipo);
     if (!payload) {
         setPreviewUiState("idle");
@@ -280,7 +284,11 @@ function bindPreviewEvents() {
         tab.addEventListener("click", async () => {
             const tipo = (tab.id || "tab-entrega").replace("tab-", "");
             await cargarCamposDinamicosActa(tipo);
-            queuePreview(600);
+            if (tipo !== "aula") {
+                queuePreview(600);
+            } else {
+                setPreviewUiState("idle");
+            }
         });
     });
 }
