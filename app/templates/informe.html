@@ -355,7 +355,7 @@
 
                         <!-- Botonera Inferior -->
                         <div class="d-flex justify-content-center gap-3 mt-3">
-                            <button class="btn btn-edu-primary shadow-lg btn-generar-lote-aula">Generar PDFs por Ubicación</button>
+                            <button class="btn btn-edu-primary shadow-lg btn-generar-lote-aula">Generar DOCX por Ubicación</button>
                         </div>
                     </div>
                     <!-- Fin de Formularios (col-lg-4) -->
@@ -518,8 +518,8 @@
 
 <script src="{{ url_for('static', filename='js/utils/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/utils/helpers.js') }}"></script>
-<script src="{{ url_for('static', filename='js/funciones-informe.js') }}"></script>
-<script src="{{ url_for('static', filename='js/modulo-informe-preview.js') }}"></script>
+<script src="{{ url_for('static', filename='js/funciones-informe.js', v=1.2) }}"></script>
+<script src="{{ url_for('static', filename='js/modulo-informe-preview.js', v=1.2) }}"></script>
 <!-- Modal Historial de Actas -->
 <div class="modal fade" id="modalHistorialActas" tabindex="-1" aria-labelledby="modalHistorialLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
@@ -553,19 +553,4 @@
     </div>
 </div>
 
-<!-- Modal Progreso de Descarga -->
-<div class="modal fade" id="modalDescargaProgress" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-    <div class="modal-dialog modal-sm modal-dialog-centered">
-        <div class="modal-content border-0 shadow">
-            <div class="modal-body p-4 text-center">
-                <div class="fw-bold mb-2 text-primary">Generando Acta</div>
-                <div class="progress mb-2" style="height: 10px;">
-                    <div class="progress-bar progress-bar-striped progress-bar-animated" id="descarga-progress-bar"
-                        role="progressbar" style="width: 0%"></div>
-                </div>
-                <div class="small text-muted" id="descarga-progress-text">0%</div>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}

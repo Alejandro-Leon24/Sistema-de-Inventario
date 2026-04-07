@@ -7,11 +7,14 @@ import tempfile
 import threading
 import hashlib
 import zipfile
+import uuid
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
 import werkzeug.utils
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, current_app, jsonify, request, send_file
 
 from database.controller import (
     count_historial_by_template_snapshot,
@@ -30,7 +33,6 @@ from database.db import get_db
 try:
     from app.utils.word_manager import (
         extract_variables_from_template,
-        generate_area_summary_pdf_fallback,
         generate_acta,
         get_preview_unavailable_reason,
         render_docx_preview_html,
@@ -39,7 +41,6 @@ try:
 except ModuleNotFoundError:
     from utils.word_manager import (
         extract_variables_from_template,
-        generate_area_summary_pdf_fallback,
         generate_acta,
         get_preview_unavailable_reason,
         render_docx_preview_html,
@@ -68,6 +69,15 @@ os.makedirs(ACTAS_OUTPUT_ROOT, exist_ok=True)
 os.makedirs(PREVIEW_OUTPUT_ROOT, exist_ok=True)
 os.makedirs(TEMPLATE_HISTORY_ROOT, exist_ok=True)
 os.makedirs(AREA_REPORTS_OUTPUT_ROOT, exist_ok=True)
+
+AREA_REPORT_TASKS = {}
+AREA_REPORT_TASKS_LOCK = threading.Lock()
+AREA_REPORT_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="area-report-worker")
+
+
+def _get_area_report_task(job_id):
+    with AREA_REPORT_TASKS_LOCK:
+        return dict(AREA_REPORT_TASKS.get(job_id, {}) or {})
 
 
 def _safe_filename_part(text):
@@ -143,6 +153,197 @@ def _build_area_summary_rows(area_id):
     total_bienes = sum(int(item["cantidad"] or 0) for item in table_data)
     table_data.append({"descripcion": "TOTAL DE BIENES", "cantidad": total_bienes})
     return table_data, total_bienes
+
+
+def _set_area_report_task_state(job_id, **updates):
+    with AREA_REPORT_TASKS_LOCK:
+        current = AREA_REPORT_TASKS.get(job_id, {})
+        current.update(updates)
+        AREA_REPORT_TASKS[job_id] = current
+
+
+def _run_area_report_job(app, job_id, scope, target_areas, numeros_acta, lot_dir, template_path, current_year):
+    generated_docx = []
+
+    try:
+        with app.app_context():
+            total = len(target_areas)
+            for idx, area in enumerate(target_areas):
+                paused_sent = False
+                while True:
+                    task_state = _get_area_report_task(job_id)
+                    if not task_state:
+                        raise RuntimeError("Estado del job no disponible.")
+
+                    if task_state.get("cancel_requested"):
+                        _set_area_report_task_state(
+                            job_id,
+                            status="cancelled",
+                            message="Generación cancelada por el usuario.",
+                        )
+                        publish_event(
+                            "areas_reports_cancelled",
+                            {
+                                "job_id": job_id,
+                                "generated": len(generated_docx),
+                                "total": total,
+                                "message": "Generación cancelada por el usuario.",
+                            },
+                        )
+                        for path in generated_docx:
+                            _safe_remove_file(path, is_output_path_allowed)
+                        return
+
+                    if task_state.get("pause_requested"):
+                        _set_area_report_task_state(
+                            job_id,
+                            status="paused",
+                            message="Generación en pausa.",
+                        )
+                        if not paused_sent:
+                            paused_sent = True
+                            publish_event(
+                                "areas_reports_paused",
+                                {
+                                    "job_id": job_id,
+                                    "generated": idx,
+                                    "total": total,
+                                    "message": "Generación en pausa.",
+                                },
+                            )
+                        time.sleep(0.4)
+                        continue
+
+                    if paused_sent:
+                        publish_event(
+                            "areas_reports_resumed",
+                            {
+                                "job_id": job_id,
+                                "generated": idx,
+                                "total": total,
+                                "message": "Generación reanudada.",
+                            },
+                        )
+                    break
+
+                numero_acta = numeros_acta[idx]
+                area_nombre = str(area.get("area_nombre") or "AREA SIN NOMBRE")
+                table_data, total_bienes = _build_area_summary_rows(area.get("area_id"))
+
+                context_data = {
+                    "numero_acta": numero_acta,
+                    "nombre_area": area_nombre,
+                    "piso": area.get("piso_nombre"),
+                    "bloque": area.get("bloque_nombre"),
+                    "total_bienes": total_bienes,
+                    "titulo_acta": f"{area_nombre} ACTA No.{numero_acta}",
+                }
+                table_columns = [
+                    {"id": "descripcion", "label": "DESCRIPCION"},
+                    {"id": "cantidad", "label": "CANTIDAD"},
+                ]
+                doc_name = (
+                    f"acta-aula-{_safe_filename_part(area_nombre)}-"
+                    f"{_safe_filename_part(numero_acta)}"
+                )
+
+                docx_path, _pdf_path = generate_acta(
+                    template_path=template_path,
+                    context_data=context_data,
+                    table_data=table_data,
+                    table_columns=table_columns,
+                    output_dir=lot_dir,
+                    doc_name=doc_name,
+                    generate_pdf=False,
+                    use_date_subfolder=False,
+                    include_time_suffix=False,
+                )
+
+                if not docx_path:
+                    raise RuntimeError(f"No se pudo generar DOCX para el area {area_nombre}.")
+
+                generated_docx.append(docx_path)
+
+                progress = int(((idx + 1) / max(total, 1)) * 100)
+                _set_area_report_task_state(
+                    job_id,
+                    status="running",
+                    progress=progress,
+                    generated=idx + 1,
+                    total=total,
+                    message=f"Generado {idx + 1}/{total}: {area_nombre}",
+                )
+                publish_event(
+                    "areas_reports_progress",
+                    {
+                        "job_id": job_id,
+                        "progress": progress,
+                        "generated": idx + 1,
+                        "total": total,
+                        "message": f"Generado {idx + 1}/{total}: {area_nombre}",
+                    },
+                )
+
+            download_kind = "docx" if len(generated_docx) == 1 else "zip"
+            download_path = generated_docx[0] if len(generated_docx) == 1 else os.path.join(lot_dir, "informes-area.zip")
+            zip_path = download_path if download_kind == "zip" else None
+
+            if download_kind == "zip":
+                with zipfile.ZipFile(download_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
+                    for docx_path in generated_docx:
+                        zipf.write(docx_path, arcname=os.path.basename(docx_path))
+
+                # En modo ZIP limpiamos DOCX temporales.
+                for docx_path in generated_docx:
+                    _safe_remove_file(docx_path, is_output_path_allowed)
+
+            next_numero = (
+                f"{(int(numeros_acta[-1].split('-')[0]) + 1):03d}-{current_year}"
+                if numeros_acta
+                else get_next_numero_informe_area(current_year)
+            )
+            _set_area_report_task_state(
+                job_id,
+                status="completed",
+                progress=100,
+                zip_path=zip_path,
+                download_path=download_path,
+                download_kind=download_kind,
+                total_generated=len(generated_docx),
+                next_numero_acta=next_numero,
+            )
+            publish_event(
+                "areas_reports_ready",
+                {
+                    "job_id": job_id,
+                    "scope": scope,
+                    "total_generated": len(generated_docx),
+                    "zip_path": zip_path,
+                    "download_path": download_path,
+                    "download_kind": download_kind,
+                    "start_numero_acta": numeros_acta[0] if numeros_acta else None,
+                    "end_numero_acta": numeros_acta[-1] if numeros_acta else None,
+                    "next_numero_acta": next_numero,
+                },
+            )
+            publish_event(
+                "areas_reports_changed",
+                {
+                    "scope": scope,
+                    "generated": len(generated_docx),
+                    "next_numero_acta": next_numero,
+                },
+            )
+    except Exception as exc:
+        logger.exception("Error en job asíncrono de informes por área job_id=%s", job_id)
+        _set_area_report_task_state(job_id, status="error", error=str(exc))
+        publish_event(
+            "areas_reports_error",
+            {
+                "job_id": job_id,
+                "error": str(exc),
+            },
+        )
 
 
 def is_output_path_allowed(path):
@@ -641,15 +842,10 @@ def api_generar_informes_areas_lote():
     current_year = datetime.now().year
     numeros_acta = reserve_numeros_informe_area(current_year, len(target_areas))
 
-    batch_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    lot_dir = os.path.join(AREA_REPORTS_OUTPUT_ROOT, f"lote-{batch_stamp}")
-    os.makedirs(lot_dir, exist_ok=True)
-
-    generated_pdfs = []
-    generated_docx = []
-
-    for idx, area in enumerate(target_areas):
-        numero_acta = numeros_acta[idx]
+    # Flujo rápido para una sola área: sin cola, sin SSE de job, descarga directa DOCX.
+    if len(target_areas) == 1:
+        area = target_areas[0]
+        numero_acta = numeros_acta[0]
         area_nombre = str(area.get("area_nombre") or "AREA SIN NOMBRE")
         table_data, total_bienes = _build_area_summary_rows(area.get("area_id"))
 
@@ -665,16 +861,23 @@ def api_generar_informes_areas_lote():
             {"id": "descripcion", "label": "DESCRIPCION"},
             {"id": "cantidad", "label": "CANTIDAD"},
         ]
-        doc_name = f"acta-aula-{_safe_filename_part(numero_acta)}"
 
-        docx_path, pdf_path = generate_acta(
+        single_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = os.path.join(AREA_REPORTS_OUTPUT_ROOT, f"single-{single_stamp}")
+        os.makedirs(output_dir, exist_ok=True)
+
+        doc_name = (
+            f"acta-aula-{_safe_filename_part(area_nombre)}-"
+            f"{_safe_filename_part(numero_acta)}"
+        )
+        docx_path, _pdf_path = generate_acta(
             template_path=template_path,
             context_data=context_data,
             table_data=table_data,
             table_columns=table_columns,
-            output_dir=lot_dir,
+            output_dir=output_dir,
             doc_name=doc_name,
-            generate_pdf=True,
+            generate_pdf=False,
             use_date_subfolder=False,
             include_time_suffix=False,
         )
@@ -686,42 +889,79 @@ def api_generar_informes_areas_lote():
                     "error": f"No se pudo generar DOCX para el area {area_nombre}.",
                 }
             ), 500
-        if not pdf_path:
-            fallback_pdf_path = os.path.splitext(docx_path)[0] + ".pdf"
-            ok_fallback, fallback_error = generate_area_summary_pdf_fallback(
-                pdf_path=fallback_pdf_path,
-                titulo_acta=context_data.get("titulo_acta"),
-                table_rows=table_data,
-            )
-            if not ok_fallback:
-                return jsonify(
-                    {
-                        "success": False,
-                        "error": (
-                            f"No se pudo convertir a PDF el informe del area {area_nombre}. "
-                            f"Detalle: {fallback_error or 'sin detalle.'}"
-                        ),
-                    }
-                ), 500
-            pdf_path = fallback_pdf_path
 
-        generated_docx.append(docx_path)
-        generated_pdfs.append(pdf_path)
+        next_numero = get_next_numero_informe_area(current_year)
+        publish_event(
+            "areas_reports_changed",
+            {
+                "scope": scope,
+                "generated": 1,
+                "next_numero_acta": next_numero,
+            },
+        )
 
-    zip_path = os.path.join(lot_dir, "informes-area.zip")
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zipf:
-        for pdf_path in generated_pdfs:
-            zipf.write(pdf_path, arcname=os.path.basename(pdf_path))
+        return jsonify(
+            {
+                "success": True,
+                "scope": scope,
+                "queued": False,
+                "immediate": True,
+                "total_targets": 1,
+                "total_generated": 1,
+                "download_path": docx_path,
+                "download_kind": "docx",
+                "start_numero_acta": numero_acta,
+                "end_numero_acta": numero_acta,
+                "next_numero_acta": next_numero,
+            }
+        )
 
-    # Limpieza: mantenemos zip + pdf y eliminamos docx intermedios.
-    for docx_path in generated_docx:
-        _safe_remove_file(docx_path, is_output_path_allowed)
+    batch_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    lot_dir = os.path.join(AREA_REPORTS_OUTPUT_ROOT, f"lote-{batch_stamp}")
+    os.makedirs(lot_dir, exist_ok=True)
 
+    job_id = str(uuid.uuid4())
+    _set_area_report_task_state(
+        job_id,
+        status="queued",
+        progress=0,
+        scope=scope,
+        total=len(target_areas),
+        generated=0,
+        pause_requested=False,
+        cancel_requested=False,
+        created_at=datetime.now().isoformat(),
+    )
+
+    app_obj = getattr(current_app, "_get_current_object", lambda: current_app)()
+
+    AREA_REPORT_EXECUTOR.submit(
+        _run_area_report_job,
+        app_obj,
+        job_id,
+        scope,
+        target_areas,
+        numeros_acta,
+        lot_dir,
+        template_path,
+        current_year,
+    )
+
+    publish_event(
+        "areas_reports_progress",
+        {
+            "job_id": job_id,
+            "progress": 0,
+            "generated": 0,
+            "total": len(target_areas),
+            "message": "Tarea en cola...",
+        },
+    )
     publish_event(
         "areas_reports_changed",
         {
             "scope": scope,
-            "generated": len(generated_pdfs),
+            "generated": 0,
             "next_numero_acta": get_next_numero_informe_area(current_year),
         },
     )
@@ -729,14 +969,75 @@ def api_generar_informes_areas_lote():
     return jsonify(
         {
             "success": True,
+            "job_id": job_id,
             "scope": scope,
-            "total_generated": len(generated_pdfs),
-            "zip_path": zip_path,
+            "queued": True,
+            "total_targets": len(target_areas),
             "start_numero_acta": numeros_acta[0],
             "end_numero_acta": numeros_acta[-1],
             "next_numero_acta": get_next_numero_informe_area(current_year),
         }
-    )
+    ), 202
+
+
+@documents_bp.route("/api/informes/areas/jobs/<job_id>", methods=["GET"])
+def api_get_area_report_job(job_id):
+    with AREA_REPORT_TASKS_LOCK:
+        payload = dict(AREA_REPORT_TASKS.get(str(job_id), {}) or {})
+    if not payload:
+        return jsonify({"success": False, "error": "Job no encontrado."}), 404
+    return jsonify({"success": True, "data": payload})
+
+
+@documents_bp.route("/api/informes/areas/jobs", methods=["GET"])
+def api_list_area_report_jobs():
+    active_only = str(request.args.get("active") or "0").strip().lower() in {"1", "true", "yes"}
+    active_statuses = {"queued", "running", "paused"}
+
+    with AREA_REPORT_TASKS_LOCK:
+        rows = []
+        for jid, payload in AREA_REPORT_TASKS.items():
+            item = dict(payload or {})
+            item["job_id"] = str(jid)
+            status = str(item.get("status") or "")
+            if active_only and status not in active_statuses:
+                continue
+            rows.append(item)
+
+    rows.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+    return jsonify({"success": True, "jobs": rows})
+
+
+@documents_bp.route("/api/informes/areas/jobs/<job_id>/control", methods=["POST"])
+def api_control_area_report_job(job_id):
+    payload = request.json or {}
+    action = str(payload.get("action") or "").strip().lower()
+    if action not in {"pause", "resume", "cancel"}:
+        return jsonify({"success": False, "error": "Acción inválida. Use pause, resume o cancel."}), 400
+
+    job_id = str(job_id)
+    task = _get_area_report_task(job_id)
+    if not task:
+        return jsonify({"success": False, "error": "Job no encontrado."}), 404
+
+    status = str(task.get("status") or "")
+    terminal_statuses = {"completed", "error", "cancelled"}
+    if status in terminal_statuses:
+        return jsonify({"success": False, "error": f"El job ya está en estado final: {status}."}), 409
+
+    if action == "pause":
+        _set_area_report_task_state(job_id, pause_requested=True, message="Pausa solicitada...")
+        publish_event("areas_reports_paused", {"job_id": job_id, "message": "Pausa solicitada..."})
+        return jsonify({"success": True, "job_id": job_id, "status": "pausing"})
+
+    if action == "resume":
+        _set_area_report_task_state(job_id, pause_requested=False, status="running", message="Reanudando...")
+        publish_event("areas_reports_resumed", {"job_id": job_id, "message": "Reanudando..."})
+        return jsonify({"success": True, "job_id": job_id, "status": "running"})
+
+    _set_area_report_task_state(job_id, cancel_requested=True, message="Cancelación solicitada...")
+    publish_event("areas_reports_cancelled", {"job_id": job_id, "message": "Cancelación solicitada..."})
+    return jsonify({"success": True, "job_id": job_id, "status": "cancelling"})
 
 
 @documents_bp.route("/api/historial/<int:acta_id>", methods=["DELETE"])

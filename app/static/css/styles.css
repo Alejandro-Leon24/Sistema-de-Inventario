@@ -360,6 +360,18 @@ body.inventory-column-dragging * {
     gap: 0.5rem;
 }
 
+.download-progress-floating {
+    position: fixed;
+    left: 1rem;
+    bottom: 1rem;
+    z-index: 1085;
+    width: min(360px, calc(100vw - 2rem));
+}
+
+.download-progress-floating .card {
+    border-radius: 0.8rem;
+}
+
 .floor-areas-list {
     display: flex;
     flex-wrap: wrap;

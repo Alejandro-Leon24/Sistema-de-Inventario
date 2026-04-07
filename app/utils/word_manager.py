@@ -10,9 +10,12 @@ import xml.etree.ElementTree as ET
 import datetime
 import tempfile
 import threading
+import time
 from docxtpl import DocxTemplate
 from docx import Document
-from docx.shared import Pt
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.shared import Inches, Pt
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 # docx2pdf works perfectly on windows if MS Word is installed. 
@@ -31,6 +34,11 @@ try:
     import pythoncom
 except ImportError:
     pythoncom = None
+
+try:
+    import win32com.client
+except ImportError:
+    win32com = None
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -97,6 +105,123 @@ def _convert_docx_to_pdf_with_libreoffice(docx_path, pdf_path):
         return False, f"No se pudo mover el PDF convertido a su destino final: {exc}"
 
     return True, None
+
+
+def _run_word_docx2pdf_convert(input_docx, output_pdf, converter):
+    with PDF_CONVERT_LOCK:
+        co_initialized = False
+        try:
+            if pythoncom:
+                pythoncom.CoInitialize()
+                co_initialized = True
+            converter(input_docx, output_pdf)
+        finally:
+            if co_initialized and pythoncom:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+
+
+def _convert_docx_to_pdf_with_word_com(docx_path, pdf_path):
+    if not pythoncom or not win32com:
+        return False, "pywin32 no disponible para conversión directa con Word COM."
+
+    abs_docx = os.path.abspath(docx_path)
+    abs_pdf = os.path.abspath(pdf_path)
+    word = None
+    doc = None
+
+    # 17 = wdExportFormatPDF
+    wd_export_format_pdf = 17
+
+    with PDF_CONVERT_LOCK:
+        co_initialized = False
+        try:
+            pythoncom.CoInitialize()
+            co_initialized = True
+
+            word = win32com.client.DispatchEx("Word.Application")
+            word.Visible = False
+            word.DisplayAlerts = 0
+
+            # Open with ReadOnly avoids many SaveAs/Open lock conflicts.
+            doc = word.Documents.Open(abs_docx, ReadOnly=True)
+            doc.ExportAsFixedFormat(abs_pdf, wd_export_format_pdf)
+
+            if not os.path.exists(abs_pdf):
+                return False, "Word COM finalizó sin generar PDF."
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+        finally:
+            try:
+                if doc is not None:
+                    doc.Close(False)
+            except Exception:
+                pass
+            try:
+                if word is not None:
+                    word.Quit()
+            except Exception:
+                pass
+            if co_initialized:
+                try:
+                    pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+
+
+def _convert_docx_to_pdf_with_word(docx_path, pdf_path, converter):
+    if not converter:
+        return False, "docx2pdf no está disponible."
+
+    abs_docx = os.path.abspath(docx_path)
+    abs_pdf = os.path.abspath(pdf_path)
+    last_error = None
+
+    # Intento 1: conversión directa en ruta final.
+    try:
+        _run_word_docx2pdf_convert(abs_docx, abs_pdf, converter)
+        if os.path.exists(abs_pdf):
+            return True, None
+        last_error = "Word finalizó sin generar el archivo PDF esperado."
+    except Exception as exc:
+        last_error = str(exc)
+
+    # Intento 2: conversión en carpeta temporal local para evitar bloqueos de OneDrive/ruta.
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp(prefix="docx2pdf_tmp_")
+        tmp_docx = os.path.join(tmp_dir, "input.docx")
+        tmp_pdf = os.path.join(tmp_dir, "output.pdf")
+        shutil.copy2(abs_docx, tmp_docx)
+
+        _run_word_docx2pdf_convert(tmp_docx, tmp_pdf, converter)
+        if not os.path.exists(tmp_pdf):
+            return False, (
+                f"{last_error or 'Word/docx2pdf falló en conversión directa.'} "
+                "Reintento temporal: Word no generó el PDF."
+            )
+
+        os.makedirs(os.path.dirname(abs_pdf), exist_ok=True)
+        shutil.copy2(tmp_pdf, abs_pdf)
+        return True, None
+    except Exception as exc:
+        detail = str(exc)
+        if last_error:
+            return False, f"{last_error} | Reintento temporal: {detail}"
+        return False, detail
+    finally:
+        if tmp_dir:
+            # Word puede liberar handles unos ms después; no fallar por limpieza.
+            for _ in range(3):
+                try:
+                    shutil.rmtree(tmp_dir, ignore_errors=False)
+                    break
+                except Exception:
+                    time.sleep(0.25)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def get_preview_unavailable_reason():
@@ -401,7 +526,134 @@ def build_dynamic_table_context(table_rows, table_columns):
     return columnas, filas
 
 
-def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns):
+def _set_cell_text(cell, value, *, bold=False, align=WD_PARAGRAPH_ALIGNMENT.LEFT, font_size=10):
+    cell.text = ""
+    p = cell.paragraphs[0]
+    p.alignment = align
+    run = p.add_run(str(value if value is not None else ""))
+    run.bold = bool(bold)
+    run.font.size = Pt(int(font_size))
+
+
+def _build_area_summary_table_subdoc(subdoc, filas, context_data):
+    table = subdoc.add_table(rows=1, cols=2)
+    for style_name in ("Table Grid", "Tabla con cuadricula", "Tabla con cuadrícula"):
+        try:
+            table.style = style_name
+            break
+        except Exception:
+            continue
+
+    table.autofit = False
+
+    titulo = str((context_data or {}).get("titulo_acta") or "").strip()
+    if not titulo:
+        area_nombre = str((context_data or {}).get("nombre_area") or "").strip()
+        numero_acta = str((context_data or {}).get("numero_acta") or "").strip()
+        if area_nombre and numero_acta:
+            titulo = f"{area_nombre} ACTA No. {numero_acta}"
+        else:
+            titulo = "ACTA"
+
+    header_cells = table.rows[0].cells
+    merged_header = header_cells[0].merge(header_cells[1])
+    _set_cell_text(
+        merged_header,
+        titulo,
+        bold=True,
+        align=WD_PARAGRAPH_ALIGNMENT.CENTER,
+        font_size=11,
+    )
+
+    for fila in filas:
+        row_cells = table.add_row().cells
+        celdas = fila.get("celdas", [])
+        descripcion = str(celdas[0] if len(celdas) > 0 else "-")
+        cantidad = str(celdas[1] if len(celdas) > 1 else "-")
+
+        is_total = descripcion.strip().upper() == "TOTAL DE BIENES"
+        align_desc = WD_PARAGRAPH_ALIGNMENT.CENTER if is_total else WD_PARAGRAPH_ALIGNMENT.LEFT
+        align_cant = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+        _set_cell_text(row_cells[0], descripcion, bold=is_total, align=align_desc, font_size=10)
+        _set_cell_text(row_cells[1], cantidad, bold=is_total, align=align_cant, font_size=10)
+
+    desc_values = []
+    for fila in filas:
+        celdas = fila.get("celdas", [])
+        if not celdas:
+            continue
+        descripcion = str(celdas[0] or "").strip()
+        if descripcion.upper() == "TOTAL DE BIENES":
+            continue
+        desc_values.append(descripcion)
+
+    max_desc_len = max((len(v) for v in desc_values), default=0)
+    use_compact_size = max_desc_len > 0 and max_desc_len < 15
+
+    # Tamaño base (normal) y variante compacta (40% menor total: 20% previo + 20% adicional).
+    desc_width = 5.9
+    qty_width = 1.1
+    if use_compact_size:
+        desc_width = round(desc_width * 0.64, 2)
+        qty_width = round(qty_width * 0.64, 2)
+
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER if use_compact_size else WD_TABLE_ALIGNMENT.LEFT
+
+    for row in table.rows:
+        row.cells[0].width = Inches(desc_width)
+        row.cells[1].width = Inches(qty_width)
+
+    return subdoc
+
+
+def _compute_general_table_widths(columnas, total_width_in=7.0):
+    cols = list(columnas or [])
+    n = len(cols)
+    if n <= 0:
+        return []
+
+    base = total_width_in / n
+    widths = [base for _ in range(n)]
+
+    desc_idx = -1
+    qty_idx = -1
+    estado_idx = -1
+    for idx, col in enumerate(cols):
+        col_id = str(col.get("id") or "").strip().lower()
+        col_label = str(col.get("label") or "").strip().lower()
+        if desc_idx < 0 and (col_id == "descripcion" or "descrip" in col_label):
+            desc_idx = idx
+        if qty_idx < 0 and (col_id == "cantidad" or col_id == "cant" or "cant" in col_label):
+            qty_idx = idx
+        if estado_idx < 0 and (col_id == "estado" or "estado" in col_label):
+            estado_idx = idx
+
+    if qty_idx >= 0:
+        old_qty = widths[qty_idx]
+        new_qty = max(0.85, round(old_qty * 0.78, 2))
+        delta = old_qty - new_qty
+        widths[qty_idx] = new_qty
+        if desc_idx >= 0 and desc_idx != qty_idx:
+            widths[desc_idx] = round(widths[desc_idx] + delta, 2)
+
+    if estado_idx >= 0 and desc_idx >= 0 and estado_idx != desc_idx:
+        old_estado = widths[estado_idx]
+        new_estado = max(0.95, round(old_estado * 0.88, 2))
+        delta_estado = old_estado - new_estado
+        widths[estado_idx] = new_estado
+        widths[desc_idx] = round(widths[desc_idx] + delta_estado, 2)
+
+    # Ajuste fino para que la suma permanezca igual al total.
+    diff = round(total_width_in - sum(widths), 4)
+    if abs(diff) > 0 and n > 0:
+        target_idx = desc_idx if desc_idx >= 0 else 0
+        widths[target_idx] = round(widths[target_idx] + diff, 2)
+
+    return widths
+
+
+def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns, context_data=None):
     """
     Construye una tabla dinámica dentro de un subdocumento para evitar depender
     de tags complejos {%tc %}/{%tr %} sensibles a cambios de Word.
@@ -424,6 +676,10 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns):
             logger.warning("docxcompose no instalado. tabla_dinamica se omitira temporalmente.")
             return None
         raise
+    normalized_ids = [str(col.get("id", "")).strip().lower() for col in columnas]
+    if len(columnas) == 2 and normalized_ids == ["descripcion", "cantidad"]:
+        return _build_area_summary_table_subdoc(subdoc, filas, context_data)
+
     table = subdoc.add_table(rows=1, cols=len(columnas))
     # Algunas plantillas no incluyen el estilo en ingles; degradamos con fallback seguro.
     for style_name in ("Table Grid", "Tabla con cuadricula", "Tabla con cuadrícula"):
@@ -432,6 +688,9 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns):
             break
         except Exception:
             continue
+    table.autofit = False
+
+    column_widths = _compute_general_table_widths(columnas, total_width_in=7.0)
 
     # Encabezados
     header_cells = table.rows[0].cells
@@ -449,6 +708,10 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns):
             val = celdas[idx] if idx < len(celdas) else "-"
             run = row_cells[idx].paragraphs[0].add_run(str(val if val is not None else "-"))
             run.font.size = Pt(10)
+
+    for row in table.rows:
+        for idx, w in enumerate(column_widths):
+            row.cells[idx].width = Inches(w)
 
     return subdoc
 
@@ -486,7 +749,12 @@ def generate_acta(
         render_context['tabla_columnas'] = tabla_columnas
         render_context['tabla_filas'] = tabla_filas
         # Camino robusto recomendado: insertar tabla como subdocumento
-        render_context['tabla_dinamica'] = build_dynamic_table_subdoc(doc, table_data, table_columns)
+        render_context['tabla_dinamica'] = build_dynamic_table_subdoc(
+            doc,
+            table_data,
+            table_columns,
+            context_data=render_context,
+        )
         
     try:
         doc.render(render_context)
@@ -551,23 +819,18 @@ def generate_acta(
         abs_pdf = os.path.abspath(pdf_path)
 
         if platform.system() == "Windows" and converter:
-            try:
-                # Word COM conversion is not reliable in parallel; serialize calls.
-                with PDF_CONVERT_LOCK:
-                    if pythoncom:
-                        pythoncom.CoInitialize()
-                    converter(abs_docx, abs_pdf)
-                    if pythoncom:
-                        pythoncom.CoUninitialize()
-                gen_pdf = True
-            except Exception as e:
-                try:
-                    if pythoncom:
-                        pythoncom.CoUninitialize()
-                except Exception:
-                    pass
-                logger.error(f"Error convirtiendo DOCX a PDF con Word/docx2pdf. Detalle: {e}")
-                gen_pdf = False
+            ok_word_com, err_word_com = _convert_docx_to_pdf_with_word_com(abs_docx, abs_pdf)
+            gen_pdf = ok_word_com
+            if not gen_pdf:
+                logger.warning(
+                    f"Conversión directa con Word COM falló. Detalle: {err_word_com or 'sin detalle'}"
+                )
+                ok_word, err_word = _convert_docx_to_pdf_with_word(abs_docx, abs_pdf, converter)
+                gen_pdf = ok_word
+                if not gen_pdf:
+                    logger.error(
+                        f"Error convirtiendo DOCX a PDF con Word/docx2pdf. Detalle: {err_word or 'sin detalle'}"
+                    )
 
         if not gen_pdf:
             with PDF_CONVERT_LOCK:

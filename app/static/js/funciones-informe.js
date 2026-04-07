@@ -30,6 +30,10 @@ let isGeneratingActa = false;
 let closeDownloadModalTimer = null;
 let informeEventSource = null;
 let activeHistorialTemplateSnapshotPath = null;
+let activeAulaBatchJobId = null;
+let activeAulaBatchModal = null;
+let activeAulaBatchPaused = false;
+const ACTIVE_AREA_JOB_STORAGE_KEY = "inventario_area_report_active_job";
 
 function shouldRefreshNumeroActaInput(input, force = false) {
     if (!input) return false;
@@ -295,9 +299,9 @@ function updateAulaBatchPreviewCard() {
         } else {
             const scopeText = scope === "bloque" ? "bloque" : scope === "piso" ? "piso" : "área";
             if (estimatedRange) {
-                labelEl.textContent = `Se generarán ${count} PDF(s) por ${scopeText}. Rango estimado: ${estimatedRange.start} a ${estimatedRange.end}.`;
+                labelEl.textContent = `Se generarán ${count} acta(s) DOCX por ${scopeText}. Rango estimado: ${estimatedRange.start} a ${estimatedRange.end}.`;
             } else {
-                labelEl.textContent = `Se generarán ${count} PDF(s) por ${scopeText}.`;
+                labelEl.textContent = `Se generarán ${count} acta(s) DOCX por ${scopeText}.`;
             }
         }
     }
@@ -327,10 +331,15 @@ async function generarLoteAula() {
         return;
     }
 
-    const modal = showDownloadProgressModal();
-    startDownloadProgress();
+    activeAulaBatchModal = showDownloadProgressModal();
+    clearInterval(downloadProgressTimer);
+    setDownloadBatchActionsVisible(true);
+    setDownloadBatchPauseButton(false);
+    setDownloadProgressTitle("Generando informes por área");
+    setDownloadProgressMessage("Encolando tarea...");
+    setDownloadProgressValue(2);
     try {
-        notify("Generando PDFs masivos por ubicación...");
+        notify("Generando actas DOCX masivas por ubicación...");
         const response = await fetch("/api/informes/areas/generar-lote", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -340,36 +349,57 @@ async function generarLoteAula() {
         const result = await response.json();
         if (!response.ok || !result.success) {
             notify(result.error || "No se pudo generar el lote de informes.", true);
+            hideDownloadProgressModal(activeAulaBatchModal);
+            activeAulaBatchModal = null;
             return;
         }
 
-        finishDownloadProgress();
-        if (result.zip_path) {
+        if (result.immediate && result.download_path) {
+            finishDownloadProgress();
+            setDownloadProgressTitle("Descarga lista");
+            setDownloadProgressMessage(
+                String(result.download_kind || "docx").toLowerCase() === "zip"
+                    ? "Paquete ZIP generado correctamente."
+                    : "Documento Word generado correctamente."
+            );
+
             const a = document.createElement("a");
-            a.href = `/api/descargar?path=${encodeURIComponent(result.zip_path)}`;
+            a.href = `/api/descargar?path=${encodeURIComponent(result.download_path)}`;
             a.style.display = "none";
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+
+            if (result.next_numero_acta) {
+                const aulaInput = document.querySelector('#form-aula input[name="numero_acta"]');
+                setNumeroActaInputValue(aulaInput, result.next_numero_acta, true);
+                updateAulaBatchPreviewCard();
+            }
+
+            notify(
+                `Se generó ${result.total_generated || 1} DOCX (${result.start_numero_acta || "-"}).`
+            );
+            clearTimeout(closeDownloadModalTimer);
+            closeDownloadModalTimer = setTimeout(() => {
+                hideDownloadProgressModal(activeAulaBatchModal);
+                activeAulaBatchModal = null;
+            }, 350);
+            return;
         }
 
-        if (result.next_numero_acta) {
-            const aulaInput = document.querySelector('#form-aula input[name="numero_acta"]');
-            setNumeroActaInputValue(aulaInput, result.next_numero_acta, true);
-            updateAulaBatchPreviewCard();
-        } else {
-            await refreshNumeroActaAula(true);
+        activeAulaBatchJobId = String(result.job_id || "").trim() || null;
+        if (activeAulaBatchJobId) {
+            localStorage.setItem(ACTIVE_AREA_JOB_STORAGE_KEY, activeAulaBatchJobId);
         }
-
-        notify(
-            `Se generaron ${result.total_generated || 0} PDFs (${result.start_numero_acta || "-"} a ${result.end_numero_acta || "-"}).`
-        );
+        setDownloadProgressMessage("Tarea en cola...");
+        setDownloadProgressValue(5);
+        notify(`Lote en cola (${result.total_targets || 0} destino(s)). Se notificará al terminar.`);
     } catch (_err) {
         notify("Error de red al generar informes masivos por ubicación.", true);
-    } finally {
         clearTimeout(closeDownloadModalTimer);
         closeDownloadModalTimer = setTimeout(() => {
-            hideDownloadProgressModal(modal);
+            hideDownloadProgressModal(activeAulaBatchModal);
+            activeAulaBatchModal = null;
         }, 300);
     }
 }
@@ -477,48 +507,80 @@ function setPreviewStatus(message) {
 }
 
 function showDownloadProgressModal() {
-    const modalEl = document.getElementById("modalDescargaProgress");
-    if (!modalEl) return null;
-    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-    modal.show();
-    return modal;
+    const panelEl = document.getElementById("download-progress-floating");
+    if (!panelEl) return null;
+    panelEl.classList.remove("d-none");
+    return panelEl;
+}
+
+function setDownloadProgressValue(percent) {
+    const safe = Math.max(0, Math.min(100, Number(percent || 0)));
+    const bar = document.getElementById("descarga-progress-bar");
+    const text = document.getElementById("descarga-progress-text");
+    downloadProgressValue = safe;
+    if (bar) bar.style.width = `${safe}%`;
+    if (text) text.textContent = `${safe}%`;
+}
+
+function setDownloadProgressMessage(message) {
+    const msg = document.getElementById("descarga-progress-message");
+    if (msg) msg.textContent = String(message || "").trim() || "Preparando descarga...";
+}
+
+function setDownloadProgressTitle(title) {
+    const node = document.getElementById("descarga-progress-title");
+    if (node) node.textContent = String(title || "").trim() || "Generando acta";
+}
+
+function setDownloadBatchActionsVisible(visible) {
+    const actions = document.getElementById("download-progress-actions");
+    if (!actions) return;
+    actions.classList.toggle("d-none", !visible);
+}
+
+function setDownloadBatchPauseButton(paused) {
+    activeAulaBatchPaused = Boolean(paused);
+    const btn = document.getElementById("btn-download-progress-pause");
+    if (!btn) return;
+    if (activeAulaBatchPaused) {
+        btn.innerHTML = '<i class="bi bi-play-fill me-1"></i>Reanudar';
+    } else {
+        btn.innerHTML = '<i class="bi bi-pause-fill me-1"></i>Pausar';
+    }
+}
+
+async function controlAulaBatchJob(action) {
+    const jobId = String(activeAulaBatchJobId || "").trim();
+    if (!jobId) {
+        notify("No hay un lote activo para controlar.", true);
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/informes/areas/jobs/${encodeURIComponent(jobId)}/control`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            notify(result.error || "No se pudo aplicar control al lote.", true);
+            return;
+        }
+
+        if (action === "pause") setDownloadProgressMessage("Pausa solicitada...");
+        if (action === "resume") setDownloadProgressMessage("Reanudando...");
+        if (action === "cancel") setDownloadProgressMessage("Cancelación solicitada...");
+    } catch (_err) {
+        notify("Error de red al controlar el lote.", true);
+    }
 }
 
 function hideDownloadProgressModal(modal) {
-    const modalEl = document.getElementById("modalDescargaProgress");
-    if (!modalEl) return;
-
-    const instance = modal || bootstrap.Modal.getOrCreateInstance(modalEl);
-    let hiddenHandled = false;
-    modalEl.addEventListener(
-        "hidden.bs.modal",
-        () => {
-            hiddenHandled = true;
-            // Limpieza conservadora: solo si no hay ningun otro modal visible.
-            const hasVisibleModal = Boolean(document.querySelector(".modal.show"));
-            if (!hasVisibleModal) {
-                document.body.classList.remove("modal-open");
-                document.body.style.removeProperty("padding-right");
-                document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
-            }
-        },
-        { once: true }
-    );
-
-    instance.hide();
-
-    // Fallback para escenarios donde hidden.bs.modal no se dispara correctamente.
-    setTimeout(() => {
-        if (hiddenHandled) return;
-        modalEl.classList.remove("show");
-        modalEl.style.display = "none";
-        const hasVisibleModal = Boolean(document.querySelector(".modal.show"));
-        if (!hasVisibleModal) {
-            document.body.classList.remove("modal-open");
-            document.body.style.removeProperty("padding-right");
-            document.querySelectorAll(".modal-backdrop").forEach((el) => el.remove());
-        }
-    }, 700);
+    const panelEl = modal || document.getElementById("download-progress-floating");
+    if (!panelEl) return;
+    panelEl.classList.add("d-none");
+    setDownloadBatchActionsVisible(false);
 }
 
 function startDownloadProgress() {
@@ -528,6 +590,7 @@ function startDownloadProgress() {
 
     if (bar) bar.style.width = "0%";
     if (text) text.textContent = "0%";
+    setDownloadProgressMessage("Preparando descarga...");
 
     clearInterval(downloadProgressTimer);
     downloadProgressTimer = setInterval(() => {
@@ -544,6 +607,7 @@ function finishDownloadProgress() {
     downloadProgressValue = 100;
     if (bar) bar.style.width = "100%";
     if (text) text.textContent = "100%";
+    setDownloadProgressMessage("Listo para descargar.");
 }
 
 function setManualPreviewOutput(result) {
@@ -811,6 +875,145 @@ function initInformeSSE() {
 
         informeEventSource.addEventListener("areas_reports_changed", async () => {
             await refreshNumeroActaAula(false);
+        });
+
+        informeEventSource.addEventListener("areas_reports_progress", (event) => {
+            let payload = {};
+            try {
+                payload = JSON.parse(event.data || "{}");
+            } catch (_err) {
+                payload = {};
+            }
+
+            const jobId = String(payload.job_id || "").trim();
+            if (!activeAulaBatchJobId || jobId !== activeAulaBatchJobId) return;
+            setDownloadProgressValue(Number(payload.progress || 0));
+            setDownloadProgressMessage(payload.message || "Procesando informe...");
+        });
+
+        informeEventSource.addEventListener("areas_reports_paused", (event) => {
+            let payload = {};
+            try {
+                payload = JSON.parse(event.data || "{}");
+            } catch (_err) {
+                payload = {};
+            }
+
+            const jobId = String(payload.job_id || "").trim();
+            if (!activeAulaBatchJobId || jobId !== activeAulaBatchJobId) return;
+            setDownloadBatchPauseButton(true);
+            setDownloadProgressMessage(payload.message || "Generación en pausa.");
+        });
+
+        informeEventSource.addEventListener("areas_reports_resumed", (event) => {
+            let payload = {};
+            try {
+                payload = JSON.parse(event.data || "{}");
+            } catch (_err) {
+                payload = {};
+            }
+
+            const jobId = String(payload.job_id || "").trim();
+            if (!activeAulaBatchJobId || jobId !== activeAulaBatchJobId) return;
+            setDownloadBatchPauseButton(false);
+            setDownloadProgressMessage(payload.message || "Generación reanudada.");
+        });
+
+        informeEventSource.addEventListener("areas_reports_ready", async (event) => {
+            let payload = {};
+            try {
+                payload = JSON.parse(event.data || "{}");
+            } catch (_err) {
+                payload = {};
+            }
+
+            const jobId = String(payload.job_id || "").trim();
+            if (!activeAulaBatchJobId || jobId !== activeAulaBatchJobId) return;
+
+            finishDownloadProgress();
+            setDownloadProgressTitle("Descarga lista");
+            const downloadPath = String(payload.download_path || payload.zip_path || "").trim();
+            const downloadKind = String(payload.download_kind || (payload.zip_path ? "zip" : "docx")).toLowerCase();
+            setDownloadProgressMessage(
+                downloadKind === "zip"
+                    ? "Paquete ZIP generado correctamente."
+                    : "Documento Word generado correctamente."
+            );
+            if (downloadPath) {
+                const a = document.createElement("a");
+                a.href = `/api/descargar?path=${encodeURIComponent(downloadPath)}`;
+                a.style.display = "none";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+
+            if (payload.next_numero_acta) {
+                const aulaInput = document.querySelector('#form-aula input[name="numero_acta"]');
+                setNumeroActaInputValue(aulaInput, payload.next_numero_acta, true);
+                updateAulaBatchPreviewCard();
+            } else {
+                await refreshNumeroActaAula(true);
+            }
+
+            notify(
+                `Se generaron ${payload.total_generated || 0} DOCX (${payload.start_numero_acta || "-"} a ${payload.end_numero_acta || "-"}).`
+            );
+
+            activeAulaBatchJobId = null;
+            localStorage.removeItem(ACTIVE_AREA_JOB_STORAGE_KEY);
+            setDownloadBatchPauseButton(false);
+            clearTimeout(closeDownloadModalTimer);
+            closeDownloadModalTimer = setTimeout(() => {
+                hideDownloadProgressModal(activeAulaBatchModal);
+                activeAulaBatchModal = null;
+            }, 350);
+        });
+
+        informeEventSource.addEventListener("areas_reports_cancelled", (event) => {
+            let payload = {};
+            try {
+                payload = JSON.parse(event.data || "{}");
+            } catch (_err) {
+                payload = {};
+            }
+
+            const jobId = String(payload.job_id || "").trim();
+            if (!activeAulaBatchJobId || jobId !== activeAulaBatchJobId) return;
+
+            notify(payload.message || "Lote cancelado.");
+            setDownloadProgressMessage(payload.message || "Lote cancelado.");
+            activeAulaBatchJobId = null;
+            localStorage.removeItem(ACTIVE_AREA_JOB_STORAGE_KEY);
+            setDownloadBatchPauseButton(false);
+            clearTimeout(closeDownloadModalTimer);
+            closeDownloadModalTimer = setTimeout(() => {
+                hideDownloadProgressModal(activeAulaBatchModal);
+                activeAulaBatchModal = null;
+            }, 300);
+        });
+
+        informeEventSource.addEventListener("areas_reports_error", (event) => {
+            let payload = {};
+            try {
+                payload = JSON.parse(event.data || "{}");
+            } catch (_err) {
+                payload = {};
+            }
+
+            const jobId = String(payload.job_id || "").trim();
+            if (!activeAulaBatchJobId || jobId !== activeAulaBatchJobId) return;
+
+            notify(payload.error || "Error durante la generación del lote de informes.", true);
+            setDownloadProgressMessage("Ocurrió un error durante la generación.");
+            activeAulaBatchJobId = null;
+            localStorage.removeItem(ACTIVE_AREA_JOB_STORAGE_KEY);
+            setDownloadBatchPauseButton(false);
+            clearTimeout(closeDownloadModalTimer);
+            closeDownloadModalTimer = setTimeout(() => {
+                hideDownloadProgressModal(activeAulaBatchModal);
+                activeAulaBatchModal = null;
+            }, 300);
         });
 
         informeEventSource.addEventListener("connected", () => {
@@ -1129,6 +1332,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         const datosColumnas = Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [];
 
         const modal = showDownloadProgressModal();
+        setDownloadBatchActionsVisible(false);
+        setDownloadProgressTitle("Generando acta");
         startDownloadProgress();
 
         try {
@@ -1156,6 +1361,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             finishDownloadProgress();
 
             if (result.docx_path) triggerFileDownload(result.docx_path);
+            setDownloadProgressTitle("Descarga iniciada");
+            setDownloadProgressMessage("El archivo DOCX se está descargando.");
             notify("Acta DOCX generada y descarga iniciada.");
             activeHistorialTemplateSnapshotPath = null;
             await refreshNumeroActaFormularioActivo(true);
@@ -1188,4 +1395,25 @@ document.addEventListener("DOMContentLoaded", async () => {
             await generarLoteAula();
         });
     });
+
+    const closeDownloadBtn = document.getElementById("btn-download-progress-close");
+    if (closeDownloadBtn) {
+        closeDownloadBtn.addEventListener("click", () => {
+            hideDownloadProgressModal(activeAulaBatchModal || null);
+        });
+    }
+
+    const pauseBtn = document.getElementById("btn-download-progress-pause");
+    if (pauseBtn) {
+        pauseBtn.addEventListener("click", async () => {
+            await controlAulaBatchJob(activeAulaBatchPaused ? "resume" : "pause");
+        });
+    }
+
+    const cancelBtn = document.getElementById("btn-download-progress-cancel");
+    if (cancelBtn) {
+        cancelBtn.addEventListener("click", async () => {
+            await controlAulaBatchJob("cancel");
+        });
+    }
 });

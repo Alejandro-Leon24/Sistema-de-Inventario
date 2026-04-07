@@ -14,7 +14,7 @@ const PLANTILLAS_REQUIRED_VARS = {
     bajas: ["numero_acta"],
     traspaso: ["numero_acta"],
     "fin-gestion": ["numero_acta"],
-    aula: ["numero_acta", "titulo_acta", "tabla_dinamica"],
+    aula: ["tabla_dinamica"],
 };
 
 let plantillasEventSource = null;
