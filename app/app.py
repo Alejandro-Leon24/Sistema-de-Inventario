@@ -3,8 +3,9 @@ import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-if str(BASE_DIR) not in sys.path:
-    sys.path.append(str(BASE_DIR))
+if str(BASE_DIR) in sys.path:
+    sys.path.remove(str(BASE_DIR))
+sys.path.insert(0, str(BASE_DIR))
 
 from flask import Flask, render_template
 
