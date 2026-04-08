@@ -166,6 +166,11 @@
                                     placeholder="Ej: Econ. Jenny Ortega">
                             </div>
                             <div class="col-md-4">
+                                <label class="form-label">Rol de quien entrega</label>
+                                <input type="text" class="form-control" name="rol_entrega" id="entrega-rol-entrega"
+                                    placeholder="Ej: Guardalmacén">
+                            </div>
+                            <div class="col-md-4">
                                 <label class="form-label">Recibido por/ Usuario final</label>
                                 <input type="text" class="form-control" name="recibido_por" id="entrega-recibido"
                                     placeholder="Ej: Abg. Candy Mendoza">
@@ -175,10 +180,28 @@
                                 <input type="text" class="form-control" name="rol_recibe" id="entrega-rol-recibe"
                                     placeholder="Ej: Asistente de secretaria">
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-12">
                                 <label class="form-label">Área de trabajo del usuario final</label>
-                                <input type="text" class="form-control" name="area_trabajo" id="entrega-area-trabajo"
-                                    placeholder="Ej: Oficina de Secretaría General">
+                                <input type="hidden" name="area_trabajo" id="entrega-area-trabajo">
+                                <input type="hidden" name="ubicacion_area_id" id="entrega-ubicacion-area-id">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small">Bloque</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-bloque" id="entrega-bloque">
+                                    <option value="">Seleccionar edificio...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small">Piso</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-piso" id="entrega-piso" disabled>
+                                    <option value="">Seleccionar piso...</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label small">Área</label>
+                                <select class="form-select border-primary-subtle shadow-sm select-area" id="entrega-area" disabled>
+                                    <option value="">Seleccionar área...</option>
+                                </select>
                             </div>
                             <!-- Contenedor dinámico para variables extra detectadas -->
                             <div id="dinamico-entrega-container" class="col-12 row g-4 m-0 p-0"></div>
@@ -210,12 +233,21 @@
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Fecha de Elaboración</label>
-                                <input type="date" class="form-control" name="fecha_emision" id="recepcion-fecha-elaboracion">
+                                <input type="date" class="form-control" name="fecha_elaboracion" id="recepcion-fecha-elaboracion">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Acción de personal</label>
                                 <input type="text" class="form-control" name="accion_personal" id="recepcion-accion-personal"
                                     placeholder="Ej: 501-ADM-24">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Memorándum</label>
+                                <input type="text" class="form-control" name="memorandum" id="recepcion-memorandum"
+                                    placeholder="Ej: UG-JAF-2026-0124-M">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha Memorándum</label>
+                                <input type="date" class="form-control" name="fecha_memorandum" id="recepcion-fecha-memorandum">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Entregado por</label>
@@ -223,48 +255,61 @@
                                     placeholder="Ej: Econ. Jenny Ortega">
                             </div>
                             <div class="col-md-6">
+                                <label class="form-label">Rol de quien entrega</label>
+                                <input type="text" class="form-control" name="rol_entrega" id="recepcion-rol-entrega"
+                                    placeholder="Ej: Guardalmacén">
+                            </div>
+                            <div class="col-md-6">
                                 <label class="form-label">Recibido por/ Usuario final</label>
                                 <input type="text" class="form-control" name="recibido_por" id="recepcion-recibido"
                                     placeholder="Ej: Abg. Candy Mendoza">
                             </div>
-                            <div class="col-md-12">
-                                <label class="form-label">Memorando delegado</label>
-                                <input type="text" class="form-control" name="memorando" id="recepcion-memorando"
-                                    placeholder="Ej: UG-JAF-2026-0124-M del 19 de enero del 2026">
+                            <div class="col-md-6">
+                                <label class="form-label">Rol de quien recibe</label>
+                                <input type="text" class="form-control" name="rol_recibe" id="recepcion-rol-recibe"
+                                    placeholder="Ej: Responsable del área">
                             </div>
-
-                            <div class="col-12 mt-3">
-                                <h6 class="fw-bold text-primary mb-3">Ubicación del Acta</h6>
+                            <div class="col-md-6">
+                                <label class="form-label">Entregado por (segunda delegada)</label>
+                                <input type="text" class="form-control" name="entregado_por_segunda_delegada" id="recepcion-entregado-segunda"
+                                    placeholder="Ej: Ing. Maria Perez">
                             </div>
-                            <div class="col-12 mt-3 text-center resultado-tabla-container d-none" style="min-height: 2.5rem;">
-                                <!-- Aquí va a inyectarse el resultado -->
+                            <div class="col-md-6">
+                                <label class="form-label">Rol segunda delegada</label>
+                                <input type="text" class="form-control" name="rol_entrega_segunda_delegada" id="recepcion-rol-segunda"
+                                    placeholder="Ej: Delegada de Bienes">
                             </div>
-                            <div class="col-md-4 mt-0">
+                            <div class="col-12">
+                                <label class="form-label">Área de trabajo</label>
+                                <input type="hidden" name="area_trabajo" id="recepcion-area-trabajo">
+                                <input type="hidden" name="ubicacion_area_id" id="recepcion-ubicacion-area-id">
+                            </div>
+                            <div class="col-md-4">
                                 <label class="form-label small">Bloque</label>
-                                <select class="form-select border-primary-subtle shadow-sm select-bloque"
-                                    id="recepcion-bloque">
+                                <select class="form-select border-primary-subtle shadow-sm select-bloque" id="recepcion-bloque">
                                     <option value="">Seleccionar edificio...</option>
                                 </select>
                             </div>
-                            <div class="col-md-4 mt-0">
+                            <div class="col-md-4">
                                 <label class="form-label small">Piso</label>
-                                <select class="form-select border-primary-subtle shadow-sm select-piso"
-                                    id="recepcion-piso" disabled>
+                                <select class="form-select border-primary-subtle shadow-sm select-piso" id="recepcion-piso" disabled>
                                     <option value="">Seleccionar piso...</option>
                                 </select>
                             </div>
-                            <div class="col-md-4 mt-0">
+                            <div class="col-md-4">
                                 <label class="form-label small">Área</label>
-                                <select class="form-select border-primary-subtle shadow-sm select-area"
-                                    id="recepcion-area" disabled>
+                                <select class="form-select border-primary-subtle shadow-sm select-area" id="recepcion-area" disabled>
                                     <option value="">Seleccionar área...</option>
                                 </select>
+                            </div>
+                            <div class="col-12 mt-3 text-center resultado-tabla-container d-none" style="min-height: 2.5rem;">
+                                <!-- Aquí va a inyectarse el resultado -->
                             </div>
                         </form>
 
                         <!-- Botonera Inferior -->
                         <div class="d-flex justify-content-center gap-3 mt-3">
-                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
+                            <button class="btn btn-edu-secondary shadow-sm btn-registrar-bienes">Registrar bienes</button>
                             <button class="btn btn-outline-primary shadow-sm btn-historial"><i
                                     class="bi bi-clock-history me-1"></i>Historial</button>
                             <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
@@ -516,10 +561,172 @@
     </div>
 </section>
 
+<!-- Modal de registro temporal de bienes para Acta de Recepción -->
+<div class="modal fade" id="modalRecepcionBienes" tabindex="-1" aria-labelledby="modalRecepcionBienesLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow-lg border-0">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title fw-bold" id="modalRecepcionBienesLabel"><i class="bi bi-box-seam me-2"></i>Registro de bienes nuevos</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body bg-soft">
+                <div class="row g-3">
+                    <div class="col-lg-5">
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <h6 class="fw-bold text-primary mb-3">Datos del bien</h6>
+                                <div class="row g-2">
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Cód. Inventario</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-cod-inventario" placeholder="Ej: 1519847">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Cód. ESBYE</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-cod-esbye" placeholder="Ej: 35344704">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Cuenta</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-cuenta" placeholder="Ej: 1.4.1">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Cantidad</label>
+                                        <input type="number" min="1" step="1" class="form-control form-control-sm" id="recepcion-bien-cantidad" value="1">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Descripción</label>
+                                        <textarea class="form-control form-control-sm" rows="2" id="recepcion-bien-descripcion" placeholder="Ej: Proyector"></textarea>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Marca</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-marca" placeholder="Ej: Epson">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Modelo</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-modelo" placeholder="Ej: X500">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Serie</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-serie" placeholder="Ej: SN123">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Estado</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-estado" placeholder="Ej: BUENO">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Fecha adquisición</label>
+                                        <input type="date" class="form-control form-control-sm" id="recepcion-bien-fecha-adquisicion">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Valor</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-valor" placeholder="0,00">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Usuario final</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-usuario-final" placeholder="Ej: Abg. Ana Perez">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Observación</label>
+                                        <textarea class="form-control form-control-sm" rows="2" id="recepcion-bien-observacion" placeholder="Notas adicionales"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-footer bg-white d-flex gap-2 justify-content-end">
+                                <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="btn-recepcion-bien-cancelar">Cancelar</button>
+                                <button type="button" class="btn btn-primary btn-sm" id="btn-recepcion-bien-guardar"><i class="bi bi-plus-circle me-1"></i>Guardar bien</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-7">
+                        <div class="card border-0 shadow-sm h-100">
+                            <div class="card-body d-flex flex-column">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h6 class="fw-bold text-primary mb-0">Bienes registrados temporalmente</h6>
+                                    <span class="badge bg-primary" id="recepcion-bienes-count">0</span>
+                                </div>
+                                <div class="table-responsive" style="max-height: 450px;">
+                                    <table class="table table-sm table-hover table-bordered align-middle">
+                                        <thead class="table-light sticky-top">
+                                            <tr>
+                                                <th style="width:55px;">N</th>
+                                                <th>CÓD. INV.</th>
+                                                <th>DESCRIPCIÓN</th>
+                                                <th>MARCA</th>
+                                                <th>MODELO</th>
+                                                <th>CANT.</th>
+                                                <th style="width:90px;" class="text-center">Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="tbody-recepcion-bienes">
+                                            <tr><td colspan="7" class="text-center text-muted">Aún no hay bienes registrados.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="small text-muted mt-2">Haz clic en una fila para editarla.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light justify-content-between">
+                <span class="small text-muted">Los datos son temporales y solo se guardan al generar el acta.</span>
+                <div>
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+                    <button type="button" class="btn btn-primary" id="btn-confirmar-recepcion-bienes"><i class="bi bi-check2-circle me-1"></i>Usar estos bienes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de códigos repetidos (reutilizado del flujo de Inventario) -->
+<div class="modal fade" id="modalDuplicadosInventario" tabindex="-1" aria-hidden="true" style="z-index: 9999 !important;">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable" style="z-index: 10000 !important;">
+        <div class="modal-content border-warning-subtle">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2 text-warning-emphasis"></i>
+                    Códigos repetidos detectados
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="duplicados-resumen" class="small text-muted mb-2"></p>
+                <div id="duplicados-lista" class="d-grid gap-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-duplicados-cancelar">Cancelar</button>
+                <button type="button" class="btn btn-warning btn-sm" id="btn-duplicados-continuar"><i class="bi bi-check2-circle me-1"></i>Registrar de todas formas</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de bloqueo de acceso a actas por plantilla incompleta -->
+<div class="modal fade" id="modalBloqueoActasPlantilla" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-warning-subtle shadow-lg">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2 text-warning-emphasis"></i>
+                    Acceso bloqueado a Actas
+                </h5>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">No puede ingresar al módulo de actas porque falta plantilla o variables obligatorias.</p>
+                <div id="bloqueo-actas-detalle" class="small"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="btn-bloqueo-actas-ok">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="{{ url_for('static', filename='js/utils/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/utils/helpers.js') }}"></script>
-<script src="{{ url_for('static', filename='js/funciones-informe.js', v=1.2) }}"></script>
-<script src="{{ url_for('static', filename='js/modulo-informe-preview.js', v=1.2) }}"></script>
+<script src="{{ url_for('static', filename='js/inventario-modales.js') }}"></script>
+<script src="{{ url_for('static', filename='js/funciones-informe.js', v=1.3) }}"></script>
+<script src="{{ url_for('static', filename='js/modulo-informe-preview.js', v=1.3) }}"></script>
 <!-- Modal Historial de Actas -->
 <div class="modal fade" id="modalHistorialActas" tabindex="-1" aria-labelledby="modalHistorialLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
@@ -548,6 +755,36 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Panel flotante de progreso (solo Informe) -->
+<div id="download-progress-floating" class="download-progress-floating d-none" aria-live="polite" aria-atomic="true">
+    <div class="card shadow border-0">
+        <div class="card-body p-3">
+            <div class="d-flex align-items-start justify-content-between gap-2">
+                <div>
+                    <div class="fw-semibold text-primary" id="descarga-progress-title">Generando acta</div>
+                    <div class="small text-muted" id="descarga-progress-message">Preparando descarga...</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-light border" id="btn-download-progress-close" aria-label="Ocultar">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="progress mt-2" style="height: 8px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" id="descarga-progress-bar"
+                    role="progressbar" style="width: 0%"></div>
+            </div>
+            <div class="small text-muted mt-1" id="descarga-progress-text">0%</div>
+            <div class="d-flex gap-2 mt-2 d-none" id="download-progress-actions">
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-download-progress-pause">
+                    <i class="bi bi-pause-fill me-1"></i>Pausar
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="btn-download-progress-cancel">
+                    <i class="bi bi-x-circle me-1"></i>Cancelar
+                </button>
             </div>
         </div>
     </div>

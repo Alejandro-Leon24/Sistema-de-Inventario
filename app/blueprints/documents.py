@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import shutil
 import tempfile
 import threading
@@ -85,6 +86,133 @@ def _safe_filename_part(text):
     value = re.sub(r"[^a-z0-9_-]+", "-", value)
     value = re.sub(r"-+", "-", value).strip("-")
     return value or "sin-numero"
+
+
+def _format_fecha_es_larga(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    raw = raw[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", raw) else raw
+    try:
+        dt = datetime.strptime(raw, "%Y-%m-%d")
+    except Exception:
+        return raw
+
+    meses = [
+        "enero",
+        "febrero",
+        "marzo",
+        "abril",
+        "mayo",
+        "junio",
+        "julio",
+        "agosto",
+        "septiembre",
+        "octubre",
+        "noviembre",
+        "diciembre",
+    ]
+    return f"{dt.day} de {meses[dt.month - 1]} del {dt.year}"
+
+
+def _is_fecha_key(key):
+    normalized = str(key or "").strip().lower()
+    if not normalized:
+        return False
+    return normalized == "fecha" or normalized.startswith("fecha_") or normalized.endswith("_fecha")
+
+
+def _normalize_fecha_fields(record):
+    data = dict(record or {})
+    for key in list(data.keys()):
+        if _is_fecha_key(key):
+            data[key] = _format_fecha_es_larga(data.get(key))
+    return data
+
+
+def _normalize_table_dates(table_data):
+    if not isinstance(table_data, list):
+        return table_data
+    normalized = []
+    for row in table_data:
+        if isinstance(row, dict):
+            normalized.append(_normalize_fecha_fields(row))
+        else:
+            normalized.append(row)
+    return normalized
+
+
+def _normalize_informe_context(tipo, context_data):
+    ctx = _normalize_fecha_fields(context_data)
+    tipo_norm = str(tipo or "").strip().lower()
+
+    # Compatibilidad de nombres históricos en plantillas.
+    if not ctx.get("memorandum") and ctx.get("memorando"):
+        ctx["memorandum"] = ctx.get("memorando")
+
+    if tipo_norm == "recepcion":
+        if not ctx.get("fecha_elaboracion") and ctx.get("fecha_emision"):
+            ctx["fecha_elaboracion"] = ctx.get("fecha_emision")
+        if not ctx.get("fecha_emision") and ctx.get("fecha_elaboracion"):
+            ctx["fecha_emision"] = ctx.get("fecha_elaboracion")
+
+    # Alias con acentos por compatibilidad si la plantilla los usa.
+    if ctx.get("fecha_elaboracion") and not ctx.get("fecha_elaboración"):
+        ctx["fecha_elaboración"] = ctx.get("fecha_elaboracion")
+    if ctx.get("accion_personal") and not ctx.get("acción_personal"):
+        ctx["acción_personal"] = ctx.get("accion_personal")
+
+    return ctx
+
+
+def _parse_positive_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _build_allowed_recepcion_location_tokens():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            b.nombre AS bloque_nombre,
+            p.nombre AS piso_nombre,
+            a.nombre AS area_nombre
+        FROM areas a
+        JOIN pisos p ON p.id = a.piso_id
+        JOIN bloques b ON b.id = p.bloque_id
+        ORDER BY b.nombre, p.nombre, a.nombre
+        """
+    ).fetchall()
+
+    allowed = set()
+    for row in rows:
+        bloque = str(row["bloque_nombre"] or "").strip()
+        piso = str(row["piso_nombre"] or "").strip()
+        area = str(row["area_nombre"] or "").strip()
+        if bloque:
+            allowed.add(f"Bloque {bloque}")
+        if piso and bloque:
+            allowed.add(f"Piso {piso} (Bloque {bloque})")
+        if area and piso and bloque:
+            allowed.add(f"Area {area} (Piso {piso}, Bloque {bloque})")
+    return allowed
+
+
+def _resolve_area_from_form(context_data):
+    area_id = _parse_positive_int(context_data.get("ubicacion_area_id"))
+    if not area_id:
+        return None
+    row = get_db().execute(
+        "SELECT id FROM areas WHERE id = ? LIMIT 1",
+        (area_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return int(row["id"])
 
 
 def _get_target_areas_for_report(scope, area_id=None, piso_id=None, bloque_id=None):
@@ -192,6 +320,7 @@ def _run_area_report_job(app, job_id, scope, target_areas, numeros_acta, lot_dir
                         )
                         for path in generated_docx:
                             _safe_remove_file(path, is_output_path_allowed)
+                        _cleanup_area_reports_dir(lot_dir)
                         return
 
                     if task_state.get("pause_requested"):
@@ -238,6 +367,7 @@ def _run_area_report_job(app, job_id, scope, target_areas, numeros_acta, lot_dir
                     "total_bienes": total_bienes,
                     "titulo_acta": f"{area_nombre} ACTA No.{numero_acta}",
                 }
+                context_data = _normalize_informe_context("aula", context_data)
                 table_columns = [
                     {"id": "descripcion", "label": "DESCRIPCION"},
                     {"id": "cantidad", "label": "CANTIDAD"},
@@ -285,7 +415,24 @@ def _run_area_report_job(app, job_id, scope, target_areas, numeros_acta, lot_dir
                 )
 
             download_kind = "docx" if len(generated_docx) == 1 else "zip"
-            download_path = generated_docx[0] if len(generated_docx) == 1 else os.path.join(lot_dir, "informes-area.zip")
+
+            zip_filename = "informes-area.zip"
+            first_area = target_areas[0] if target_areas else {}
+            bloque_nombre = _safe_filename_part(first_area.get("bloque_nombre") or "")
+            piso_nombre = _safe_filename_part(first_area.get("piso_nombre") or "")
+            scope_norm = str(scope or "").strip().lower()
+            if scope_norm == "bloque" and bloque_nombre and bloque_nombre != "sin-numero":
+                zip_filename = f"informes-area-{bloque_nombre}.zip"
+            elif scope_norm == "piso":
+                parts = [p for p in [bloque_nombre, piso_nombre] if p and p != "sin-numero"]
+                if parts:
+                    zip_filename = f"informes-area-{'-'.join(parts)}.zip"
+
+            download_path = (
+                generated_docx[0]
+                if len(generated_docx) == 1
+                else os.path.join(lot_dir, zip_filename)
+            )
             zip_path = download_path if download_kind == "zip" else None
 
             if download_kind == "zip":
@@ -336,6 +483,9 @@ def _run_area_report_job(app, job_id, scope, target_areas, numeros_acta, lot_dir
             )
     except Exception as exc:
         logger.exception("Error en job asíncrono de informes por área job_id=%s", job_id)
+        for path in generated_docx:
+            _safe_remove_file(path, is_output_path_allowed)
+        _cleanup_area_reports_dir(lot_dir)
         _set_area_report_task_state(job_id, status="error", error=str(exc))
         publish_event(
             "areas_reports_error",
@@ -389,6 +539,13 @@ def _cleanup_empty_parent_dirs(path, stop_at):
         except Exception:
             pass
         break
+
+
+def _cleanup_area_reports_dir(path):
+    # Borra carpetas vacías bajo informes-area sin eliminar la raíz compartida.
+    if not path:
+        return
+    _cleanup_empty_parent_dirs(os.path.join(path, "_cleanup_.tmp"), AREA_REPORTS_OUTPUT_ROOT)
 
 
 def _snapshot_template_for_historial(tipo, template_path):
@@ -542,8 +699,9 @@ def api_generar_informe():
     payload = request.json
     tipo = payload.get("tipo", "acta_entrega")
     context_data_raw = dict(payload.get("datos_formulario", {}) or {})
-    context_data = dict(context_data_raw or {})
-    vista_previa = payload.get("vista_previa", False)
+    context_data = _normalize_informe_context(tipo, context_data_raw)
+    header_preview = str(request.headers.get("X-Preview-Request") or "").strip().lower() in {"1", "true", "yes"}
+    vista_previa = bool(payload.get("vista_previa", False)) or header_preview
 
     # Compatibilidad entre plantillas que usan usuario_final y otras que usan recibido_por.
     if context_data.get("recibido_por") and not context_data.get("usuario_final"):
@@ -604,8 +762,104 @@ def api_generar_informe():
 
     tabla_data = payload.get("datos_tabla", [])
     tabla_columnas = payload.get("datos_columnas", [])
+    entrega_selected_ids = []
 
-    nombres_campos_personal = ["entregado_por", "recibido_por", "usuario_final", "administradora"]
+    tipo_norm = str(tipo or "").strip().lower()
+    target_area_id = None
+    if not vista_previa and tipo_norm in {"entrega", "recepcion"}:
+        target_area_id = _resolve_area_from_form(context_data)
+        if not target_area_id:
+            return jsonify({
+                "success": False,
+                "error": "Debe seleccionar una ubicación válida (área) desde los selectores.",
+            }), 400
+    target_area_id_int = int(target_area_id) if target_area_id is not None else None
+
+    if not vista_previa and tipo_norm == "entrega":
+        required_entrega = [
+            "numero_acta",
+            "fecha_corte",
+            "fecha_emision",
+            "accion_personal",
+            "entregado_por",
+            "rol_entrega",
+            "recibido_por",
+            "rol_recibe",
+            "area_trabajo",
+        ]
+        missing_entrega = [k for k in required_entrega if not str(context_data.get(k) or "").strip()]
+        if missing_entrega:
+            labels = ", ".join(missing_entrega)
+            return jsonify({
+                "success": False,
+                "error": f"Faltan campos obligatorios en entrega: {labels}.",
+            }), 400
+
+        if not isinstance(tabla_data, list) or not tabla_data or not isinstance(tabla_columnas, list) or not tabla_columnas:
+            return jsonify({
+                "success": False,
+                "error": "La variable {{tabla_dinamica}} es obligatoria en Entrega: debe extraer al menos un bien.",
+            }), 400
+
+        entrega_selected_ids = sorted(
+            {
+                item_id
+                for item_id in (
+                    _parse_positive_int((row or {}).get("id")) for row in (tabla_data or [])
+                )
+                if item_id
+            }
+        )
+        if not entrega_selected_ids:
+            return jsonify({
+                "success": False,
+                "error": "No se identificaron bienes/inmuebles válidos para mover. Extraiga desde Inventario y seleccione registros válidos.",
+            }), 400
+
+    if not vista_previa and tipo_norm == "recepcion":
+        required_recepcion = [
+            "numero_acta",
+            "entregado_por",
+            "rol_entrega",
+            "recibido_por",
+            "rol_recibe",
+            "fecha_corte",
+            "fecha_elaboracion",
+            "accion_personal",
+            "memorandum",
+            "fecha_memorandum",
+            "entregado_por_segunda_delegada",
+            "rol_entrega_segunda_delegada",
+            "area_trabajo",
+        ]
+        missing = [k for k in required_recepcion if not str(context_data.get(k) or "").strip()]
+        if missing:
+            labels = ", ".join(missing)
+            return jsonify({
+                "success": False,
+                "error": f"Faltan campos obligatorios en recepción: {labels}.",
+            }), 400
+
+        if not isinstance(tabla_data, list) or not tabla_data or not isinstance(tabla_columnas, list) or not tabla_columnas:
+            return jsonify({
+                "success": False,
+                "error": "Debe registrar al menos un bien para generar el acta de recepción.",
+            }), 400
+
+        area_trabajo = str(context_data.get("area_trabajo") or "").strip()
+        if not area_trabajo:
+            return jsonify({
+                "success": False,
+                "error": "En Acta de Recepción, el campo Área de trabajo es obligatorio.",
+            }), 400
+
+    nombres_campos_personal = [
+        "entregado_por",
+        "recibido_por",
+        "usuario_final",
+        "administradora",
+        "entregado_por_segunda_delegada",
+    ]
     for campo in nombres_campos_personal:
         if campo in context_data and context_data[campo]:
             get_or_create_personal(context_data[campo])
@@ -696,6 +950,89 @@ def api_generar_informe():
             )
 
         if not vista_previa:
+            db = get_db()
+            try:
+                if tipo_norm == "entrega":
+                    placeholders = ",".join(["?"] * len(entrega_selected_ids))
+                    db.execute(
+                        f"""
+                        UPDATE inventario_items
+                        SET area_id = ?, ubicacion = ?, actualizado_en = CURRENT_TIMESTAMP
+                        WHERE id IN ({placeholders})
+                        """,
+                        (target_area_id_int, str(context_data.get("area_trabajo") or "").strip(), *entrega_selected_ids),
+                    )
+
+                if tipo_norm == "recepcion":
+                    next_item_numero_row = db.execute(
+                        "SELECT COALESCE(MAX(item_numero), 0) + 1 AS next_item FROM inventario_items"
+                    ).fetchone()
+                    next_item_numero = int(next_item_numero_row["next_item"]) if next_item_numero_row else 1
+
+                    for idx, row in enumerate(tabla_data or []):
+                        item = row or {}
+                        cantidad_raw = item.get("cantidad")
+                        valor_raw = item.get("valor")
+                        cantidad_text = str(cantidad_raw or "").strip()
+                        valor_text = str(valor_raw or "").strip()
+                        try:
+                            cantidad = int(cantidad_text) if cantidad_text else 1
+                        except (TypeError, ValueError):
+                            cantidad = 1
+                        try:
+                            valor = float(valor_text) if valor_text else None
+                        except (TypeError, ValueError):
+                            valor = None
+
+                        db.execute(
+                            """
+                            INSERT INTO inventario_items (
+                                item_numero,
+                                cod_inventario,
+                                cod_esbye,
+                                cuenta,
+                                cantidad,
+                                descripcion,
+                                ubicacion,
+                                marca,
+                                modelo,
+                                serie,
+                                estado,
+                                usuario_final,
+                                fecha_adquisicion,
+                                valor,
+                                observacion,
+                                area_id
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                next_item_numero + idx,
+                                str(item.get("cod_inventario") or "").strip() or None,
+                                str(item.get("cod_esbye") or "").strip() or None,
+                                str(item.get("cuenta") or "").strip() or None,
+                                cantidad,
+                                str(item.get("descripcion") or "").strip() or None,
+                                str(context_data.get("area_trabajo") or "").strip() or None,
+                                str(item.get("marca") or "").strip() or None,
+                                str(item.get("modelo") or "").strip() or None,
+                                str(item.get("serie") or "").strip() or None,
+                                str(item.get("estado") or "").strip() or None,
+                                str(item.get("usuario_final") or "").strip() or None,
+                                str(item.get("fecha_adquisicion") or "").strip() or None,
+                                valor,
+                                str(item.get("observacion") or "").strip() or None,
+                                target_area_id_int,
+                            ),
+                        )
+            except sqlite3.DatabaseError:
+                logger.exception("Error de base de datos al actualizar inventario en generación de acta")
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": "La base de datos presenta corrupción (database disk image is malformed). Debe ejecutar reparación o restaurar respaldo antes de guardar cambios de inventario.",
+                    }
+                ), 500
+
             plantilla_hash, plantilla_snapshot_path, plantilla_variables = _snapshot_template_for_historial(
                 tipo,
                 template_path,
@@ -857,6 +1194,7 @@ def api_generar_informes_areas_lote():
             "total_bienes": total_bienes,
             "titulo_acta": f"{area_nombre} ACTA No.{numero_acta}",
         }
+        context_data = _normalize_informe_context("aula", context_data)
         table_columns = [
             {"id": "descripcion", "label": "DESCRIPCION"},
             {"id": "cantidad", "label": "CANTIDAD"},
@@ -883,6 +1221,7 @@ def api_generar_informes_areas_lote():
         )
 
         if not docx_path:
+            _cleanup_area_reports_dir(output_dir)
             return jsonify(
                 {
                     "success": False,

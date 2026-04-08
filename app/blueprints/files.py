@@ -12,10 +12,58 @@ except ModuleNotFoundError:
     from utils.constants import AREA_EXPORT_COLUMNS, INVENTORY_EXPORT_COLUMNS
     from utils.excel_export import generar_excel
 
-from .documents import ACTAS_OUTPUT_ROOT, is_output_path_allowed
+from .documents import ACTAS_OUTPUT_ROOT, AREA_REPORTS_OUTPUT_ROOT, PREVIEW_OUTPUT_ROOT, is_output_path_allowed
 
 
 files_bp = Blueprint("files", __name__)
+
+
+def _cleanup_empty_parent_dirs(path, stop_at):
+    current = os.path.abspath(os.path.dirname(path or ""))
+    stop_dir = os.path.abspath(stop_at)
+    while current.startswith(stop_dir) and current != stop_dir:
+        try:
+            if os.path.isdir(current) and not os.listdir(current):
+                os.rmdir(current)
+                current = os.path.abspath(os.path.dirname(current))
+                continue
+        except Exception:
+            pass
+        break
+
+
+def _is_temporary_download_path(path):
+    if not path:
+        return False
+    real_path = os.path.abspath(path)
+    reports_root = os.path.abspath(AREA_REPORTS_OUTPUT_ROOT)
+    actas_root = os.path.abspath(ACTAS_OUTPUT_ROOT)
+    preview_root = os.path.abspath(PREVIEW_OUTPUT_ROOT)
+    return (
+        real_path.startswith(reports_root)
+        or real_path.startswith(actas_root)
+        or real_path.startswith(preview_root)
+    )
+
+
+def _cleanup_parent_dirs_for_temp_path(path):
+    if not path:
+        return
+    real_path = os.path.abspath(path)
+    reports_root = os.path.abspath(AREA_REPORTS_OUTPUT_ROOT)
+    actas_root = os.path.abspath(ACTAS_OUTPUT_ROOT)
+    preview_root = os.path.abspath(PREVIEW_OUTPUT_ROOT)
+
+    stop_at = None
+    if real_path.startswith(reports_root):
+        stop_at = reports_root
+    elif real_path.startswith(actas_root):
+        stop_at = actas_root
+    elif real_path.startswith(preview_root):
+        stop_at = preview_root
+
+    if stop_at:
+        _cleanup_empty_parent_dirs(real_path, stop_at)
 
 
 @files_bp.get("/api/ubicaciones/export")
@@ -69,7 +117,21 @@ def api_descargar():
     if path and os.path.exists(path):
         if not is_output_path_allowed(path):
             return "Ruta no permitida", 403
-        return send_file(path, as_attachment=True)
+        response = send_file(path, as_attachment=True)
+
+        if _is_temporary_download_path(path):
+            real_path = os.path.abspath(path)
+
+            @response.call_on_close
+            def _cleanup_temp_download():
+                try:
+                    if os.path.exists(real_path):
+                        os.remove(real_path)
+                except Exception:
+                    pass
+                _cleanup_parent_dirs_for_temp_path(real_path)
+
+        return response
     return "No encontrado", 404
 
 

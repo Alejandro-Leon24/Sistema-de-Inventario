@@ -1,6 +1,6 @@
 window.api = {
-    async get(url) {
-        const response = await fetch(url);
+    async get(url, options = {}) {
+        const response = await fetch(url, options);
         const payload = await response.json();
         if (!response.ok) {
             const error = new Error(payload.error || "Error de servidor");

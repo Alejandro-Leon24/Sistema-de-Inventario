@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS inventario_items (
 
 CREATE INDEX IF NOT EXISTS idx_inventario_cod_inventario ON inventario_items(cod_inventario);
 CREATE INDEX IF NOT EXISTS idx_inventario_cod_esbye ON inventario_items(cod_esbye);
+CREATE INDEX IF NOT EXISTS idx_inventario_area_id ON inventario_items(area_id);
+CREATE INDEX IF NOT EXISTS idx_inventario_item_numero_id ON inventario_items(item_numero, id);
 
 CREATE TABLE IF NOT EXISTS column_mappings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

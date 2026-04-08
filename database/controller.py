@@ -985,6 +985,8 @@ def _ensure_inventory_search_indexes():
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_descripcion ON inventario_items(descripcion)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_cod_inventario ON inventario_items(cod_inventario)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_cod_esbye ON inventario_items(cod_esbye)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_area_id ON inventario_items(area_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_item_numero_id ON inventario_items(item_numero, id)")
     db.commit()
 
 
@@ -1078,10 +1080,30 @@ def _build_inventory_where_clause(filters=None):
         raw_search = filters["search"].strip()
         fts_query = _build_fts_query(raw_search)
         if fts_query and _has_inventory_fts():
+            like_token = f"%{raw_search}%"
             where_clauses.append(
-                "i.id IN (SELECT rowid FROM inventario_items_fts WHERE inventario_items_fts MATCH ?)"
+                "(" 
+                "i.id IN (SELECT rowid FROM inventario_items_fts WHERE inventario_items_fts MATCH ?) "
+                "OR i.descripcion LIKE ? "
+                "OR i.cod_inventario LIKE ? "
+                "OR i.cod_esbye LIKE ? "
+                "OR i.cuenta LIKE ? "
+                "OR i.ubicacion LIKE ? "
+                "OR i.marca LIKE ? "
+                "OR i.modelo LIKE ? "
+                "OR i.serie LIKE ? "
+                "OR i.usuario_final LIKE ? "
+                "OR i.observacion LIKE ? "
+                "OR i.descripcion_esbye LIKE ? "
+                "OR i.marca_esbye LIKE ? "
+                "OR i.modelo_esbye LIKE ? "
+                "OR i.serie_esbye LIKE ? "
+                "OR i.ubicacion_esbye LIKE ? "
+                "OR i.observacion_esbye LIKE ?"
+                ")"
             )
             params.append(fts_query)
+            params.extend([like_token] * 16)
         else:
             token = f"%{raw_search}%"
             where_clauses.append(

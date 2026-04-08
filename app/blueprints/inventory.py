@@ -163,6 +163,18 @@ def api_inventory_search_diagnostics():
     return jsonify({"data": data})
 
 
+@inventory_bp.get("/api/inventario/duplicados")
+def api_inventory_duplicates():
+    cod_inventario = request.args.get("cod_inventario", default="", type=str)
+    cod_esbye = request.args.get("cod_esbye", default="", type=str)
+    duplicates = find_inventory_code_duplicates(
+        cod_inventario=cod_inventario,
+        cod_esbye=cod_esbye,
+        limit=50,
+    )
+    return jsonify({"success": True, "duplicates": duplicates})
+
+
 @inventory_bp.get("/api/preferencias")
 def api_get_preferencias():
     return jsonify({"data": get_user_preferences(DEFAULT_USER_KEY)})

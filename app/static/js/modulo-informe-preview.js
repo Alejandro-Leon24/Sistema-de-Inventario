@@ -5,11 +5,26 @@ const REQUIRED_VARS_INFORME = {
         "fecha_emision",
         "accion_personal",
         "entregado_por",
+        "rol_entrega",
         "recibido_por",
         "rol_recibe",
         "area_trabajo",
     ],
-    recepcion: ["numero_acta"],
+    recepcion: [
+        "numero_acta",
+        "entregado_por",
+        "rol_entrega",
+        "recibido_por",
+        "rol_recibe",
+        "fecha_corte",
+        "fecha_elaboracion",
+        "accion_personal",
+        "memorandum",
+        "fecha_memorandum",
+        "entregado_por_segunda_delegada",
+        "rol_entrega_segunda_delegada",
+        "area_trabajo",
+    ],
     movimiento: ["numero_acta"],
     bajas: ["numero_acta"],
     traspaso: ["numero_acta"],
@@ -169,16 +184,18 @@ function buildPreviewPayload(tipo) {
 
     const entries = new FormData(form).entries();
     const datosFormulario = Object.fromEntries(entries);
-    const tablaSeleccionada = Array.isArray(window._globalSelectedTableRows) ? window._globalSelectedTableRows : [];
-    const columnasSeleccionadas = Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [];
-    const required = REQUIRED_VARS_INFORME[tipo] || [];
-    const hasRequiredFormValues =
-        required.length === 0 ||
-        required.every((key) => String(datosFormulario[key] || "").trim() !== "");
+    const tablePayload = typeof window.getInformeActaTablePayload === "function"
+        ? window.getInformeActaTablePayload(tipo)
+        : {
+            datosTabla: Array.isArray(window._globalSelectedTableRows) ? window._globalSelectedTableRows : [],
+            datosColumnas: Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [],
+        };
+    const tablaSeleccionada = Array.isArray(tablePayload.datosTabla) ? tablePayload.datosTabla : [];
+    const columnasSeleccionadas = Array.isArray(tablePayload.datosColumnas) ? tablePayload.datosColumnas : [];
     const hasAnyFormValues = Object.values(datosFormulario).some((v) => String(v || "").trim() !== "");
     const hasTableValues = tablaSeleccionada.length > 0 && columnasSeleccionadas.length > 0;
+    if (tipo === "recepcion" && !hasTableValues) return null;
     // Evita llamadas pesadas mientras el usuario apenas empieza a escribir.
-    if (!hasRequiredFormValues && !hasTableValues && !hasAnyFormValues) return null;
     if (!hasAnyFormValues && !hasTableValues) return null;
 
     return {
@@ -213,7 +230,10 @@ async function triggerPreview() {
     try {
         const response = await fetch("/api/informes/generar", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-Preview-Request": "1",
+            },
             body: JSON.stringify(payload),
         });
         const json = await response.json();

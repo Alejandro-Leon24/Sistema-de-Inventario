@@ -33,7 +33,186 @@ let activeHistorialTemplateSnapshotPath = null;
 let activeAulaBatchJobId = null;
 let activeAulaBatchModal = null;
 let activeAulaBatchPaused = false;
-const ACTIVE_AREA_JOB_STORAGE_KEY = "inventario_area_report_active_job";
+let recepcionBienesTemp = [];
+let recepcionEditIndex = -1;
+
+const RECEPCION_BIENES_COLUMNS = [
+    { id: "cod_inventario", label: "CODIGO INV." },
+    { id: "cod_esbye", label: "COD. ESBYE" },
+    { id: "cuenta", label: "CUENTA" },
+    { id: "cantidad", label: "CANT" },
+    { id: "descripcion", label: "DESCRIPCION" },
+    { id: "marca", label: "MARCA" },
+    { id: "modelo", label: "MODELO" },
+    { id: "serie", label: "SERIE" },
+    { id: "estado", label: "ESTADO" },
+    { id: "ubicacion", label: "UBICACION" },
+    { id: "fecha_adquisicion", label: "FECHA ADQUISICION" },
+    { id: "valor", label: "VALOR" },
+    { id: "usuario_final", label: "USUARIO FINAL" },
+    { id: "observacion", label: "OBSERVACION" },
+];
+
+const ACTA_TEMPLATE_REQUIRED_VARS = {
+    entrega: [
+        "numero_acta",
+        "fecha_corte",
+        "fecha_emision",
+        "accion_personal",
+        "entregado_por",
+        "rol_entrega",
+        "recibido_por",
+        "rol_recibe",
+        "area_trabajo",
+        "tabla_dinamica",
+    ],
+    recepcion: [
+        "numero_acta",
+        "entregado_por",
+        "rol_entrega",
+        "recibido_por",
+        "rol_recibe",
+        "fecha_corte",
+        "fecha_elaboracion",
+        "accion_personal",
+        "memorandum",
+        "fecha_memorandum",
+        "entregado_por_segunda_delegada",
+        "rol_entrega_segunda_delegada",
+        "area_trabajo",
+        "tabla_dinamica",
+    ],
+    aula: ["tabla_dinamica"],
+};
+
+const ACTA_TEMPLATE_REQUIRED_ALIASES = {
+    entrega: {
+        rol_recibe: ["usuario_final", "recibe_custodio"],
+        area_trabajo: ["ubicacion", "ubicacion_entrega"],
+    },
+};
+
+function normalizeTemplateVarName(value) {
+    let v = String(value || "").trim();
+    if (!v) return "";
+    v = v.replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "");
+    v = v.split("|")[0].trim();
+    v = v.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
+    v = v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    v = v.toLowerCase().replace(/[\s-]+/g, "_");
+    v = v.replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+    return v;
+}
+
+function templateVarSet(variables) {
+    return new Set((variables || []).map((v) => normalizeTemplateVarName(v)).filter(Boolean));
+}
+
+function isActaRequiredVarPresent(tipo, requiredKey, foundSet) {
+    const normalized = normalizeTemplateVarName(requiredKey);
+    if (!normalized) return true;
+    if (foundSet.has(normalized)) return true;
+
+    const aliases = (ACTA_TEMPLATE_REQUIRED_ALIASES[tipo] || {})[normalized] || [];
+    return aliases.some((alias) => foundSet.has(normalizeTemplateVarName(alias)));
+}
+
+function resolveActaGuardDestination() {
+    const fallback = "/ajustes";
+    const rawRef = String(document.referrer || "").trim();
+    if (!rawRef) return fallback;
+    try {
+        const refUrl = new URL(rawRef, window.location.origin);
+        if (refUrl.origin !== window.location.origin) return fallback;
+        const current = `${window.location.pathname}${window.location.search}`;
+        const refPath = `${refUrl.pathname}${refUrl.search}`;
+        if (!refPath || refPath === current || refUrl.pathname === window.location.pathname) return fallback;
+        return `${refUrl.pathname}${refUrl.search}${refUrl.hash}`;
+    } catch (_err) {
+        return fallback;
+    }
+}
+
+function showActaGuardModal(issues) {
+    const modalEl = document.getElementById("modalBloqueoActasPlantilla");
+    const detailEl = document.getElementById("bloqueo-actas-detalle");
+    const okBtn = document.getElementById("btn-bloqueo-actas-ok");
+    if (!modalEl || !detailEl || !okBtn) {
+        window.location.href = resolveActaGuardDestination();
+        return;
+    }
+
+    detailEl.innerHTML = "";
+    const list = document.createElement("ul");
+    list.className = "mb-0 ps-3";
+    issues.forEach((issue) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<strong>${issue.tipoLabel}:</strong> ${issue.reason}`;
+        list.appendChild(li);
+    });
+    detailEl.appendChild(list);
+
+    if (okBtn.dataset.bound !== "1") {
+        okBtn.dataset.bound = "1";
+        okBtn.addEventListener("click", () => {
+            window.location.href = resolveActaGuardDestination();
+        });
+    }
+
+    const modal = new bootstrap.Modal(modalEl, { backdrop: "static", keyboard: false });
+    modal.show();
+}
+
+async function checkActaTemplatesAccessGuard() {
+    const tipos = ["entrega", "recepcion", "aula"];
+    const labels = { entrega: "Acta de Entrega", recepcion: "Acta de Recepción", aula: "Inventario por Área" };
+    const issues = [];
+
+    for (const tipo of tipos) {
+        try {
+            const res = await fetch(`/api/plantillas/estado?tipo=${encodeURIComponent(tipo)}`);
+            const payload = await res.json();
+            if (!res.ok || !payload.success || !payload.existe) {
+                issues.push({ tipoLabel: labels[tipo] || tipo, reason: "No existe plantilla cargada." });
+                continue;
+            }
+
+            const found = templateVarSet(payload.variables || []);
+            const required = ACTA_TEMPLATE_REQUIRED_VARS[tipo] || [];
+            const missing = required.filter((k) => !isActaRequiredVarPresent(tipo, k, found));
+            if (missing.length) {
+                const rendered = missing.map((k) => `{{${k}}}`).join(", ");
+                issues.push({
+                    tipoLabel: labels[tipo] || tipo,
+                    reason: `Faltan variables obligatorias: ${rendered}.`,
+                });
+            }
+        } catch (_err) {
+            issues.push({ tipoLabel: labels[tipo] || tipo, reason: "No se pudo verificar la plantilla." });
+        }
+    }
+
+    if (!issues.length) return true;
+    showActaGuardModal(issues);
+    return false;
+}
+
+function _updateUbicacionFromSelects(prefix) {
+    const bloqueSel = document.getElementById(`${prefix}-bloque`);
+    const pisoSel = document.getElementById(`${prefix}-piso`);
+    const areaSel = document.getElementById(`${prefix}-area`);
+    const areaTrabajo = document.getElementById(`${prefix}-area-trabajo`);
+    const areaIdHidden = document.getElementById(`${prefix}-ubicacion-area-id`);
+    if (!bloqueSel || !pisoSel || !areaSel || !areaTrabajo || !areaIdHidden) return;
+
+    const parts = [];
+    if (String(bloqueSel.value || "").trim()) parts.push(bloqueSel.options[bloqueSel.selectedIndex]?.textContent || "");
+    if (String(pisoSel.value || "").trim()) parts.push(pisoSel.options[pisoSel.selectedIndex]?.textContent || "");
+    if (String(areaSel.value || "").trim()) parts.push(areaSel.options[areaSel.selectedIndex]?.textContent || "");
+
+    areaTrabajo.value = parts.map((p) => String(p || "").trim()).filter(Boolean).join(", ");
+    areaIdHidden.value = String(areaSel.value || "").trim();
+}
 
 function shouldRefreshNumeroActaInput(input, force = false) {
     if (!input) return false;
@@ -388,9 +567,6 @@ async function generarLoteAula() {
         }
 
         activeAulaBatchJobId = String(result.job_id || "").trim() || null;
-        if (activeAulaBatchJobId) {
-            localStorage.setItem(ACTIVE_AREA_JOB_STORAGE_KEY, activeAulaBatchJobId);
-        }
         setDownloadProgressMessage("Tarea en cola...");
         setDownloadProgressValue(5);
         notify(`Lote en cola (${result.total_targets || 0} destino(s)). Se notificará al terminar.`);
@@ -470,6 +646,7 @@ function populateLocationSelects() {
                 selPiso.appendChild(opt);
             });
             if (pre === "aula") updateAulaBatchPreviewCard();
+            if (pre === "entrega" || pre === "recepcion") _updateUbicacionFromSelects(pre);
         });
 
         selPiso.addEventListener("change", () => {
@@ -487,6 +664,7 @@ function populateLocationSelects() {
                 selArea.appendChild(opt);
             });
             if (pre === "aula") updateAulaBatchPreviewCard();
+            if (pre === "entrega" || pre === "recepcion") _updateUbicacionFromSelects(pre);
         });
 
         if (pre === "aula") {
@@ -494,7 +672,31 @@ function populateLocationSelects() {
                 updateAulaBatchPreviewCard();
             });
         }
+
+        if (pre === "recepcion") {
+            selArea.addEventListener("change", () => {
+                _updateUbicacionFromSelects(pre);
+            });
+        }
+
+        if (pre === "entrega") {
+            selArea.addEventListener("change", () => {
+                _updateUbicacionFromSelects(pre);
+            });
+        }
+
+        if (pre === "entrega" || pre === "recepcion") {
+            _updateUbicacionFromSelects(pre);
+        }
     });
+}
+
+function isEntregaAreaTrabajoValida(_value) {
+    return String(document.getElementById("entrega-ubicacion-area-id")?.value || "").trim() !== "";
+}
+
+function isRecepcionAreaTrabajoValida(_value) {
+    return String(document.getElementById("recepcion-ubicacion-area-id")?.value || "").trim() !== "";
 }
 
 function normalizeTipoActa(value) {
@@ -663,6 +865,292 @@ function showResultadoTabla(container, html) {
     if (!container) return;
     container.innerHTML = String(html || "");
     container.classList.remove("d-none");
+}
+
+function getActaTablePayload(tipo) {
+    const t = normalizeTipoActa(tipo);
+    if (t === "recepcion") {
+        return {
+            datosTabla: Array.isArray(recepcionBienesTemp) ? recepcionBienesTemp : [],
+            datosColumnas: RECEPCION_BIENES_COLUMNS,
+        };
+    }
+    return {
+        datosTabla: Array.isArray(window._globalSelectedTableRows) ? window._globalSelectedTableRows : [],
+        datosColumnas: Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [],
+    };
+}
+
+window.getInformeActaTablePayload = getActaTablePayload;
+
+function getRecepcionResultContainer() {
+    return document.querySelector("#sec-recepcion .resultado-tabla-container");
+}
+
+function updateRecepcionSummary() {
+    const targetDiv = getRecepcionResultContainer();
+    const total = Array.isArray(recepcionBienesTemp) ? recepcionBienesTemp.length : 0;
+    if (!targetDiv) return;
+
+    if (total <= 0) {
+        hideResultadoTabla(targetDiv);
+        return;
+    }
+
+    showResultadoTabla(
+        targetDiv,
+        `<div class="alert alert-success d-inline-block p-2 px-4 shadow-sm mb-0"><i class="bi bi-check2-circle me-2"></i>Recepción: <strong>${total}</strong> bien(es) nuevo(s) registrados temporalmente.</div>`
+    );
+}
+
+function getRecepcionBienFormValues() {
+    const cantidadRaw = String(document.getElementById("recepcion-bien-cantidad")?.value || "1").trim();
+    const cantidad = Number(cantidadRaw);
+    return {
+        cod_inventario: String(document.getElementById("recepcion-bien-cod-inventario")?.value || "").trim(),
+        cod_esbye: String(document.getElementById("recepcion-bien-cod-esbye")?.value || "").trim(),
+        cuenta: String(document.getElementById("recepcion-bien-cuenta")?.value || "").trim(),
+        cantidad: Number.isFinite(cantidad) && cantidad > 0 ? Math.trunc(cantidad) : 0,
+        descripcion: String(document.getElementById("recepcion-bien-descripcion")?.value || "").trim(),
+        marca: String(document.getElementById("recepcion-bien-marca")?.value || "").trim(),
+        modelo: String(document.getElementById("recepcion-bien-modelo")?.value || "").trim(),
+        serie: String(document.getElementById("recepcion-bien-serie")?.value || "").trim(),
+        estado: String(document.getElementById("recepcion-bien-estado")?.value || "").trim(),
+        ubicacion: String(document.getElementById("recepcion-area-trabajo")?.value || "").trim(),
+        fecha_adquisicion: String(document.getElementById("recepcion-bien-fecha-adquisicion")?.value || "").trim(),
+        valor: String(document.getElementById("recepcion-bien-valor")?.value || "").trim(),
+        usuario_final: String(document.getElementById("recepcion-bien-usuario-final")?.value || "").trim(),
+        observacion: String(document.getElementById("recepcion-bien-observacion")?.value || "").trim(),
+    };
+}
+
+function clearRecepcionBienForm() {
+    const ids = [
+        "recepcion-bien-cod-inventario",
+        "recepcion-bien-cod-esbye",
+        "recepcion-bien-cuenta",
+        "recepcion-bien-descripcion",
+        "recepcion-bien-marca",
+        "recepcion-bien-modelo",
+        "recepcion-bien-serie",
+        "recepcion-bien-estado",
+        "recepcion-bien-fecha-adquisicion",
+        "recepcion-bien-valor",
+        "recepcion-bien-usuario-final",
+        "recepcion-bien-observacion",
+    ];
+    ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    const cantidad = document.getElementById("recepcion-bien-cantidad");
+    if (cantidad) cantidad.value = "1";
+}
+
+function setRecepcionEditMode(index) {
+    recepcionEditIndex = Number.isInteger(index) ? index : -1;
+    const btnSave = document.getElementById("btn-recepcion-bien-guardar");
+    const btnCancel = document.getElementById("btn-recepcion-bien-cancelar");
+    if (btnSave) {
+        btnSave.innerHTML = recepcionEditIndex >= 0
+            ? '<i class="bi bi-pencil-square me-1"></i>Editar bien'
+            : '<i class="bi bi-plus-circle me-1"></i>Guardar bien';
+    }
+    if (btnCancel) {
+        btnCancel.classList.toggle("d-none", recepcionEditIndex < 0);
+    }
+}
+
+function loadRecepcionBienIntoForm(index) {
+    const item = recepcionBienesTemp[index];
+    if (!item) return;
+    const assign = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = String(value || "");
+    };
+    assign("recepcion-bien-cod-inventario", item.cod_inventario);
+    assign("recepcion-bien-cod-esbye", item.cod_esbye);
+    assign("recepcion-bien-cuenta", item.cuenta);
+    assign("recepcion-bien-cantidad", item.cantidad || 1);
+    assign("recepcion-bien-descripcion", item.descripcion);
+    assign("recepcion-bien-marca", item.marca);
+    assign("recepcion-bien-modelo", item.modelo);
+    assign("recepcion-bien-serie", item.serie);
+    assign("recepcion-bien-estado", item.estado);
+    assign("recepcion-bien-fecha-adquisicion", item.fecha_adquisicion);
+    assign("recepcion-bien-valor", item.valor);
+    assign("recepcion-bien-usuario-final", item.usuario_final);
+    assign("recepcion-bien-observacion", item.observacion);
+    setRecepcionEditMode(index);
+}
+
+function renderRecepcionBienesTable() {
+    const tbody = document.getElementById("tbody-recepcion-bienes");
+    const countBadge = document.getElementById("recepcion-bienes-count");
+    if (!tbody || !countBadge) return;
+
+    countBadge.textContent = String(recepcionBienesTemp.length);
+    if (!recepcionBienesTemp.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Aún no hay bienes registrados.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = "";
+    recepcionBienesTemp.forEach((item, idx) => {
+        const tr = document.createElement("tr");
+        tr.style.cursor = "pointer";
+        tr.dataset.index = String(idx);
+        tr.innerHTML = `
+            <td>${idx + 1}</td>
+            <td>${String(item.cod_inventario || "-")}</td>
+            <td>${String(item.descripcion || "-")}</td>
+            <td>${String(item.marca || "-")}</td>
+            <td>${String(item.modelo || "-")}</td>
+            <td>${String(item.cantidad || 1)}</td>
+            <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-recepcion-bien-eliminar" data-index="${idx}"><i class="bi bi-trash"></i></button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll("tr").forEach((tr) => {
+        tr.addEventListener("click", (event) => {
+            if (event.target.closest(".btn-recepcion-bien-eliminar")) return;
+            const idx = Number(tr.dataset.index);
+            if (!Number.isFinite(idx)) return;
+            loadRecepcionBienIntoForm(idx);
+        });
+    });
+
+    tbody.querySelectorAll(".btn-recepcion-bien-eliminar").forEach((btn) => {
+        btn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const idx = Number(btn.dataset.index);
+            if (!Number.isFinite(idx)) return;
+            recepcionBienesTemp.splice(idx, 1);
+            if (recepcionEditIndex === idx) {
+                clearRecepcionBienForm();
+                setRecepcionEditMode(-1);
+            } else if (recepcionEditIndex > idx) {
+                setRecepcionEditMode(recepcionEditIndex - 1);
+            }
+            renderRecepcionBienesTable();
+            updateRecepcionSummary();
+        });
+    });
+}
+
+async function checkRecepcionDuplicates(payload) {
+    const codInv = String(payload.cod_inventario || "").trim();
+    const codEsbye = String(payload.cod_esbye || "").trim();
+    if (!codInv && !codEsbye) return [];
+
+    try {
+        const query = new URLSearchParams();
+        if (codInv) query.set("cod_inventario", codInv);
+        if (codEsbye) query.set("cod_esbye", codEsbye);
+        const response = await fetch(`/api/inventario/duplicados?${query.toString()}`);
+        const result = await response.json();
+        if (!response.ok || !result.success) return [];
+        return Array.isArray(result.duplicates) ? result.duplicates : [];
+    } catch (_err) {
+        return [];
+    }
+}
+
+function setupRecepcionBienesModal() {
+    const modalEl = document.getElementById("modalRecepcionBienes");
+    const btnOpen = document.querySelector("#sec-recepcion .btn-registrar-bienes");
+    const btnSave = document.getElementById("btn-recepcion-bien-guardar");
+    const btnCancel = document.getElementById("btn-recepcion-bien-cancelar");
+    const btnConfirm = document.getElementById("btn-confirmar-recepcion-bienes");
+    if (!modalEl || !btnOpen || !btnSave || !btnConfirm) return;
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    const duplicateNodes = {
+        duplicateModalEl: document.getElementById("modalDuplicadosInventario"),
+        duplicateSummary: document.getElementById("duplicados-resumen"),
+        duplicateList: document.getElementById("duplicados-lista"),
+        duplicateCancelBtn: document.getElementById("btn-duplicados-cancelar"),
+        duplicateContinueBtn: document.getElementById("btn-duplicados-continuar"),
+    };
+    const duplicateModal = duplicateNodes.duplicateModalEl
+        ? bootstrap.Modal.getOrCreateInstance(duplicateNodes.duplicateModalEl)
+        : null;
+
+    const duplicateController = typeof window.createDuplicateInventoryModal === "function"
+        ? window.createDuplicateInventoryModal({
+            duplicateModal,
+            nodes: duplicateNodes,
+            escapeHtmlText: (value) => String(value || "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;"),
+            buildDuplicateWarningMessage: (duplicates = [], payload = {}) => {
+                const inv = String(payload.cod_inventario || "").trim();
+                const esbye = String(payload.cod_esbye || "").trim();
+                return `Se encontraron ${duplicates.length} coincidencia(s).${inv ? ` INV: ${inv}` : ""}${esbye ? ` ESBYE: ${esbye}` : ""}`;
+            },
+        })
+        : null;
+
+    const openDuplicateModal = duplicateController?.openDuplicateModal
+        ? duplicateController.openDuplicateModal
+        : async () => true;
+
+    btnOpen.addEventListener("click", (event) => {
+        event.preventDefault();
+        renderRecepcionBienesTable();
+        modal.show();
+    });
+
+    btnCancel?.addEventListener("click", () => {
+        clearRecepcionBienForm();
+        setRecepcionEditMode(-1);
+    });
+
+    btnSave.addEventListener("click", async () => {
+        const payload = getRecepcionBienFormValues();
+        if (!payload.descripcion) {
+            notify("La descripción del bien es obligatoria.", true);
+            return;
+        }
+        if (!payload.cantidad || payload.cantidad <= 0) {
+            notify("La cantidad debe ser un entero mayor que 0.", true);
+            return;
+        }
+
+        const duplicates = await checkRecepcionDuplicates(payload);
+        if (duplicates.length) {
+            const confirmed = await openDuplicateModal({ duplicates, payload, mode: "create" });
+            if (!confirmed) return;
+        }
+
+        if (recepcionEditIndex >= 0 && recepcionBienesTemp[recepcionEditIndex]) {
+            recepcionBienesTemp[recepcionEditIndex] = payload;
+            notify("Bien actualizado en la lista temporal.");
+        } else {
+            recepcionBienesTemp.push(payload);
+            notify("Bien agregado a la lista temporal.");
+        }
+        clearRecepcionBienForm();
+        setRecepcionEditMode(-1);
+        renderRecepcionBienesTable();
+        updateRecepcionSummary();
+        document.dispatchEvent(new CustomEvent("informe:tablaExtraida"));
+    });
+
+    btnConfirm.addEventListener("click", () => {
+        updateRecepcionSummary();
+        modal.hide();
+        document.dispatchEvent(new CustomEvent("informe:tablaExtraida"));
+    });
+
+    modalEl.addEventListener("hidden.bs.modal", () => {
+        updateRecepcionSummary();
+    });
 }
 
 function fillActaFormFromData(tipo, formularioData) {
@@ -961,7 +1449,6 @@ function initInformeSSE() {
             );
 
             activeAulaBatchJobId = null;
-            localStorage.removeItem(ACTIVE_AREA_JOB_STORAGE_KEY);
             setDownloadBatchPauseButton(false);
             clearTimeout(closeDownloadModalTimer);
             closeDownloadModalTimer = setTimeout(() => {
@@ -984,7 +1471,6 @@ function initInformeSSE() {
             notify(payload.message || "Lote cancelado.");
             setDownloadProgressMessage(payload.message || "Lote cancelado.");
             activeAulaBatchJobId = null;
-            localStorage.removeItem(ACTIVE_AREA_JOB_STORAGE_KEY);
             setDownloadBatchPauseButton(false);
             clearTimeout(closeDownloadModalTimer);
             closeDownloadModalTimer = setTimeout(() => {
@@ -1007,7 +1493,6 @@ function initInformeSSE() {
             notify(payload.error || "Error durante la generación del lote de informes.", true);
             setDownloadProgressMessage("Ocurrió un error durante la generación.");
             activeAulaBatchJobId = null;
-            localStorage.removeItem(ACTIVE_AREA_JOB_STORAGE_KEY);
             setDownloadBatchPauseButton(false);
             clearTimeout(closeDownloadModalTimer);
             closeDownloadModalTimer = setTimeout(() => {
@@ -1258,6 +1743,9 @@ async function cargarPersonalDatalist() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+    const canAccessActas = await checkActaTemplatesAccessGuard();
+    if (!canAccessActas) return;
+
     setupTabs();
     initNumeroActaTracking();
     document.querySelectorAll(".resultado-tabla-container").forEach((el) => hideResultadoTabla(el));
@@ -1271,6 +1759,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     populateLocationSelects();
     setupExtraccionModal();
+    setupRecepcionBienesModal();
     cargarPersonalDatalist();
     setupHistorialModal();
     initInformeSSE();
@@ -1318,6 +1807,25 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
 
         const datosFormulario = Object.fromEntries(new FormData(form).entries());
+
+        if (tipo === "entrega" && !isEntregaAreaTrabajoValida(datosFormulario.area_trabajo)) {
+            notify("Debe seleccionar Bloque, Piso y Área para el Acta de Entrega.", true);
+            isGeneratingActa = false;
+            document.querySelectorAll(".btn-descargar-acta").forEach((btn) => {
+                btn.disabled = false;
+            });
+            return;
+        }
+
+        if (tipo === "recepcion" && !isRecepcionAreaTrabajoValida(datosFormulario.area_trabajo)) {
+            notify("Debe seleccionar Bloque, Piso y Área para el Acta de Recepción.", true);
+            isGeneratingActa = false;
+            document.querySelectorAll(".btn-descargar-acta").forEach((btn) => {
+                btn.disabled = false;
+            });
+            return;
+        }
+
         const numeroActaValidation = await validarNumeroActa(datosFormulario.numero_acta);
         if (!numeroActaValidation.valid) {
             notify(numeroActaValidation.error, true);
@@ -1328,8 +1836,18 @@ document.addEventListener("DOMContentLoaded", async () => {
             return;
         }
 
-        const datosTabla = Array.isArray(window._globalSelectedTableRows) ? window._globalSelectedTableRows : [];
-        const datosColumnas = Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [];
+        const tablePayload = getActaTablePayload(tipo);
+        const datosTabla = tablePayload.datosTabla;
+        const datosColumnas = tablePayload.datosColumnas;
+
+        if (tipo === "recepcion" && (!datosTabla.length || !datosColumnas.length)) {
+            notify("Debe registrar al menos un bien nuevo en 'Registrar bienes' para generar el acta de recepción.", true);
+            isGeneratingActa = false;
+            document.querySelectorAll(".btn-descargar-acta").forEach((btn) => {
+                btn.disabled = false;
+            });
+            return;
+        }
 
         const modal = showDownloadProgressModal();
         setDownloadBatchActionsVisible(false);

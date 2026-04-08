@@ -183,6 +183,8 @@ async function initInventoryPage() {
 	const addModalTitle = addModalElement?.querySelector(".modal-title");
 	const duplicateModal = nodes.duplicateModalEl ? new bootstrap.Modal(nodes.duplicateModalEl) : null;
 	const quickAddModal = nodes.quickAddModalEl ? new bootstrap.Modal(nodes.quickAddModalEl) : null;
+	let itemsLoadAbortController = null;
+	let itemsLoadRequestId = 0;
 	const quickAddState = {
 		mode: null,
 		resolver: null,
@@ -727,7 +729,7 @@ async function initInventoryPage() {
 	}
 
 	async function loadStructure() {
-		state.structure = await window.appHelpers.loadStructure(api);
+		state.structure = await window.appHelpers.loadStructure(api, { sortNatural: true });
 		fillSelect(nodes.filtroBloque, state.structure, "Todos");
 		updateFloorAndAreaFilters();
 		renderAreaModalSelect();
@@ -768,6 +770,12 @@ async function initInventoryPage() {
 	}
 
 	async function loadItems() {
+		if (itemsLoadAbortController) {
+			itemsLoadAbortController.abort();
+		}
+		itemsLoadAbortController = new AbortController();
+		const requestId = ++itemsLoadRequestId;
+
 		const params = new URLSearchParams();
 		if (state.activeBlockId) params.set("bloque_id", state.activeBlockId);
 		if (state.activeFloorId) params.set("piso_id", state.activeFloorId);
@@ -776,20 +784,33 @@ async function initInventoryPage() {
 		params.set("order", state.order);
 		params.set("page", String(state.page));
 		params.set("per_page", String(state.perPage));
-		const response = await api.get(`/api/inventario?${params.toString()}`);
-		state.items = response.data || [];
-		state.visibleItems = state.items;
-		state.totalItems = Number(response.pagination?.total || state.items.length || 0);
-		state.totalPages = Math.max(Number(response.pagination?.total_pages || 1), 1);
-		state.page = Math.min(Math.max(Number(response.pagination?.page || state.page), 1), state.totalPages);
-		state.perPage = Number(response.pagination?.per_page || state.perPage);
-		renderRows();
-		renderPaginationMeta();
+
+		try {
+			const response = await api.get(`/api/inventario?${params.toString()}`, {
+				signal: itemsLoadAbortController.signal,
+			});
+			if (requestId !== itemsLoadRequestId) return;
+
+			state.items = response.data || [];
+			state.visibleItems = state.items;
+			state.totalItems = Number(response.pagination?.total || state.items.length || 0);
+			state.totalPages = Math.max(Number(response.pagination?.total_pages || 1), 1);
+			state.page = Math.min(Math.max(Number(response.pagination?.page || state.page), 1), state.totalPages);
+			state.perPage = Number(response.pagination?.per_page || state.perPage);
+			renderRows();
+			renderPaginationMeta();
+		} catch (error) {
+			if (error?.name === "AbortError") return;
+			throw error;
+		} finally {
+			if (requestId === itemsLoadRequestId) {
+				itemsLoadAbortController = null;
+			}
+		}
 	}
 
 	async function refreshItemsTable() {
 		await loadItems();
-		renderRows();
 	}
 
 	async function saveCell(id, field, value, options = {}) {
