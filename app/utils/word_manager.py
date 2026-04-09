@@ -617,29 +617,19 @@ def _compute_general_table_widths(columnas, total_width_in=7.0):
     widths = [base for _ in range(n)]
 
     desc_idx = -1
-    qty_idx = -1
     estado_idx = -1
     for idx, col in enumerate(cols):
         col_id = str(col.get("id") or "").strip().lower()
         col_label = str(col.get("label") or "").strip().lower()
         if desc_idx < 0 and (col_id == "descripcion" or "descrip" in col_label):
             desc_idx = idx
-        if qty_idx < 0 and (col_id == "cantidad" or col_id == "cant" or "cant" in col_label):
-            qty_idx = idx
         if estado_idx < 0 and (col_id == "estado" or "estado" in col_label):
             estado_idx = idx
 
-    if qty_idx >= 0:
-        old_qty = widths[qty_idx]
-        new_qty = max(0.85, round(old_qty * 0.78, 2))
-        delta = old_qty - new_qty
-        widths[qty_idx] = new_qty
-        if desc_idx >= 0 and desc_idx != qty_idx:
-            widths[desc_idx] = round(widths[desc_idx] + delta, 2)
-
     if estado_idx >= 0 and desc_idx >= 0 and estado_idx != desc_idx:
         old_estado = widths[estado_idx]
-        new_estado = max(0.95, round(old_estado * 0.88, 2))
+        # Afinado de diseño: ceder ancho de ESTADO a DESCRIPCION.
+        new_estado = max(0.9, round(old_estado - 0.35, 2))
         delta_estado = old_estado - new_estado
         widths[estado_idx] = new_estado
         widths[desc_idx] = round(widths[desc_idx] + delta_estado, 2)
@@ -690,6 +680,7 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns, context_data=
             continue
     table.autofit = False
 
+    # Mantiene tabla en tamaño normal/completo y redistribuye ancho entre columnas clave.
     column_widths = _compute_general_table_widths(columnas, total_width_in=7.0)
 
     # Encabezados
