@@ -1214,7 +1214,7 @@ async function initSettingsPage() {
 		}
 
 		async function loadStructure() {
-			state.structure = await window.appHelpers.loadStructure(api, { sortNatural: true });
+			state.structure = await window.appHelpers.loadStructure(api, { sortNatural: true, includeAreaDetails: true });
 
 			if (!state.activeBlockId && state.structure.length) {
 				state.activeBlockId = state.structure[0].id;

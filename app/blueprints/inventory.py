@@ -2,7 +2,7 @@ import sqlite3
 
 from flask import Blueprint, jsonify, request
 
-from database.controller import (
+from database.inventory_repository import (
     bulk_insert_inventory_rows,
     create_inventory_item,
     delete_inventory_item,

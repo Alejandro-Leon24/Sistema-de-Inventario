@@ -20,7 +20,7 @@ def index():
 
 @ui_bp.route("/inventario-form")
 def inventario_form():
-    return render_template("inventario-list.html", data={"year": datetime.now().year})
+    return inventario_list()
 
 
 @ui_bp.route("/inventario-list")

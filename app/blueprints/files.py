@@ -8,28 +8,16 @@ from database.controller import get_all_areas_for_export, iter_inventory_items
 try:
     from app.utils.constants import AREA_EXPORT_COLUMNS, INVENTORY_EXPORT_COLUMNS
     from app.utils.excel_export import generar_excel
+    from app.utils.filesystem import cleanup_empty_parent_dirs
 except ModuleNotFoundError:
     from utils.constants import AREA_EXPORT_COLUMNS, INVENTORY_EXPORT_COLUMNS
     from utils.excel_export import generar_excel
+    from utils.filesystem import cleanup_empty_parent_dirs
 
 from .documents import ACTAS_OUTPUT_ROOT, AREA_REPORTS_OUTPUT_ROOT, PREVIEW_OUTPUT_ROOT, is_output_path_allowed
 
 
 files_bp = Blueprint("files", __name__)
-
-
-def _cleanup_empty_parent_dirs(path, stop_at):
-    current = os.path.abspath(os.path.dirname(path or ""))
-    stop_dir = os.path.abspath(stop_at)
-    while current.startswith(stop_dir) and current != stop_dir:
-        try:
-            if os.path.isdir(current) and not os.listdir(current):
-                os.rmdir(current)
-                current = os.path.abspath(os.path.dirname(current))
-                continue
-        except Exception:
-            pass
-        break
 
 
 def _is_temporary_download_path(path):
@@ -63,7 +51,7 @@ def _cleanup_parent_dirs_for_temp_path(path):
         stop_at = preview_root
 
     if stop_at:
-        _cleanup_empty_parent_dirs(real_path, stop_at)
+        cleanup_empty_parent_dirs(real_path, stop_at)
 
 
 @files_bp.get("/api/ubicaciones/export")

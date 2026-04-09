@@ -3,7 +3,7 @@ import uuid
 
 from flask import Blueprint, jsonify, request
 
-from database.controller import (
+from database.location_repository import (
     create_area,
     create_block,
     create_floor,
@@ -28,7 +28,9 @@ locations_bp = Blueprint("locations", __name__)
 
 @locations_bp.get("/api/estructura")
 def api_estructura():
-    return jsonify({"data": get_structure()})
+    raw_include_details = str(request.args.get("include_details", "0") or "0").strip().lower()
+    include_details = raw_include_details in {"1", "true", "si", "yes", "on"}
+    return jsonify({"data": get_structure(include_area_details=include_details)})
 
 
 @locations_bp.post("/api/bloques")

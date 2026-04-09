@@ -1,6 +1,15 @@
 # Python cache
 __pycache__/
 *.py[cod]
+**/__pycache__/
+*.pyo
+
+# SQLite / local data
+inventario.db
+*.db
+*.sqlite
+*.sqlite3
+database/backups/
 
 # Virtual environments
 .venv/
@@ -10,3 +19,6 @@ env/
 # Local IDE/runtime artifacts
 .vscode/
 *.log
+
+# Runtime outputs
+salidas/

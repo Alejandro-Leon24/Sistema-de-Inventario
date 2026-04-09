@@ -8,8 +8,9 @@ window.appHelpers = {
             .replaceAll("'", "&#39;");
     },
 
-    async loadStructure(apiClient, { sortNatural = false } = {}) {
-        const response = await apiClient.get("/api/estructura");
+    async loadStructure(apiClient, { sortNatural = false, includeAreaDetails = false } = {}) {
+        const includeDetailsParam = includeAreaDetails ? "1" : "0";
+        const response = await apiClient.get(`/api/estructura?include_details=${includeDetailsParam}`);
         const structure = Array.isArray(response.data) ? response.data : [];
 
         if (!sortNatural) {

@@ -112,6 +112,122 @@ CANONICAL_COLUMN_ORDER = [
     "observacion_esbye",
 ]
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+AREA_DETAIL_COLUMNS = [
+    "identificacion_ambiente",
+    "metros_cuadrados",
+    "alto",
+    "senaletica",
+    "cod_senaletica",
+    "infraestructura_fisica",
+    "estado_piso",
+    "material_techo",
+    "puerta",
+    "material_puerta",
+    "responsable_admin_id",
+    "estado_paredes",
+    "estado_techo",
+    "estado_puerta",
+    "cerradura",
+    "nivel_seguridad",
+    "sitio_profesor_mesa",
+    "sitio_profesor_silla",
+    "pc_aula",
+    "proyector",
+    "pantalla_interactiva",
+    "pupitres_cantidad",
+    "pupitres_funcionan",
+    "pupitres_no_funcionan",
+    "pizarra",
+    "pizarra_estado",
+    "ventanas_cantidad",
+    "ventanas_funcionan",
+    "ventanas_no_funcionan",
+    "aa_cantidad",
+    "aa_funcionan",
+    "aa_no_funcionan",
+    "ventiladores_cantidad",
+    "ventiladores_funcionan",
+    "ventiladores_no_funcionan",
+    "wifi",
+    "red_lan",
+    "red_lan_funcionan",
+    "red_lan_no_funcionan",
+    "red_inalambrica_cantidad",
+    "iluminacion_funcionan",
+    "iluminacion_no_funcionan",
+    "luminarias_cantidad",
+    "puntos_electricos",
+    "puntos_electricos_funcionan",
+    "puntos_electricos_no_funcionan",
+    "puntos_electricos_cantidad",
+    "capacidad_aulica",
+    "capacidad_distanciamiento",
+    "ambiente_apto_retorno",
+    "observaciones_detalle",
+]
+
+
+def _ensure_schema_migrations_table():
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.commit()
+
+
+def _run_startup_migration_once(name, migration_fn):
+    db = get_db()
+    existing = db.execute("SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1", (name,)).fetchone()
+    if existing:
+        return False
+
+    migration_fn()
+    db.execute("INSERT INTO schema_migrations (name) VALUES (?)", (name,))
+    db.commit()
+    return True
+
+
+def _to_storage_relative_path(path_value):
+    raw = str(path_value or "").strip()
+    if not raw:
+        return None
+
+    path_obj = Path(raw)
+    if not path_obj.is_absolute():
+        return raw.replace("\\", "/")
+
+    try:
+        rel = path_obj.resolve().relative_to(PROJECT_ROOT.resolve())
+        return str(rel).replace("\\", "/")
+    except Exception:
+        return raw
+
+
+def _to_storage_absolute_path(path_value):
+    raw = str(path_value or "").strip()
+    if not raw:
+        return None
+
+    path_obj = Path(raw)
+    if path_obj.is_absolute():
+        return str(path_obj)
+
+    return str((PROJECT_ROOT / raw).resolve())
+
+
+def _normalize_historial_row_paths(row_dict):
+    normalized = dict(row_dict or {})
+    for field in ("docx_path", "pdf_path", "plantilla_snapshot_path"):
+        normalized[field] = _to_storage_absolute_path(normalized.get(field))
+    return normalized
+
 
 def _row_to_inventory_item(row):
     return {
@@ -153,16 +269,19 @@ def _row_to_inventory_item(row):
 def init_schema(base_dir: Path):
     schema_path = base_dir / "database" / "schema.sql"
     execute_schema(schema_path)
-    _ensure_university_unique_constraint()
-    _ensure_area_extended_columns()
-    _ensure_inventory_extended_columns()
-    _ensure_inventory_codes_allow_duplicates()
-    _ensure_inventory_search_indexes()
-    _ensure_inventory_fts()
-    _ensure_historial_actas_numero_column()
-    _ensure_historial_actas_template_columns()
-    _ensure_informes_area_sequence_table()
-    _seed_default_param_values()
+    _ensure_schema_migrations_table()
+
+    _run_startup_migration_once("20260409_university_unique_constraint", _ensure_university_unique_constraint)
+    _run_startup_migration_once("20260409_area_extended_columns", _ensure_area_extended_columns)
+    _run_startup_migration_once("20260409_inventory_extended_columns", _ensure_inventory_extended_columns)
+    _run_startup_migration_once("20260409_inventory_codes_allow_duplicates", _ensure_inventory_codes_allow_duplicates)
+    _run_startup_migration_once("20260409_inventory_search_indexes", _ensure_inventory_search_indexes)
+    _run_startup_migration_once("20260409_inventory_fts", _ensure_inventory_fts)
+    _run_startup_migration_once("20260409_historial_actas_numero_column", _ensure_historial_actas_numero_column)
+    _run_startup_migration_once("20260409_historial_actas_template_columns", _ensure_historial_actas_template_columns)
+    _run_startup_migration_once("20260409_informes_area_sequence_table", _ensure_informes_area_sequence_table)
+    _run_startup_migration_once("20260409_actas_sequence_table", _ensure_actas_sequence_table)
+    _run_startup_migration_once("20260409_seed_default_param_values", _seed_default_param_values)
 
 
 def _ensure_historial_actas_numero_column():
@@ -196,6 +315,20 @@ def _ensure_informes_area_sequence_table():
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS secuencia_informes_area (
+            anio INTEGER PRIMARY KEY,
+            ultimo_numero INTEGER NOT NULL DEFAULT 0,
+            actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.commit()
+
+
+def _ensure_actas_sequence_table():
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS secuencia_actas (
             anio INTEGER PRIMARY KEY,
             ultimo_numero INTEGER NOT NULL DEFAULT 0,
             actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -460,7 +593,7 @@ def _seed_default_param_values():
     db.commit()
 
 
-def get_structure():
+def get_structure(include_area_details=False):
     db = get_db()
     blocks = db.execute(
         "SELECT id, nombre, descripcion, orden FROM bloques ORDER BY orden, id"
@@ -468,65 +601,13 @@ def get_structure():
     floors = db.execute(
         "SELECT id, bloque_id, nombre, descripcion, orden FROM pisos ORDER BY orden, id"
     ).fetchall()
+    area_select = ["id", "piso_id", "nombre", "descripcion", "orden"]
+    if include_area_details:
+        area_select.extend(AREA_DETAIL_COLUMNS)
     areas = db.execute(
-        """
+        f"""
         SELECT
-            id,
-            piso_id,
-            nombre,
-            descripcion,
-            orden,
-            identificacion_ambiente,
-            metros_cuadrados,
-            alto,
-            senaletica,
-            cod_senaletica,
-            infraestructura_fisica,
-            estado_piso,
-            material_techo,
-            puerta,
-            material_puerta,
-            responsable_admin_id,
-            estado_paredes,
-            estado_techo,
-            estado_puerta,
-            cerradura,
-            nivel_seguridad,
-            sitio_profesor_mesa,
-            sitio_profesor_silla,
-            pc_aula,
-            proyector,
-            pantalla_interactiva,
-            pupitres_cantidad,
-            pupitres_funcionan,
-            pupitres_no_funcionan,
-            pizarra,
-            pizarra_estado,
-            ventanas_cantidad,
-            ventanas_funcionan,
-            ventanas_no_funcionan,
-            aa_cantidad,
-            aa_funcionan,
-            aa_no_funcionan,
-            ventiladores_cantidad,
-            ventiladores_funcionan,
-            ventiladores_no_funcionan,
-            wifi,
-            red_lan,
-            red_lan_funcionan,
-            red_lan_no_funcionan,
-            red_inalambrica_cantidad,
-            iluminacion_funcionan,
-            iluminacion_no_funcionan,
-            luminarias_cantidad,
-            puntos_electricos,
-            puntos_electricos_funcionan,
-            puntos_electricos_no_funcionan,
-            puntos_electricos_cantidad,
-            capacidad_aulica,
-            capacidad_distanciamiento,
-            ambiente_apto_retorno,
-            observaciones_detalle
+            {', '.join(area_select)}
         FROM areas
         ORDER BY orden, id
         """
@@ -552,65 +633,16 @@ def get_structure():
     for area in areas:
         floor = floor_ref.get(area["piso_id"])
         if floor:
-            floor["areas"].append(
-                {
-                    "id": area["id"],
-                    "nombre": area["nombre"],
-                    "descripcion": area["descripcion"],
-                    "orden": area["orden"],
-                    "identificacion_ambiente": area["identificacion_ambiente"],
-                    "metros_cuadrados": area["metros_cuadrados"],
-                    "alto": area["alto"],
-                    "senaletica": area["senaletica"],
-                    "cod_senaletica": area["cod_senaletica"],
-                    "infraestructura_fisica": area["infraestructura_fisica"],
-                    "estado_piso": area["estado_piso"],
-                    "material_techo": area["material_techo"],
-                    "puerta": area["puerta"],
-                    "material_puerta": area["material_puerta"],
-                    "responsable_admin_id": area["responsable_admin_id"],
-                    "estado_paredes": area["estado_paredes"],
-                    "estado_techo": area["estado_techo"],
-                    "estado_puerta": area["estado_puerta"],
-                    "cerradura": area["cerradura"],
-                    "nivel_seguridad": area["nivel_seguridad"],
-                    "sitio_profesor_mesa": area["sitio_profesor_mesa"],
-                    "sitio_profesor_silla": area["sitio_profesor_silla"],
-                    "pc_aula": area["pc_aula"],
-                    "proyector": area["proyector"],
-                    "pantalla_interactiva": area["pantalla_interactiva"],
-                    "pupitres_cantidad": area["pupitres_cantidad"],
-                    "pupitres_funcionan": area["pupitres_funcionan"],
-                    "pupitres_no_funcionan": area["pupitres_no_funcionan"],
-                    "pizarra": area["pizarra"],
-                    "pizarra_estado": area["pizarra_estado"],
-                    "ventanas_cantidad": area["ventanas_cantidad"],
-                    "ventanas_funcionan": area["ventanas_funcionan"],
-                    "ventanas_no_funcionan": area["ventanas_no_funcionan"],
-                    "aa_cantidad": area["aa_cantidad"],
-                    "aa_funcionan": area["aa_funcionan"],
-                    "aa_no_funcionan": area["aa_no_funcionan"],
-                    "ventiladores_cantidad": area["ventiladores_cantidad"],
-                    "ventiladores_funcionan": area["ventiladores_funcionan"],
-                    "ventiladores_no_funcionan": area["ventiladores_no_funcionan"],
-                    "wifi": area["wifi"],
-                    "red_lan": area["red_lan"],
-                    "red_lan_funcionan": area["red_lan_funcionan"],
-                    "red_lan_no_funcionan": area["red_lan_no_funcionan"],
-                    "red_inalambrica_cantidad": area["red_inalambrica_cantidad"],
-                    "iluminacion_funcionan": area["iluminacion_funcionan"],
-                    "iluminacion_no_funcionan": area["iluminacion_no_funcionan"],
-                    "luminarias_cantidad": area["luminarias_cantidad"],
-                    "puntos_electricos": area["puntos_electricos"],
-                    "puntos_electricos_funcionan": area["puntos_electricos_funcionan"],
-                    "puntos_electricos_no_funcionan": area["puntos_electricos_no_funcionan"],
-                    "puntos_electricos_cantidad": area["puntos_electricos_cantidad"],
-                    "capacidad_aulica": area["capacidad_aulica"],
-                    "capacidad_distanciamiento": area["capacidad_distanciamiento"],
-                    "ambiente_apto_retorno": area["ambiente_apto_retorno"],
-                    "observaciones_detalle": area["observaciones_detalle"],
-                }
-            )
+            area_payload = {
+                "id": area["id"],
+                "nombre": area["nombre"],
+                "descripcion": area["descripcion"],
+                "orden": area["orden"],
+            }
+            if include_area_details:
+                for column in AREA_DETAIL_COLUMNS:
+                    area_payload[column] = area[column]
+            floor["areas"].append(area_payload)
 
     return [
         {
@@ -963,6 +995,13 @@ def _next_item_numero():
     return row["next_item"]
 
 
+def _next_item_numero_in_tx(db):
+    row = db.execute(
+        "SELECT COALESCE(MAX(item_numero), 0) + 1 AS next_item FROM inventario_items"
+    ).fetchone()
+    return int(row["next_item"] if row and row["next_item"] is not None else 1)
+
+
 def _audit_change(item_id, action, field=None, old_value=None, new_value=None):
     db = get_db()
     db.execute(
@@ -1080,30 +1119,10 @@ def _build_inventory_where_clause(filters=None):
         raw_search = filters["search"].strip()
         fts_query = _build_fts_query(raw_search)
         if fts_query and _has_inventory_fts():
-            like_token = f"%{raw_search}%"
             where_clauses.append(
-                "(" 
-                "i.id IN (SELECT rowid FROM inventario_items_fts WHERE inventario_items_fts MATCH ?) "
-                "OR i.descripcion LIKE ? "
-                "OR i.cod_inventario LIKE ? "
-                "OR i.cod_esbye LIKE ? "
-                "OR i.cuenta LIKE ? "
-                "OR i.ubicacion LIKE ? "
-                "OR i.marca LIKE ? "
-                "OR i.modelo LIKE ? "
-                "OR i.serie LIKE ? "
-                "OR i.usuario_final LIKE ? "
-                "OR i.observacion LIKE ? "
-                "OR i.descripcion_esbye LIKE ? "
-                "OR i.marca_esbye LIKE ? "
-                "OR i.modelo_esbye LIKE ? "
-                "OR i.serie_esbye LIKE ? "
-                "OR i.ubicacion_esbye LIKE ? "
-                "OR i.observacion_esbye LIKE ?"
-                ")"
+                "i.id IN (SELECT rowid FROM inventario_items_fts WHERE inventario_items_fts MATCH ?)"
             )
             params.append(fts_query)
-            params.extend([like_token] * 16)
         else:
             token = f"%{raw_search}%"
             where_clauses.append(
@@ -1156,10 +1175,11 @@ def get_inventory_search_diagnostics(search_text=None):
     }
 
 
-def list_inventory_items(filters=None, sort_direction="asc"):
+def list_inventory_items(filters=None, sort_direction="asc", limit=5000):
     where_sql, params = _build_inventory_where_clause(filters)
 
     direction = "DESC" if str(sort_direction).lower() == "desc" else "ASC"
+    safe_limit = max(int(limit or 5000), 1)
     db = get_db()
     rows = db.execute(
         f"""
@@ -1202,8 +1222,9 @@ def list_inventory_items(filters=None, sort_direction="asc"):
         LEFT JOIN bloques b ON b.id = p.bloque_id
         {where_sql}
         ORDER BY i.item_numero {direction}, i.id {direction}
+        LIMIT ?
         """,
-        params,
+        [*params, safe_limit],
     ).fetchall()
     return [_row_to_inventory_item(row) for row in rows]
 
@@ -1339,10 +1360,14 @@ def get_inventory_item(item_id):
 def create_inventory_item(payload, commit=True):
     db = get_db()
     fields = {k: payload.get(k) for k in ALLOWED_INVENTORY_FIELDS if k in payload}
-    fields["item_numero"] = fields.get("item_numero") or _next_item_numero()
     fields["cantidad"] = int(fields.get("cantidad") or 1)
     fields["valor"] = float(fields.get("valor")) if fields.get("valor") not in (None, "") else None
     fields["valor_esbye"] = float(fields.get("valor_esbye")) if fields.get("valor_esbye") not in (None, "") else None
+
+    if fields.get("item_numero") in (None, ""):
+        if commit:
+            db.execute("BEGIN IMMEDIATE")
+        fields["item_numero"] = _next_item_numero_in_tx(db)
 
     columns = ", ".join(fields.keys())
     placeholders = ", ".join(["?"] * len(fields))
@@ -1476,10 +1501,10 @@ def find_inventory_code_duplicates(cod_inventario=None, cod_esbye=None, limit=50
 def bulk_insert_inventory_rows(rows, area_id=None):
     db = get_db()
     normalized_values = []
-    start_item_numero = _next_item_numero()
     insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
     try:
-        db.execute("BEGIN")
+        db.execute("BEGIN IMMEDIATE")
+        start_item_numero = _next_item_numero_in_tx(db)
         for row_index, row in enumerate(rows):
             payload = {
                 "item_numero": start_item_numero + row_index,
@@ -1517,25 +1542,63 @@ def bulk_insert_inventory_rows(rows, area_id=None):
 
 
 def iter_inventory_items(filters=None, sort_direction="asc", batch_size=2000):
+    where_sql, params = _build_inventory_where_clause(filters)
     direction = "DESC" if str(sort_direction).lower() == "desc" else "ASC"
-    page = 1
     per_page = max(int(batch_size or 2000), 1)
+    offset = 0
+    db = get_db()
 
     while True:
-        page_result = list_inventory_items_paginated(
-            filters=filters,
-            sort_direction=direction,
-            page=page,
-            per_page=per_page,
-        )
-        items = page_result["items"]
-        if not items:
+        rows = db.execute(
+            f"""
+            SELECT
+                i.id,
+                i.item_numero,
+                i.cod_inventario,
+                i.cod_esbye,
+                i.cuenta,
+                i.cantidad,
+                i.descripcion,
+                i.ubicacion,
+                i.marca,
+                i.modelo,
+                i.serie,
+                i.estado,
+                i.condicion,
+                i.usuario_final,
+                i.fecha_adquisicion,
+                i.valor,
+                i.observacion,
+                i.descripcion_esbye,
+                i.marca_esbye,
+                i.modelo_esbye,
+                i.serie_esbye,
+                i.valor_esbye,
+                i.ubicacion_esbye,
+                i.observacion_esbye,
+                i.fecha_adquisicion_esbye,
+                i.area_id,
+                i.actualizado_en,
+                a.nombre AS area_nombre,
+                a.piso_id AS piso_id,
+                p.nombre AS piso_nombre,
+                p.bloque_id AS bloque_id,
+                b.nombre AS bloque_nombre
+            FROM inventario_items i
+            LEFT JOIN areas a ON a.id = i.area_id
+            LEFT JOIN pisos p ON p.id = a.piso_id
+            LEFT JOIN bloques b ON b.id = p.bloque_id
+            {where_sql}
+            ORDER BY i.item_numero {direction}, i.id {direction}
+            LIMIT ? OFFSET ?
+            """,
+            [*params, per_page, offset],
+        ).fetchall()
+        if not rows:
             break
-        for item in items:
-            yield item
-        if page >= page_result["total_pages"]:
-            break
-        page += 1
+        for row in rows:
+            yield _row_to_inventory_item(row)
+        offset += per_page
 
 
 def get_user_preferences(user_key):
@@ -1677,6 +1740,9 @@ def save_historial_acta(
     plantilla_snapshot_path=None,
 ):
     db = get_db()
+    stored_docx_path = _to_storage_relative_path(docx_path)
+    stored_pdf_path = _to_storage_relative_path(pdf_path)
+    stored_snapshot_path = _to_storage_relative_path(plantilla_snapshot_path)
     cursor = db.execute(
         """
         INSERT INTO historial_actas (
@@ -1693,10 +1759,10 @@ def save_historial_acta(
             tipo_acta,
             numero_acta,
             datos_json,
-            docx_path,
-            pdf_path,
+            stored_docx_path,
+            stored_pdf_path,
             plantilla_hash,
-            plantilla_snapshot_path,
+            stored_snapshot_path,
         ),
     )
     db.commit()
@@ -1715,25 +1781,90 @@ def _split_numero_acta(numero_acta):
 
 def get_max_numero_acta_for_year(year):
     db = get_db()
-    rows = db.execute(
-        "SELECT numero_acta FROM historial_actas WHERE numero_acta IS NOT NULL AND TRIM(numero_acta) != ''"
-    ).fetchall()
-
-    max_value = 0
     target_year = int(year)
-    for row in rows:
-        number, num_year = _split_numero_acta(row["numero_acta"])
-        if number is None or num_year != target_year:
-            continue
-        if number > max_value:
-            max_value = number
-    return max_value
+    row = db.execute(
+        """
+        SELECT COALESCE(
+            MAX(CAST(substr(numero_acta, 1, instr(numero_acta, '-') - 1) AS INTEGER)),
+            0
+        ) AS max_value
+        FROM historial_actas
+        WHERE numero_acta IS NOT NULL
+          AND TRIM(numero_acta) != ''
+          AND instr(numero_acta, '-') > 1
+          AND CAST(substr(numero_acta, instr(numero_acta, '-') + 1) AS INTEGER) = ?
+          AND substr(numero_acta, 1, instr(numero_acta, '-') - 1) GLOB '[0-9]*'
+        """,
+        (target_year,),
+    ).fetchone()
+    return int(row["max_value"] if row else 0)
 
 
 def get_next_numero_acta(year):
-    max_value = get_max_numero_acta_for_year(year)
-    next_value = max_value + 1
-    return f"{next_value:03d}-{int(year)}"
+    db = get_db()
+    target_year = int(year)
+    max_historial = get_max_numero_acta_for_year(target_year)
+    seq_row = db.execute(
+        "SELECT ultimo_numero FROM secuencia_actas WHERE anio = ?",
+        (target_year,),
+    ).fetchone()
+    max_sequence = int(seq_row["ultimo_numero"] or 0) if seq_row else 0
+    next_value = max(max_historial, max_sequence) + 1
+    return f"{next_value:03d}-{target_year}"
+
+
+def reserve_numero_acta(year, preferred_numero_acta=None):
+    db = get_db()
+    target_year = int(year)
+
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row = db.execute(
+            "SELECT ultimo_numero FROM secuencia_actas WHERE anio = ?",
+            (target_year,),
+        ).fetchone()
+
+        if row:
+            ultimo = int(row["ultimo_numero"] or 0)
+            ultimo_historial = get_max_numero_acta_for_year(target_year)
+            if ultimo_historial > ultimo:
+                ultimo = ultimo_historial
+                db.execute(
+                    "UPDATE secuencia_actas SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE anio = ?",
+                    (ultimo, target_year),
+                )
+        else:
+            ultimo = get_max_numero_acta_for_year(target_year)
+            db.execute(
+                "INSERT INTO secuencia_actas (anio, ultimo_numero) VALUES (?, ?)",
+                (target_year, ultimo),
+            )
+
+        if preferred_numero_acta:
+            seq, year_in_num = _split_numero_acta(preferred_numero_acta)
+            if seq is None or year_in_num != target_year:
+                raise ValueError("Numero de acta invalido para reservar.")
+            if seq <= ultimo:
+                raise ValueError("El numero de acta debe ser mayor al ultimo consecutivo reservado.")
+            existing = db.execute(
+                "SELECT 1 FROM historial_actas WHERE numero_acta = ? LIMIT 1",
+                (f"{seq:03d}-{target_year}",),
+            ).fetchone()
+            if existing:
+                raise ValueError("El numero de acta ya existe.")
+            reserved = seq
+        else:
+            reserved = ultimo + 1
+
+        db.execute(
+            "UPDATE secuencia_actas SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE anio = ?",
+            (reserved, target_year),
+        )
+        db.commit()
+        return f"{reserved:03d}-{target_year}"
+    except Exception:
+        db.rollback()
+        raise
 
 
 def numero_acta_exists(numero_acta):
@@ -1765,14 +1896,15 @@ def get_historial_actas(tipo_acta=None):
         ).fetchall()
     else:
         rows = db.execute(f"SELECT * FROM historial_actas {order_sql}").fetchall()
-    return [dict(row) for row in rows]
+    return [_normalize_historial_row_paths(dict(row)) for row in rows]
 
 
 def count_historial_by_template_snapshot(plantilla_snapshot_path):
     db = get_db()
+    normalized_snapshot = _to_storage_relative_path(plantilla_snapshot_path)
     row = db.execute(
         "SELECT COUNT(1) AS total FROM historial_actas WHERE plantilla_snapshot_path = ?",
-        (str(plantilla_snapshot_path or "").strip(),),
+        (str(normalized_snapshot or "").strip(),),
     ).fetchone()
     return int(row["total"] or 0)
 
@@ -1827,7 +1959,7 @@ def reserve_numeros_informe_area(year, count):
 def delete_historial_acta(acta_id):
     db = get_db()
     row = db.execute("SELECT * FROM historial_actas WHERE id = ?", (acta_id,)).fetchone()
-    deleted = dict(row) if row else None
+    deleted = _normalize_historial_row_paths(dict(row)) if row else None
     db.execute("DELETE FROM historial_actas WHERE id = ?", (acta_id,))
     db.commit()
     return deleted

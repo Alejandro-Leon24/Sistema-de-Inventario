@@ -1,7 +1,7 @@
 import pytest
 
 from app.app import app as flask_app, BASE_DIR
-from database.controller import init_schema
+from database.schema_manager import init_schema
 
 
 @pytest.fixture()

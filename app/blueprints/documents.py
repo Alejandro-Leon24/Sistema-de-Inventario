@@ -17,7 +17,7 @@ from pathlib import Path
 import werkzeug.utils
 from flask import Blueprint, current_app, jsonify, request, send_file
 
-from database.controller import (
+from database.historial_repository import (
     count_historial_by_template_snapshot,
     delete_historial_acta,
     get_historial_actas,
@@ -25,6 +25,7 @@ from database.controller import (
     get_next_numero_acta,
     get_next_numero_informe_area,
     numero_acta_exists,
+    reserve_numero_acta,
     reserve_numeros_informe_area,
     get_or_create_personal,
     save_historial_acta,
@@ -39,6 +40,7 @@ try:
         render_docx_preview_html,
     )
     from app.utils.sse_hub import publish_event
+    from app.utils.filesystem import cleanup_empty_parent_dirs
 except ModuleNotFoundError:
     from utils.word_manager import (
         extract_variables_from_template,
@@ -47,6 +49,7 @@ except ModuleNotFoundError:
         render_docx_preview_html,
     )
     from utils.sse_hub import publish_event
+    from utils.filesystem import cleanup_empty_parent_dirs
 
 
 documents_bp = Blueprint("documents", __name__)
@@ -527,25 +530,11 @@ def _safe_remove_file(path, allowed_checker):
     return False
 
 
-def _cleanup_empty_parent_dirs(path, stop_at):
-    current = os.path.abspath(os.path.dirname(path or ""))
-    stop_dir = os.path.abspath(stop_at)
-    while current.startswith(stop_dir) and current != stop_dir:
-        try:
-            if os.path.isdir(current) and not os.listdir(current):
-                os.rmdir(current)
-                current = os.path.abspath(os.path.dirname(current))
-                continue
-        except Exception:
-            pass
-        break
-
-
 def _cleanup_area_reports_dir(path):
     # Borra carpetas vacías bajo informes-area sin eliminar la raíz compartida.
     if not path:
         return
-    _cleanup_empty_parent_dirs(os.path.join(path, "_cleanup_.tmp"), AREA_REPORTS_OUTPUT_ROOT)
+    cleanup_empty_parent_dirs(os.path.join(path, "_cleanup_.tmp"), AREA_REPORTS_OUTPUT_ROOT)
 
 
 def _snapshot_template_for_historial(tipo, template_path):
@@ -710,9 +699,8 @@ def api_generar_informe():
         context_data["recibido_por"] = context_data.get("usuario_final")
 
     current_year = datetime.now().year
-    numero_acta = str(context_data.get("numero_acta") or "").strip()
-    if not numero_acta:
-        numero_acta = get_next_numero_acta(current_year)
+    requested_numero_acta = str(context_data.get("numero_acta") or "").strip()
+    numero_acta = requested_numero_acta or get_next_numero_acta(current_year)
 
     if not NUMERO_ACTA_PATTERN.match(numero_acta):
         return jsonify(
@@ -737,25 +725,23 @@ def api_generar_informe():
             }
         ), 400
 
-    max_for_year = get_max_numero_acta_for_year(current_year)
-    if not vista_previa and numero_seq < max_for_year:
-        return jsonify(
-            {
-                "success": False,
-                "error": (
-                    f"El numero de acta {numero_acta} es menor al ultimo registrado. "
-                    f"Debe usar uno mayor o igual al consecutivo actual {max_for_year:03d}-{current_year}."
-                ),
-            }
-        ), 409
-
-    if not vista_previa and numero_acta_exists(numero_acta):
-        return jsonify(
-            {
-                "success": False,
-                "error": f"Ya existe un acta registrada con el numero {numero_acta}.",
-            }
-        ), 409
+    if not vista_previa:
+        try:
+            numero_acta = reserve_numero_acta(
+                current_year,
+                preferred_numero_acta=numero_acta if requested_numero_acta else None,
+            )
+        except ValueError:
+            max_for_year = get_max_numero_acta_for_year(current_year)
+            return jsonify(
+                {
+                    "success": False,
+                    "error": (
+                        f"El numero de acta {numero_acta} no es válido para el consecutivo actual. "
+                        f"Use uno mayor a {max_for_year:03d}-{current_year} o deje el campo vacío para asignación automática."
+                    ),
+                }
+            ), 409
 
     context_data["numero_acta"] = numero_acta
     context_data_raw["numero_acta"] = numero_acta
@@ -964,6 +950,7 @@ def api_generar_informe():
                     )
 
                 if tipo_norm == "recepcion":
+                    db.execute("BEGIN IMMEDIATE")
                     next_item_numero_row = db.execute(
                         "SELECT COALESCE(MAX(item_numero), 0) + 1 AS next_item FROM inventario_items"
                     ).fetchone()
@@ -1391,7 +1378,7 @@ def api_delete_historial(acta_id):
         if snapshot_path:
             remaining_refs = count_historial_by_template_snapshot(snapshot_path)
             if remaining_refs <= 0 and _safe_remove_file(snapshot_path, is_template_history_path_allowed):
-                _cleanup_empty_parent_dirs(snapshot_path, TEMPLATE_HISTORY_ROOT)
+                cleanup_empty_parent_dirs(snapshot_path, TEMPLATE_HISTORY_ROOT)
 
     publish_event("actas_changed", {"acta_id": acta_id, "action": "delete"})
     return jsonify({"success": True})

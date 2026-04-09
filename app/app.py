@@ -14,7 +14,7 @@ try:
 except ModuleNotFoundError:
     from blueprints import register_blueprints
 
-from database.controller import init_schema
+from database.schema_manager import init_schema
 from database.db import init_app
 
 

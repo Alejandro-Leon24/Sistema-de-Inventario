@@ -1751,7 +1751,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.querySelectorAll(".resultado-tabla-container").forEach((el) => hideResultadoTabla(el));
 
     try {
-        const response = await api.get("/api/estructura");
+        const response = await api.get("/api/estructura?include_details=0");
         structureData = response.data || [];
     } catch (e) {
         notify("Error al cargar ubicaciones: " + e.message, true);
