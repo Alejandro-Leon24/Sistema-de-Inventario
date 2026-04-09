@@ -1539,7 +1539,7 @@ def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
         if not fields:
             continue
 
-        fields["item_numero"] = start_item_numero + idx
+        fields["item_numero"] = start_item_numero + len(normalized)  # use current length for consecutive numbering
         if area_id is not None:
             fields["area_id"] = int(area_id)
 

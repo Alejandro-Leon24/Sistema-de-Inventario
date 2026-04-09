@@ -1,4 +1,6 @@
+import logging
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -26,6 +28,7 @@ from database.controller import (
 
 inventory_bp = Blueprint("inventory", __name__)
 DEFAULT_USER_KEY = "portable_user"
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Excel import helpers
@@ -36,6 +39,12 @@ os.makedirs(_EXCEL_IMPORT_DIR, exist_ok=True)
 _MAX_EXCEL_PREVIEW_ROWS = 20
 _MAX_EXCEL_IMPORT_ROWS = 10_000
 _MAX_EXCEL_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+# Strict UUID v4 pattern – prevents any path traversal attempt
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 def _clean_old_excel_imports(max_age_seconds: int = 3600) -> None:
@@ -56,14 +65,17 @@ def _clean_old_excel_imports(max_age_seconds: int = 3600) -> None:
 
 
 def _safe_import_session_path(session_id: str) -> str | None:
-    """Return the absolute temp path for *session_id*, or None if invalid."""
-    # session_id must be a UUID (hex + hyphens only, no path separators)
-    clean = session_id.replace("-", "")
-    if not clean.isalnum() or len(session_id) > 64:
+    """Return the absolute temp path for *session_id*, or None if invalid.
+
+    Only accepts well-formed UUID strings so no path separator characters or
+    directory traversal sequences can reach ``os.path.join``.
+    """
+    if not _UUID_RE.fullmatch(session_id):
         return None
-    path = os.path.join(_EXCEL_IMPORT_DIR, f"{session_id}.xlsx")
-    # Ensure the resolved path is still inside the import dir (no traversal)
-    if not os.path.abspath(path).startswith(os.path.abspath(_EXCEL_IMPORT_DIR)):
+    safe_dir = os.path.abspath(_EXCEL_IMPORT_DIR)
+    path = os.path.join(safe_dir, f"{session_id}.xlsx")
+    # Defense-in-depth: confirm the resolved path stays inside safe_dir
+    if not os.path.abspath(path).startswith(safe_dir + os.sep):
         return None
     return path
 
@@ -299,12 +311,13 @@ def api_previsualizar_excel():
                             [str(cell) if cell is not None else "" for cell in row]
                         )
         wb.close()
-    except Exception as exc:
+    except Exception:
+        logger.exception("Error reading uploaded Excel file")
         try:
             os.remove(temp_path)
         except Exception:
             pass
-        return jsonify({"error": f"No se pudo leer el archivo Excel: {exc}"}), 400
+        return jsonify({"error": "No se pudo leer el archivo Excel. Verifica que sea un .xlsx válido y no esté dañado."}), 400
 
     if not headers:
         try:
@@ -377,8 +390,9 @@ def api_confirmar_importacion():
                 rows_as_dicts.append(row_dict)
 
         wb.close()
-    except Exception as exc:
-        return jsonify({"error": f"Error leyendo el archivo: {exc}"}), 500
+    except Exception:
+        logger.exception("Error reading Excel file during import session_id=%s", session_id)
+        return jsonify({"error": "Error al leer el archivo para importar. Por favor sube el archivo nuevamente."}), 500
     finally:
         try:
             os.remove(temp_path)
@@ -390,8 +404,9 @@ def api_confirmar_importacion():
 
     try:
         result = bulk_insert_inventory_dicts(rows_as_dicts, area_id=area_id)
-    except sqlite3.IntegrityError as exc:
-        return jsonify({"error": f"Error de integridad al importar: {exc}"}), 409
+    except sqlite3.IntegrityError:
+        logger.exception("Integrity error during Excel bulk import")
+        return jsonify({"error": "Error de integridad al importar. Puede haber datos con formato inválido."}), 409
 
     return jsonify(
         {
