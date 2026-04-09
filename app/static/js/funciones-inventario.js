@@ -1459,6 +1459,12 @@ if (nodes.excelSingleRow) {
 		});
 	}
 
+	if (typeof window.initInventarioImportar === "function") {
+		window.initInventarioImportar({
+			onImportSuccess: () => refreshItemsTable(),
+		});
+	}
+
 	nodes.toggleDensityBtn?.addEventListener("click", () => {
 		state.tableDensity = state.tableDensity === "compact" ? "normal" : "compact";
 		applyDensityMode();

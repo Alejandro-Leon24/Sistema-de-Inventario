@@ -12,6 +12,9 @@
             <button id="btn-exportar-excel" class="btn btn-outline-success" type="button">
                 <i class="bi bi-file-earmark-excel me-2"></i>Exportar a Excel
             </button>
+            <button id="btn-importar-excel" class="btn btn-outline-primary" type="button">
+                <i class="bi bi-file-earmark-arrow-up me-2"></i>Importar Excel
+            </button>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAgregarItem">
                 <i class="bi bi-plus-circle me-2"></i>Agregar nuevo ítem
             </button>
@@ -334,6 +337,117 @@
         </div>
     </div>
 </div>
+<!-- ════════════════════════════════════════════════════════════════
+     Modal: Importar desde Excel
+     ════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="modalImportarExcel" tabindex="-1" aria-hidden="true"
+    data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-file-earmark-arrow-up me-2 text-primary"></i>
+                    Importar bienes desde Excel
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+
+                <!-- Indicador de pasos -->
+                <div class="d-flex align-items-center gap-2 mb-4">
+                    <span class="badge rounded-pill bg-primary" id="import-step-badge-1">1</span>
+                    <span class="small fw-semibold" id="import-step-label-1">Seleccionar archivo</span>
+                    <span class="text-muted">→</span>
+                    <span class="badge rounded-pill bg-secondary" id="import-step-badge-2">2</span>
+                    <span class="small text-muted" id="import-step-label-2">Mapear columnas</span>
+                    <span class="text-muted">→</span>
+                    <span class="badge rounded-pill bg-secondary" id="import-step-badge-3">3</span>
+                    <span class="small text-muted" id="import-step-label-3">Importar</span>
+                </div>
+
+                <!-- ── Paso 1: subir archivo ──────────────────────────────── -->
+                <div id="import-panel-1">
+                    <div id="import-dropzone"
+                        class="border border-2 rounded-3 p-5 text-center"
+                        style="border-style: dashed !important; cursor: pointer; transition: background 0.15s;">
+                        <i class="bi bi-file-earmark-excel text-success" style="font-size: 3rem;"></i>
+                        <p class="mt-3 mb-1 fw-semibold">Arrastra tu archivo Excel aquí</p>
+                        <p class="text-muted small mb-3">o haz clic para seleccionar</p>
+                        <input type="file" id="import-file-input" accept=".xlsx" class="d-none">
+                        <button type="button" class="btn btn-outline-success btn-sm"
+                            id="btn-import-select-file">
+                            <i class="bi bi-folder2-open me-1"></i>Seleccionar archivo .xlsx
+                        </button>
+                        <p class="text-muted small mt-3 mb-0">Máximo 10 MB · Solo archivos .xlsx</p>
+                    </div>
+                    <div id="import-upload-status" class="d-none"></div>
+                </div>
+
+                <!-- ── Paso 2: mapeo de columnas ─────────────────────────── -->
+                <div id="import-panel-2" class="d-none">
+                    <p class="small text-muted mb-2">
+                        Asigna cada columna del Excel al campo del inventario correspondiente.
+                        Las marcadas como <em>Ignorar columna</em> no se importarán.
+                        Las columnas sombreadas serán descartadas.
+                    </p>
+                    <div class="table-responsive border rounded" style="max-height: 58vh; overflow: auto;">
+                        <table class="table table-sm table-bordered align-middle mb-0"
+                            id="import-mapping-table"
+                            style="table-layout: auto; white-space: nowrap;">
+                            <thead class="table-light" style="position: sticky; top: 0; z-index: 2;">
+                                <tr id="import-mapping-selects-row"></tr>
+                                <tr class="table-secondary" id="import-mapping-headers-row"></tr>
+                            </thead>
+                            <tbody id="import-mapping-preview-body"></tbody>
+                        </table>
+                    </div>
+                    <p class="small text-muted mt-2 mb-0" id="import-preview-info"></p>
+                </div>
+
+                <!-- ── Paso 3: confirmar e importar ──────────────────────── -->
+                <div id="import-panel-3" class="d-none">
+                    <div class="alert alert-info d-flex gap-2 align-items-start small">
+                        <i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>
+                        <div id="import-row-count">0 filas</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold small">
+                            Asignar área a todos los bienes importados
+                            <span class="text-muted fw-normal">(opcional)</span>
+                        </label>
+                        <select id="import-area-select" class="form-select form-select-sm">
+                            <option value="">Sin área específica</option>
+                        </select>
+                        <div class="form-text">
+                            Si los bienes ya traen área en el Excel, este valor la sobreescribirá.
+                        </div>
+                    </div>
+                    <div id="import-result-area" class="d-none"></div>
+                </div>
+
+            </div><!-- /.modal-body -->
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm d-none"
+                    id="btn-import-back">
+                    <i class="bi bi-arrow-left me-1"></i>Anterior
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm"
+                    data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm d-none"
+                    id="btn-import-next">
+                    Siguiente <i class="bi bi-arrow-right ms-1"></i>
+                </button>
+                <button type="button" class="btn btn-success btn-sm d-none"
+                    id="btn-import-confirm">
+                    <i class="bi bi-cloud-upload me-1"></i>Importar ahora
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- ── fin modal importar excel ──────────────────────────────────── -->
+
 <script>
 
 function validarEnteros(input) {
@@ -358,5 +472,6 @@ function validarNumerosComas(input) {
 <script src="{{ url_for('static', filename='js/inventario-tabla.js') }}"></script>
 <script src="{{ url_for('static', filename='js/inventario-modales.js') }}"></script>
 <script src="{{ url_for('static', filename='js/inventario-exportar.js') }}"></script>
+<script src="{{ url_for('static', filename='js/inventario-importar.js') }}"></script>
 <script src="{{ url_for('static', filename='js/funciones-inventario.js') }}"></script>
 {% endblock %}

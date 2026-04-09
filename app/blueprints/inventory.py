@@ -1,8 +1,14 @@
+import os
 import sqlite3
+import tempfile
+import time
+import uuid
 
 from flask import Blueprint, jsonify, request
 
 from database.controller import (
+    ALLOWED_INVENTORY_FIELDS,
+    bulk_insert_inventory_dicts,
     bulk_insert_inventory_rows,
     create_inventory_item,
     delete_inventory_item,
@@ -20,6 +26,46 @@ from database.controller import (
 
 inventory_bp = Blueprint("inventory", __name__)
 DEFAULT_USER_KEY = "portable_user"
+
+# ---------------------------------------------------------------------------
+# Excel import helpers
+# ---------------------------------------------------------------------------
+_EXCEL_IMPORT_DIR = os.path.join(tempfile.gettempdir(), "inventario_excel_import")
+os.makedirs(_EXCEL_IMPORT_DIR, exist_ok=True)
+
+_MAX_EXCEL_PREVIEW_ROWS = 20
+_MAX_EXCEL_IMPORT_ROWS = 10_000
+_MAX_EXCEL_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _clean_old_excel_imports(max_age_seconds: int = 3600) -> None:
+    """Remove temp excel files older than *max_age_seconds*."""
+    now = time.time()
+    try:
+        for fname in os.listdir(_EXCEL_IMPORT_DIR):
+            if not fname.endswith(".xlsx"):
+                continue
+            fpath = os.path.join(_EXCEL_IMPORT_DIR, fname)
+            try:
+                if os.path.isfile(fpath) and (now - os.path.getmtime(fpath)) > max_age_seconds:
+                    os.remove(fpath)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _safe_import_session_path(session_id: str) -> str | None:
+    """Return the absolute temp path for *session_id*, or None if invalid."""
+    # session_id must be a UUID (hex + hyphens only, no path separators)
+    clean = session_id.replace("-", "")
+    if not clean.isalnum() or len(session_id) > 64:
+        return None
+    path = os.path.join(_EXCEL_IMPORT_DIR, f"{session_id}.xlsx")
+    # Ensure the resolved path is still inside the import dir (no traversal)
+    if not os.path.abspath(path).startswith(os.path.abspath(_EXCEL_IMPORT_DIR)):
+        return None
+    return path
 
 
 @inventory_bp.get("/api/inventario")
@@ -203,3 +249,154 @@ def api_put_column_mappings():
         return jsonify({"error": "mappings debe ser una lista."}), 400
     replace_column_mappings(mappings)
     return jsonify({"success": True})
+
+
+# ---------------------------------------------------------------------------
+# Excel bulk import  –  step 1: upload and preview
+# ---------------------------------------------------------------------------
+
+@inventory_bp.post("/api/inventario/previsualizar-excel")
+def api_previsualizar_excel():
+    """Upload an .xlsx file, store it temporarily and return headers + preview rows."""
+    _clean_old_excel_imports()
+
+    if "file" not in request.files:
+        return jsonify({"error": "No se recibió ningún archivo."}), 400
+
+    file = request.files["file"]
+    filename = (file.filename or "").strip().lower()
+    if not filename.endswith(".xlsx"):
+        return jsonify({"error": "Solo se aceptan archivos .xlsx"}), 400
+
+    content = file.read()
+    if len(content) > _MAX_EXCEL_FILE_BYTES:
+        return jsonify({"error": "El archivo supera el límite de 10 MB."}), 400
+    if not content:
+        return jsonify({"error": "El archivo está vacío."}), 400
+
+    session_id = str(uuid.uuid4())
+    temp_path = os.path.join(_EXCEL_IMPORT_DIR, f"{session_id}.xlsx")
+    with open(temp_path, "wb") as f:
+        f.write(content)
+
+    try:
+        from openpyxl import load_workbook  # openpyxl is an existing dependency
+
+        wb = load_workbook(temp_path, read_only=True, data_only=True)
+        ws = wb.active
+        headers: list[str] = []
+        preview_rows: list[list[str]] = []
+        total_rows = 0
+
+        for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
+            if row_idx == 0:
+                headers = [str(cell if cell is not None else "").strip() for cell in row]
+            else:
+                if any(cell is not None for cell in row):
+                    total_rows += 1
+                    if total_rows <= _MAX_EXCEL_PREVIEW_ROWS:
+                        preview_rows.append(
+                            [str(cell) if cell is not None else "" for cell in row]
+                        )
+        wb.close()
+    except Exception as exc:
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+        return jsonify({"error": f"No se pudo leer el archivo Excel: {exc}"}), 400
+
+    if not headers:
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+        return jsonify({"error": "El archivo no tiene encabezados en la primera fila."}), 400
+
+    return jsonify(
+        {
+            "session_id": session_id,
+            "headers": headers,
+            "preview_rows": preview_rows,
+            "total_rows": total_rows,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Excel bulk import  –  step 2: apply mapping and insert
+# ---------------------------------------------------------------------------
+
+@inventory_bp.post("/api/inventario/confirmar-importacion")
+def api_confirmar_importacion():
+    """Apply a column mapping to a previously uploaded file and bulk-insert the rows."""
+    payload = request.get_json(silent=True) or {}
+    session_id = str(payload.get("session_id") or "").strip()
+    # mapping: {str(col_index): canonical_field_name_or_empty_string}
+    mapping: dict[str, str] = payload.get("mapping") or {}
+    area_id_raw = payload.get("area_id")
+
+    if not session_id:
+        return jsonify({"error": "Falta session_id."}), 400
+
+    temp_path = _safe_import_session_path(session_id)
+    if temp_path is None:
+        return jsonify({"error": "session_id inválido."}), 400
+    if not os.path.exists(temp_path):
+        return jsonify(
+            {"error": "La sesión de importación ha expirado. Por favor sube el archivo nuevamente."}
+        ), 410
+
+    try:
+        area_id = int(area_id_raw) if area_id_raw not in (None, "", "null") else None
+    except (TypeError, ValueError):
+        area_id = None
+
+    try:
+        from openpyxl import load_workbook
+
+        wb = load_workbook(temp_path, read_only=True, data_only=True)
+        ws = wb.active
+        rows_as_dicts: list[dict] = []
+        first_row = True
+
+        for row in ws.iter_rows(values_only=True):
+            if first_row:
+                first_row = False
+                continue
+            if len(rows_as_dicts) >= _MAX_EXCEL_IMPORT_ROWS:
+                break
+            if not any(cell is not None for cell in row):
+                continue  # skip blank rows
+            row_dict: dict = {}
+            for col_idx, cell in enumerate(row):
+                canonical = str(mapping.get(str(col_idx)) or "").strip()
+                if canonical and canonical in ALLOWED_INVENTORY_FIELDS and canonical != "item_numero":
+                    row_dict[canonical] = str(cell).strip() if cell is not None else None
+            if row_dict:
+                rows_as_dicts.append(row_dict)
+
+        wb.close()
+    except Exception as exc:
+        return jsonify({"error": f"Error leyendo el archivo: {exc}"}), 500
+    finally:
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+
+    if not rows_as_dicts:
+        return jsonify({"error": "No se encontraron filas con datos para importar después de aplicar el mapeo."}), 400
+
+    try:
+        result = bulk_insert_inventory_dicts(rows_as_dicts, area_id=area_id)
+    except sqlite3.IntegrityError as exc:
+        return jsonify({"error": f"Error de integridad al importar: {exc}"}), 409
+
+    return jsonify(
+        {
+            "success": True,
+            "inserted": result["inserted"],
+            "skipped": result["skipped"],
+        }
+    ), 201

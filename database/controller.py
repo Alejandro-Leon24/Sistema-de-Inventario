@@ -1516,6 +1516,77 @@ def bulk_insert_inventory_rows(rows, area_id=None):
     return list(range(first_insert_rowid, last_insert_rowid + 1))
 
 
+def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
+    """Insert a list of dicts with canonical field names into inventario_items.
+
+    Each dict may contain any subset of ALLOWED_INVENTORY_FIELDS (excluding
+    item_numero, which is assigned automatically).  Returns a dict with
+    ``inserted`` and ``skipped`` counts.
+    """
+    db = get_db()
+    start_item_numero = _next_item_numero()
+
+    normalized = []
+    for idx, row_dict in enumerate(rows_as_dicts):
+        if not isinstance(row_dict, dict):
+            continue
+        # Keep only valid, non-item_numero fields
+        fields = {
+            k: v
+            for k, v in row_dict.items()
+            if k in ALLOWED_INVENTORY_FIELDS and k != "item_numero"
+        }
+        if not fields:
+            continue
+
+        fields["item_numero"] = start_item_numero + idx
+        if area_id is not None:
+            fields["area_id"] = int(area_id)
+
+        try:
+            fields["cantidad"] = int(fields.get("cantidad") or 1)
+        except (TypeError, ValueError):
+            fields["cantidad"] = 1
+
+        for val_field in ("valor", "valor_esbye"):
+            raw = fields.get(val_field)
+            if raw not in (None, ""):
+                try:
+                    fields[val_field] = float(str(raw).replace(",", "."))
+                except (TypeError, ValueError):
+                    fields[val_field] = None
+            else:
+                fields[val_field] = None
+
+        normalized.append(fields)
+
+    skipped = len(rows_as_dicts) - len(normalized)
+
+    if not normalized:
+        return {"inserted": 0, "skipped": skipped}
+
+    # Use the same fixed column set as bulk_insert_inventory_rows for consistency
+    insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
+    insert_values = [
+        tuple(row.get(col) for col in insert_columns)
+        for row in normalized
+    ]
+
+    try:
+        db.execute("BEGIN")
+        placeholders = ", ".join(["?"] * len(insert_columns))
+        db.executemany(
+            f"INSERT INTO inventario_items ({', '.join(insert_columns)}) VALUES ({placeholders})",
+            insert_values,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {"inserted": len(normalized), "skipped": skipped}
+
+
 def iter_inventory_items(filters=None, sort_direction="asc", batch_size=2000):
     direction = "DESC" if str(sort_direction).lower() == "desc" else "ASC"
     page = 1
