@@ -71,10 +71,12 @@ function getFormByTipo(tipo) {
 function setPreviewUiState(state) {
     const status = document.getElementById("preview-status");
     const loader = document.getElementById("preview-loader");
+    const loaderLabel = document.getElementById("preview-loader-label");
     if (!status || !loader) return;
 
     if (state === "loading") {
         status.textContent = "Generando...";
+        if (loaderLabel) loaderLabel.textContent = "Generando vista previa...";
         loader.classList.remove("d-none");
         loader.classList.add("d-flex");
         return;
@@ -116,6 +118,15 @@ function setPreviewInfo(message) {
         <div class="text-primary fw-semibold mb-2">Vista previa en proceso</div>
         <div class="small text-muted">${String(message || "Generando documento...")}</div>
     `;
+}
+
+function setPreviewTransitionLoading(message) {
+    const loaderLabel = document.getElementById("preview-loader-label");
+    if (loaderLabel) {
+        loaderLabel.textContent = String(message || "Esperando datos...");
+    }
+    setPreviewInfo(message || "Esperando datos...");
+    setPreviewUiState("loading");
 }
 
 function updatePreviewIframe(pdfPath) {
@@ -303,10 +314,12 @@ function bindPreviewEvents() {
     document.querySelectorAll(".settings-menu-btn").forEach((tab) => {
         tab.addEventListener("click", async () => {
             const tipo = (tab.id || "tab-entrega").replace("tab-", "");
+            setPreviewTransitionLoading(`Esperando datos de ${tipo}...`);
             await cargarCamposDinamicosActa(tipo);
             if (tipo !== "aula") {
                 queuePreview(600);
             } else {
+                setPreviewInfo("Esta opción no usa vista previa en vivo. Genera el DOCX directamente.");
                 setPreviewUiState("idle");
             }
         });

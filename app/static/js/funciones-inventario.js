@@ -145,6 +145,7 @@ async function initInventoryPage() {
 		filtroOrder: document.getElementById("filtro-order"),
 		filtroSearch: document.getElementById("filtro-search"),
 		exportExcelBtn: document.getElementById("btn-exportar-excel"),
+		clearInventoryBtn: document.getElementById("btn-vaciar-inventario-temporal"),
 		toggleDensityBtn: document.getElementById("btn-toggle-density"),
 		gridWrapper: document.getElementById("inventory-grid-wrapper"),
 		table: document.getElementById("tabla-inventario"),
@@ -792,6 +793,9 @@ async function initInventoryPage() {
 			if (requestId !== itemsLoadRequestId) return;
 
 			state.items = response.data || [];
+			if (state.selectedRowId && !state.items.some((item) => String(item.id) === String(state.selectedRowId))) {
+				state.selectedRowId = null;
+			}
 			state.visibleItems = state.items;
 			state.totalItems = Number(response.pagination?.total || state.items.length || 0);
 			state.totalPages = Math.max(Number(response.pagination?.total_pages || 1), 1);
@@ -820,8 +824,47 @@ async function initInventoryPage() {
 	}
 
 	async function removeItem(itemId) {
-		await api.send(`/api/inventario/${itemId}`, "DELETE", {});
+		if (!itemId) return;
+		try {
+			await api.send(`/api/inventario/${itemId}`, "DELETE", {});
+		} catch (error) {
+			if (error?.status !== 404) {
+				throw error;
+			}
+			notify("El registro ya no existe o fue eliminado en otra acción.");
+		} finally {
+			state.selectedRowId = null;
+			nodes.contextMenu?.classList.add("d-none");
+			document.querySelectorAll("#tabla-inventario tbody tr.row-selected").forEach((el) => {
+				el.classList.remove("row-selected");
+			});
+		}
 		await loadItems();
+	}
+
+	async function clearInventoryForTesting() {
+		const confirmed = window.confirm("Esto borrará TODOS los bienes del inventario para pruebas. ¿Deseas continuar?");
+		if (!confirmed) return;
+
+		const confirmText = window.prompt("Escribe exactamente: VACIAR TODO", "");
+		if (String(confirmText || "").trim().toUpperCase() !== "VACIAR TODO") {
+			notify("Operación cancelada: confirmación incorrecta.", true);
+			return;
+		}
+
+		try {
+			const result = await api.send("/api/inventario/vaciar-temporal", "POST", { confirm_text: "VACIAR TODO" });
+			state.selectedRowId = null;
+			await loadItems();
+			notify(`Inventario vaciado para pruebas. Registros eliminados: ${Number(result.deleted || 0)}.`);
+		} catch (error) {
+			const raw = String(error?.payload?.raw || "");
+			if (raw.startsWith("<!DOCTYPE") || raw.startsWith("<html")) {
+				notify("El servidor devolvió HTML en lugar de JSON. Reinicia la app y vuelve a intentar el vaciado.", true);
+				return;
+			}
+			notify(error.message, true);
+		}
 	}
 
 	function resetAddItemForm() {
@@ -1299,6 +1342,7 @@ async function initInventoryPage() {
 		document.querySelectorAll("#tabla-inventario tbody tr.row-selected").forEach(el => {
 			el.classList.remove("row-selected");
 		});
+		state.selectedRowId = null;
 	});
 
 	// Manejador global para cerrar menú al hacer clic fuera
@@ -1314,6 +1358,11 @@ async function initInventoryPage() {
 		document.querySelectorAll("#tabla-inventario tbody tr.row-selected").forEach(el => {
 			el.classList.remove("row-selected");
 		});
+		state.selectedRowId = null;
+	});
+
+	nodes.clearInventoryBtn?.addEventListener("click", async () => {
+		await clearInventoryForTesting();
 	});
 
 	nodes.filtroBloque.addEventListener("change", async () => {
@@ -1456,6 +1505,15 @@ if (nodes.excelSingleRow) {
 		window.bindInventarioExport({
 			button: nodes.exportExcelBtn,
 			getCurrentFilterParams,
+		});
+	}
+
+	if (typeof window.initInventarioImportar === "function") {
+		window.initInventarioImportar({
+			onImportSuccess: async () => {
+				await refreshItemsTable();
+				notify("Importación de Excel completada.");
+			},
 		});
 	}
 

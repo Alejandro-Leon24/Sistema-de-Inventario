@@ -1,5 +1,8 @@
 from database.controller import (
+    ALLOWED_INVENTORY_FIELDS,
+    bulk_insert_inventory_dicts,
     bulk_insert_inventory_rows,
+    clear_inventory_items,
     create_inventory_item,
     delete_inventory_item,
     find_inventory_code_duplicates,
@@ -16,7 +19,10 @@ from database.controller import (
 )
 
 __all__ = [
+    "ALLOWED_INVENTORY_FIELDS",
+    "bulk_insert_inventory_dicts",
     "bulk_insert_inventory_rows",
+    "clear_inventory_items",
     "create_inventory_item",
     "delete_inventory_item",
     "find_inventory_code_duplicates",

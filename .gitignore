@@ -4,13 +4,6 @@ __pycache__/
 **/__pycache__/
 *.pyo
 
-# SQLite / local data
-inventario.db
-*.db
-*.sqlite
-*.sqlite3
-database/backups/
-
 # Virtual environments
 .venv/
 venv/

@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import re
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from database.db import get_db, execute_schema
@@ -179,17 +180,43 @@ def _ensure_schema_migrations_table():
         )
         """
     )
+
+    # Compatibilidad con versiones anteriores que usaban migration_name/applied_en.
+    cols = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(schema_migrations)").fetchall()
+    }
+    if "name" not in cols and "migration_name" in cols:
+        db.execute("ALTER TABLE schema_migrations ADD COLUMN name TEXT")
+        db.execute("UPDATE schema_migrations SET name = migration_name WHERE name IS NULL")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_schema_migrations_name ON schema_migrations(name)")
+
+    if "applied_at" not in cols and "applied_en" in cols:
+        db.execute("ALTER TABLE schema_migrations ADD COLUMN applied_at TEXT")
+        db.execute("UPDATE schema_migrations SET applied_at = applied_en WHERE applied_at IS NULL")
+
     db.commit()
 
 
 def _run_startup_migration_once(name, migration_fn):
     db = get_db()
-    existing = db.execute("SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1", (name,)).fetchone()
+    cols = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(schema_migrations)").fetchall()
+    }
+    key_col = "name" if "name" in cols else "migration_name"
+    existing = db.execute(
+        f"SELECT 1 FROM schema_migrations WHERE {key_col} = ? LIMIT 1",
+        (name,),
+    ).fetchone()
     if existing:
         return False
 
     migration_fn()
-    db.execute("INSERT INTO schema_migrations (name) VALUES (?)", (name,))
+    if "name" in cols:
+        db.execute("INSERT INTO schema_migrations (name) VALUES (?)", (name,))
+    else:
+        db.execute("INSERT INTO schema_migrations (migration_name) VALUES (?)", (name,))
     db.commit()
     return True
 
@@ -1432,6 +1459,21 @@ def delete_inventory_item(item_id):
     return True
 
 
+def clear_inventory_items(reset_sequence=True):
+    db = get_db()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        deleted = db.execute("SELECT COUNT(1) AS total FROM inventario_items").fetchone()["total"]
+        db.execute("DELETE FROM inventario_items")
+        if reset_sequence:
+            db.execute("DELETE FROM sqlite_sequence WHERE name = ?", ("inventario_items",))
+        db.commit()
+        return {"deleted": int(deleted or 0)}
+    except Exception:
+        db.rollback()
+        raise
+
+
 def find_inventory_code_duplicates(cod_inventario=None, cod_esbye=None, limit=50, exclude_item_id=None):
     inventory_code = str(cod_inventario or "").strip()
     esbye_code = str(cod_esbye or "").strip()
@@ -1539,6 +1581,141 @@ def bulk_insert_inventory_rows(rows, area_id=None):
     last_insert_rowid = db.execute("SELECT last_insert_rowid() AS last_id").fetchone()["last_id"]
     first_insert_rowid = last_insert_rowid - len(normalized_values) + 1
     return list(range(first_insert_rowid, last_insert_rowid + 1))
+
+
+def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
+    db = get_db()
+    insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
+    normalized_values = []
+    skipped = 0
+
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        start_item_numero = _next_item_numero_in_tx(db)
+
+        def _normalize_import_date(raw_value):
+            if raw_value in (None, ""):
+                return None
+
+            if isinstance(raw_value, datetime):
+                return raw_value.date().isoformat()
+            if isinstance(raw_value, date):
+                return raw_value.isoformat()
+
+            text = str(raw_value).strip()
+            if not text:
+                return None
+
+            # Maneja serial de Excel como texto numerico.
+            if re.fullmatch(r"\d+(?:\.\d+)?", text):
+                serial = float(text)
+                if serial > 59:
+                    # Excel epoch compatible.
+                    epoch = datetime(1899, 12, 30)
+                    parsed = epoch + timedelta(days=int(serial))
+                    return parsed.date().isoformat()
+
+            date_patterns = [
+                "%d/%m/%Y",
+                "%d/%m/%y",
+                "%d-%m-%Y",
+                "%d-%m-%y",
+                "%Y-%m-%d",
+                "%d-%b-%y",
+                "%d-%b-%Y",
+                "%d-%B-%Y",
+                "%d-%B-%y",
+            ]
+
+            # Fuerza locale neutral para meses en ingles (Nov, Dec, etc.).
+            text_normalized = text.replace(".", "-").replace("/", "/")
+
+            for pattern in date_patterns:
+                try:
+                    parsed = datetime.strptime(text_normalized, pattern)
+                    return parsed.date().isoformat()
+                except ValueError:
+                    continue
+
+            return text
+
+        for row_idx, raw_row in enumerate(rows_as_dicts or []):
+            if not isinstance(raw_row, dict):
+                skipped += 1
+                continue
+
+            payload = {
+                "item_numero": start_item_numero + len(normalized_values),
+                "area_id": area_id,
+            }
+
+            has_data = False
+            for field in CANONICAL_COLUMN_ORDER:
+                if field not in raw_row:
+                    continue
+                value = raw_row.get(field)
+                if isinstance(value, str):
+                    value = value.strip()
+                if value in ("", None):
+                    value = None
+                else:
+                    has_data = True
+                payload[field] = value
+
+            if "area_id" in raw_row and raw_row.get("area_id") not in (None, ""):
+                try:
+                    payload["area_id"] = int(raw_row.get("area_id"))
+                except (TypeError, ValueError):
+                    payload["area_id"] = area_id
+
+            if area_id and not payload.get("area_id"):
+                payload["area_id"] = area_id
+
+            if not has_data:
+                skipped += 1
+                continue
+
+            try:
+                payload["cantidad"] = int(payload.get("cantidad") or 1)
+            except (TypeError, ValueError):
+                payload["cantidad"] = 1
+
+            for money_field in ("valor", "valor_esbye"):
+                raw_money = payload.get(money_field)
+                if raw_money in (None, ""):
+                    payload[money_field] = None
+                    continue
+                text_money = str(raw_money).strip().replace(" ", "")
+                if "," in text_money and "." in text_money:
+                    text_money = text_money.replace(".", "").replace(",", ".")
+                elif "," in text_money:
+                    text_money = text_money.replace(",", ".")
+                try:
+                    payload[money_field] = float(text_money)
+                except (TypeError, ValueError):
+                    payload[money_field] = None
+
+            for date_field in ("fecha_adquisicion", "fecha_adquisicion_esbye"):
+                payload[date_field] = _normalize_import_date(payload.get(date_field))
+
+            normalized_values.append(tuple(payload.get(column) for column in insert_columns))
+
+        if normalized_values:
+            placeholders = ", ".join(["?"] * len(insert_columns))
+            db.executemany(
+                f"INSERT INTO inventario_items ({', '.join(insert_columns)}) VALUES ({placeholders})",
+                normalized_values,
+            )
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "inserted": len(normalized_values),
+        "skipped": skipped,
+    }
 
 
 def iter_inventory_items(filters=None, sort_direction="asc", batch_size=2000):
