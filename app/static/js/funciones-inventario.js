@@ -1,6 +1,6 @@
 ﻿const INVENTORY_COLUMNS = [
 	{ field: "item_numero", label: "ITEM", editable: false },
-	{ field: "cod_inventario", label: "CÓD. INVENTARIO", editable: true },
+	{ field: "cod_inventario", label: "COD INV.", editable: true },
 	{ field: "cod_esbye", label: "CÓD. ESBYE", editable: true },
 	{ field: "cuenta", label: "CUENTA", editable: true },
 	{ field: "cantidad", label: "CANTIDAD", editable: true },
@@ -153,6 +153,7 @@ async function initInventoryPage() {
 		detailContainer: document.getElementById("detalle-contenido"),
 		contextMenu: document.getElementById("context-menu"),
 		modalAreaSelect: document.getElementById("modal-area-select"),
+		modalAreaEsbyeSelect: document.getElementById("modal-area-esbye-select"),
 		modalCuentaSelect: document.getElementById("modal-cuenta-select"),
 		modalUsuarioFinalSelect: document.getElementById("modal-usuario-final-select"),
 		modalUbicacion: document.getElementById("modal-ubicacion"),
@@ -699,11 +700,21 @@ async function initInventoryPage() {
 	function renderAreaModalSelect() {
 		const areas = flattenAreas();
 		nodes.modalAreaSelect.innerHTML = '<option value="">Sin área</option>';
+		if (nodes.modalAreaEsbyeSelect) {
+			nodes.modalAreaEsbyeSelect.innerHTML = '<option value="">Sin ubicación ESBYE</option>';
+		}
 		areas.forEach((area) => {
 			const option = document.createElement("option");
 			option.value = area.id;
 			option.textContent = area.nombre;
 			nodes.modalAreaSelect.appendChild(option);
+
+			if (nodes.modalAreaEsbyeSelect) {
+				const optionEsbye = document.createElement("option");
+				optionEsbye.value = area.nombre;
+				optionEsbye.textContent = area.nombre;
+				nodes.modalAreaEsbyeSelect.appendChild(optionEsbye);
+			}
 		});
 	}
 
@@ -968,6 +979,9 @@ async function initInventoryPage() {
 		}
 		if (nodes.modalUbicacion) {
 			nodes.modalUbicacion.value = String(item.ubicacion || "");
+		}
+		if (nodes.modalAreaEsbyeSelect) {
+			nodes.modalAreaEsbyeSelect.value = String(item.ubicacion_esbye || "");
 		}
 		setAddModalMode({ editing: true, itemId });
 		addModal.show();

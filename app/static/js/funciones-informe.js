@@ -2,7 +2,7 @@ const api = window.api;
 
 let selectedColumns = ["cod_inventario", "descripcion", "marca", "modelo", "serie", "estado"];
 const availableColumns = [
-    { id: "cod_inventario", label: "CODIGO INV." },
+    { id: "cod_inventario", label: "COD INV." },
     { id: "cod_esbye", label: "COD. ESBYE" },
     { id: "cuenta", label: "CUENTA" },
     { id: "cantidad", label: "CANT" },
@@ -35,9 +35,10 @@ let activeAulaBatchModal = null;
 let activeAulaBatchPaused = false;
 let recepcionBienesTemp = [];
 let recepcionEditIndex = -1;
+let recepcionSelectedColumnIds = ["cod_inventario", "descripcion", "marca", "modelo", "cantidad", "estado"];
 
 const RECEPCION_BIENES_COLUMNS = [
-    { id: "cod_inventario", label: "CODIGO INV." },
+    { id: "cod_inventario", label: "COD INV." },
     { id: "cod_esbye", label: "COD. ESBYE" },
     { id: "cuenta", label: "CUENTA" },
     { id: "cantidad", label: "CANT" },
@@ -51,7 +52,30 @@ const RECEPCION_BIENES_COLUMNS = [
     { id: "valor", label: "VALOR" },
     { id: "usuario_final", label: "USUARIO FINAL" },
     { id: "observacion", label: "OBSERVACION" },
+    { id: "descripcion_esbye", label: "DESCRIPCION ESBYE" },
+    { id: "marca_esbye", label: "MARCA ESBYE" },
+    { id: "modelo_esbye", label: "MODELO ESBYE" },
+    { id: "serie_esbye", label: "SERIE ESBYE" },
+    { id: "fecha_adquisicion_esbye", label: "FECHA ESBYE" },
+    { id: "valor_esbye", label: "VALOR ESBYE" },
+    { id: "ubicacion_esbye", label: "UBICACION ESBYE" },
+    { id: "observacion_esbye", label: "OBSERVACION ESBYE" },
 ];
+
+function normalizeRecepcionColumnIds(rawColumns) {
+    const allIds = new Set(RECEPCION_BIENES_COLUMNS.map((c) => c.id));
+    const ids = (rawColumns || [])
+        .map((entry) => (typeof entry === "string" ? entry : entry?.id))
+        .map((id) => String(id || "").trim())
+        .filter((id) => allIds.has(id));
+
+    const unique = [];
+    ids.forEach((id) => {
+        if (!unique.includes(id)) unique.push(id);
+    });
+
+    return unique.length ? unique : ["cod_inventario", "descripcion", "marca", "modelo", "cantidad", "estado"];
+}
 
 const ACTA_TEMPLATE_REQUIRED_VARS = {
     entrega: [
@@ -91,6 +115,100 @@ const ACTA_TEMPLATE_REQUIRED_ALIASES = {
         area_trabajo: ["ubicacion", "ubicacion_entrega"],
     },
 };
+
+function normalizeImportDateLikeInventario(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+    if (/^\d+(?:\.\d+)?$/.test(raw)) {
+        const serial = Number(raw);
+        if (Number.isFinite(serial)) {
+            const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+            excelEpoch.setUTCDate(excelEpoch.getUTCDate() + Math.floor(serial));
+            const year = excelEpoch.getUTCFullYear();
+            const month = String(excelEpoch.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(excelEpoch.getUTCDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        }
+    }
+
+    const patterns = [
+        /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/,
+        /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/,
+    ];
+
+    const p1 = raw.match(patterns[0]);
+    if (p1) {
+        const day = String(Number(p1[1])).padStart(2, "0");
+        const month = String(Number(p1[2])).padStart(2, "0");
+        const year = p1[3];
+        return `${year}-${month}-${day}`;
+    }
+
+    const p2 = raw.match(patterns[1]);
+    if (p2) {
+        const year = p2[1];
+        const month = String(Number(p2[2])).padStart(2, "0");
+        const day = String(Number(p2[3])).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, "0");
+        const day = String(parsed.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+
+    return "";
+}
+
+function normalizeImportMoneyLikeInventario(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    let text = raw.replace(/\s+/g, "");
+    if (text.includes(",") && text.includes(".")) {
+        text = text.replace(/\./g, "").replace(/,/g, ".");
+    } else if (text.includes(",")) {
+        text = text.replace(/,/g, ".");
+    }
+    const num = Number(text);
+    if (!Number.isFinite(num)) return "";
+    return num.toFixed(2);
+}
+
+function normalizeRecepcionRowLikeInventarioImport(row, forcedLocation) {
+    const src = row && typeof row === "object" ? row : {};
+    const toText = (v) => String(v ?? "").trim();
+    const cantidadNum = parseInt(String(src.cantidad ?? "").trim(), 10);
+    return {
+        ...src,
+        cod_inventario: toText(src.cod_inventario),
+        cod_esbye: toText(src.cod_esbye),
+        cuenta: toText(src.cuenta),
+        descripcion: toText(src.descripcion),
+        marca: toText(src.marca),
+        modelo: toText(src.modelo),
+        serie: toText(src.serie),
+        estado: toText(src.estado),
+        usuario_final: toText(src.usuario_final),
+        observacion: toText(src.observacion),
+        descripcion_esbye: toText(src.descripcion_esbye),
+        marca_esbye: toText(src.marca_esbye),
+        modelo_esbye: toText(src.modelo_esbye),
+        serie_esbye: toText(src.serie_esbye),
+        observacion_esbye: toText(src.observacion_esbye),
+        cantidad: Number.isFinite(cantidadNum) && cantidadNum > 0 ? cantidadNum : 1,
+        valor: normalizeImportMoneyLikeInventario(src.valor),
+        valor_esbye: normalizeImportMoneyLikeInventario(src.valor_esbye),
+        fecha_adquisicion: normalizeImportDateLikeInventario(src.fecha_adquisicion),
+        fecha_adquisicion_esbye: normalizeImportDateLikeInventario(src.fecha_adquisicion_esbye || src.fecha_esbye),
+        ubicacion: toText(forcedLocation),
+        ubicacion_esbye: toText(src.ubicacion_esbye),
+    };
+}
 
 function normalizeTemplateVarName(value) {
     let v = String(value || "").trim();
@@ -331,12 +449,6 @@ async function validarNumeroActa(numeroActa) {
 
         if (payload.exists) {
             return { valid: false, error: `Ya existe un acta con el número ${value}.` };
-        }
-        if (payload.lower_than_max) {
-            return {
-                valid: false,
-                error: `El número ${value} es menor al último registrado (${payload.max_numero_acta}).`,
-            };
         }
         if (payload.reason === "format") {
             return { valid: false, error: "Formato inválido. Use 0NNN-AAAA (ej: 012-2026)." };
@@ -703,6 +815,39 @@ function normalizeTipoActa(value) {
     return String(value || "").trim().toLowerCase();
 }
 
+function syncModalBackdropState() {
+    const openModals = Array.from(document.querySelectorAll(".modal.show"));
+    const backdrops = Array.from(document.querySelectorAll(".modal-backdrop"));
+    const hasOpen = openModals.length > 0;
+
+    document.body.classList.toggle("modal-open", hasOpen);
+    if (!hasOpen) {
+        backdrops.forEach((bd) => bd.remove());
+        document.body.style.removeProperty("padding-right");
+        return;
+    }
+
+    if (!backdrops.length) {
+        const bd = document.createElement("div");
+        bd.className = "modal-backdrop fade show";
+        document.body.appendChild(bd);
+    } else if (backdrops.length > 1) {
+        backdrops.slice(0, -1).forEach((bd) => bd.remove());
+    }
+}
+
+function setupModalBackdropGuardian() {
+    if (window.__informeBackdropGuardianBound) return;
+    window.__informeBackdropGuardianBound = true;
+
+    document.addEventListener("shown.bs.modal", () => {
+        setTimeout(syncModalBackdropState, 0);
+    });
+    document.addEventListener("hidden.bs.modal", () => {
+        setTimeout(syncModalBackdropState, 0);
+    });
+}
+
 function setPreviewStatus(message) {
     const status = document.getElementById("preview-status");
     if (status) status.textContent = message;
@@ -870,9 +1015,14 @@ function showResultadoTabla(container, html) {
 function getActaTablePayload(tipo) {
     const t = normalizeTipoActa(tipo);
     if (t === "recepcion") {
+        const rows = Array.isArray(recepcionBienesTemp) ? recepcionBienesTemp : [];
+        const selectedIds = normalizeRecepcionColumnIds(recepcionSelectedColumnIds);
+        const selected = selectedIds
+            .map((id) => RECEPCION_BIENES_COLUMNS.find((col) => col.id === id))
+            .filter(Boolean);
         return {
-            datosTabla: Array.isArray(recepcionBienesTemp) ? recepcionBienesTemp : [],
-            datosColumnas: RECEPCION_BIENES_COLUMNS,
+            datosTabla: rows,
+            datosColumnas: selected,
         };
     }
     return {
@@ -916,11 +1066,19 @@ function getRecepcionBienFormValues() {
         modelo: String(document.getElementById("recepcion-bien-modelo")?.value || "").trim(),
         serie: String(document.getElementById("recepcion-bien-serie")?.value || "").trim(),
         estado: String(document.getElementById("recepcion-bien-estado")?.value || "").trim(),
-        ubicacion: String(document.getElementById("recepcion-area-trabajo")?.value || "").trim(),
+        ubicacion: String(document.getElementById("recepcion-bien-ubicacion")?.value || document.getElementById("recepcion-area-trabajo")?.value || "").trim(),
         fecha_adquisicion: String(document.getElementById("recepcion-bien-fecha-adquisicion")?.value || "").trim(),
         valor: String(document.getElementById("recepcion-bien-valor")?.value || "").trim(),
         usuario_final: String(document.getElementById("recepcion-bien-usuario-final")?.value || "").trim(),
         observacion: String(document.getElementById("recepcion-bien-observacion")?.value || "").trim(),
+        descripcion_esbye: String(document.getElementById("recepcion-bien-descripcion-esbye")?.value || "").trim(),
+        marca_esbye: String(document.getElementById("recepcion-bien-marca-esbye")?.value || "").trim(),
+        modelo_esbye: String(document.getElementById("recepcion-bien-modelo-esbye")?.value || "").trim(),
+        serie_esbye: String(document.getElementById("recepcion-bien-serie-esbye")?.value || "").trim(),
+        fecha_adquisicion_esbye: String(document.getElementById("recepcion-bien-fecha-esbye")?.value || "").trim(),
+        valor_esbye: String(document.getElementById("recepcion-bien-valor-esbye")?.value || "").trim(),
+        ubicacion_esbye: String(document.getElementById("recepcion-bien-ubicacion-esbye")?.value || "").trim(),
+        observacion_esbye: String(document.getElementById("recepcion-bien-observacion-esbye")?.value || "").trim(),
     };
 }
 
@@ -938,6 +1096,14 @@ function clearRecepcionBienForm() {
         "recepcion-bien-valor",
         "recepcion-bien-usuario-final",
         "recepcion-bien-observacion",
+        "recepcion-bien-descripcion-esbye",
+        "recepcion-bien-marca-esbye",
+        "recepcion-bien-modelo-esbye",
+        "recepcion-bien-serie-esbye",
+        "recepcion-bien-fecha-esbye",
+        "recepcion-bien-valor-esbye",
+        "recepcion-bien-ubicacion-esbye",
+        "recepcion-bien-observacion-esbye",
     ];
     ids.forEach((id) => {
         const el = document.getElementById(id);
@@ -964,34 +1130,86 @@ function setRecepcionEditMode(index) {
 function loadRecepcionBienIntoForm(index) {
     const item = recepcionBienesTemp[index];
     if (!item) return;
+    const assignSelect = (id, value) => {
+        const el = document.getElementById(id);
+        const val = String(value || "").trim();
+        if (!el) return;
+        if (!val) {
+            el.value = "";
+            return;
+        }
+        if (!Array.from(el.options || []).some((opt) => String(opt.value) === val)) {
+            const opt = document.createElement("option");
+            opt.value = val;
+            opt.textContent = val;
+            el.appendChild(opt);
+        }
+        el.value = val;
+    };
     const assign = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.value = String(value || "");
     };
     assign("recepcion-bien-cod-inventario", item.cod_inventario);
     assign("recepcion-bien-cod-esbye", item.cod_esbye);
-    assign("recepcion-bien-cuenta", item.cuenta);
+    assignSelect("recepcion-bien-cuenta", item.cuenta);
     assign("recepcion-bien-cantidad", item.cantidad || 1);
     assign("recepcion-bien-descripcion", item.descripcion);
     assign("recepcion-bien-marca", item.marca);
     assign("recepcion-bien-modelo", item.modelo);
     assign("recepcion-bien-serie", item.serie);
-    assign("recepcion-bien-estado", item.estado);
-    assign("recepcion-bien-fecha-adquisicion", item.fecha_adquisicion);
+    assignSelect("recepcion-bien-estado", item.estado);
+    assign("recepcion-bien-fecha-adquisicion", normalizeImportDateLikeInventario(item.fecha_adquisicion));
     assign("recepcion-bien-valor", item.valor);
-    assign("recepcion-bien-usuario-final", item.usuario_final);
+    assignSelect("recepcion-bien-usuario-final", item.usuario_final);
     assign("recepcion-bien-observacion", item.observacion);
+    assign("recepcion-bien-descripcion-esbye", item.descripcion_esbye);
+    assign("recepcion-bien-marca-esbye", item.marca_esbye);
+    assign("recepcion-bien-modelo-esbye", item.modelo_esbye);
+    assign("recepcion-bien-serie-esbye", item.serie_esbye);
+    assign("recepcion-bien-fecha-esbye", normalizeImportDateLikeInventario(item.fecha_adquisicion_esbye || item.fecha_esbye));
+    assign("recepcion-bien-valor-esbye", item.valor_esbye);
+    assign("recepcion-bien-ubicacion-esbye", item.ubicacion_esbye || "");
+    assign("recepcion-bien-observacion-esbye", item.observacion_esbye);
     setRecepcionEditMode(index);
 }
 
 function renderRecepcionBienesTable() {
     const tbody = document.getElementById("tbody-recepcion-bienes");
+    const thead = document.getElementById("thead-recepcion-bienes");
     const countBadge = document.getElementById("recepcion-bienes-count");
-    if (!tbody || !countBadge) return;
+    if (!tbody || !thead || !countBadge) return;
+
+    const selectedIds = normalizeRecepcionColumnIds(recepcionSelectedColumnIds);
+    const escapeCell = (text) => String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    const selectedCols = selectedIds
+        .map((id) => RECEPCION_BIENES_COLUMNS.find((col) => col.id === id))
+        .filter(Boolean);
+
+    thead.innerHTML = "";
+    const thIndex = document.createElement("th");
+    thIndex.style.width = "55px";
+    thIndex.textContent = "N";
+    thead.appendChild(thIndex);
+    selectedCols.forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col.label;
+        thead.appendChild(th);
+    });
+    const thActions = document.createElement("th");
+    thActions.style.width = "90px";
+    thActions.className = "text-center";
+    thActions.textContent = "Acciones";
+    thead.appendChild(thActions);
 
     countBadge.textContent = String(recepcionBienesTemp.length);
     if (!recepcionBienesTemp.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Aún no hay bienes registrados.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${selectedCols.length + 2}" class="text-center text-muted">Aún no hay bienes registrados.</td></tr>`;
         return;
     }
 
@@ -1000,23 +1218,24 @@ function renderRecepcionBienesTable() {
         const tr = document.createElement("tr");
         tr.style.cursor = "pointer";
         tr.dataset.index = String(idx);
-        tr.innerHTML = `
-            <td>${idx + 1}</td>
-            <td>${String(item.cod_inventario || "-")}</td>
-            <td>${String(item.descripcion || "-")}</td>
-            <td>${String(item.marca || "-")}</td>
-            <td>${String(item.modelo || "-")}</td>
-            <td>${String(item.cantidad || 1)}</td>
-            <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-recepcion-bien-eliminar" data-index="${idx}"><i class="bi bi-trash"></i></button></td>
-        `;
+        let rowHtml = `<td>${idx + 1}</td>`;
+        selectedCols.forEach((col) => {
+            const raw = item?.[col.id];
+            const value = raw == null || String(raw).trim() === "" ? "-" : String(raw);
+            rowHtml += `<td title="${escapeCell(value)}">${escapeCell(value)}</td>`;
+        });
+        rowHtml += `<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-recepcion-bien-eliminar" data-index="${idx}"><i class="bi bi-trash"></i></button></td>`;
+        tr.innerHTML = rowHtml;
         tbody.appendChild(tr);
     });
 
     tbody.querySelectorAll("tr").forEach((tr) => {
-        tr.addEventListener("click", (event) => {
+        tr.addEventListener("click", async (event) => {
             if (event.target.closest(".btn-recepcion-bien-eliminar")) return;
             const idx = Number(tr.dataset.index);
             if (!Number.isFinite(idx)) return;
+            // Asegura que los catálogos de selects estén listos antes de cargar el item.
+            await loadRecepcionSelectOptions();
             loadRecepcionBienIntoForm(idx);
         });
     });
@@ -1060,10 +1279,39 @@ async function checkRecepcionDuplicates(payload) {
 
 function setupRecepcionBienesModal() {
     const modalEl = document.getElementById("modalRecepcionBienes");
+    const importModalEl = document.getElementById("modalRecepcionImportarExcel");
+    const columnsModalEl = document.getElementById("modalRecepcionColumnas");
     const btnOpen = document.querySelector("#sec-recepcion .btn-registrar-bienes");
     const btnSave = document.getElementById("btn-recepcion-bien-guardar");
     const btnCancel = document.getElementById("btn-recepcion-bien-cancelar");
     const btnConfirm = document.getElementById("btn-confirmar-recepcion-bienes");
+    const btnImportExcel = document.getElementById("btn-recepcion-importar-excel");
+    const inputImportExcel = document.getElementById("recepcion-import-file-input");
+    const importStatus = document.getElementById("recepcion-import-status");
+    const mappingSelectsRow = document.getElementById("recepcion-import-mapping-selects-row");
+    const mappingHeadersRow = document.getElementById("recepcion-import-mapping-headers-row");
+    const mappingPreviewBody = document.getElementById("recepcion-import-mapping-preview-body");
+    const previewInfo = document.getElementById("recepcion-import-preview-info");
+    const previewRunBody = document.getElementById("recepcion-import-preview-run-body");
+    const chunkRange = document.getElementById("recepcion-import-run-info");
+    const rowCount = null;
+    const reviewSummary = document.getElementById("recepcion-import-run-result");
+    const btnImportBack = document.getElementById("btn-recepcion-import-back");
+    const btnImportNext = document.getElementById("btn-recepcion-import-next");
+    const btnImportRun = document.getElementById("btn-recepcion-import-run");
+    const btnColumnas = document.getElementById("btn-recepcion-columnas");
+    const btnColumnasGuardar = document.getElementById("btn-recepcion-columnas-guardar");
+    const recepcionColumnSelector = document.getElementById("recepcion-column-selector");
+    const panel1 = document.getElementById("recepcion-import-step-file");
+    const panel2 = document.getElementById("recepcion-import-step-mapping");
+    const panel3 = document.getElementById("recepcion-import-step-run");
+    const stepBadges = [];
+    const stepLabels = [];
+    const ubicacionReadonly = document.getElementById("recepcion-bien-ubicacion");
+    const cuentaSelect = document.getElementById("recepcion-bien-cuenta");
+    const estadoSelect = document.getElementById("recepcion-bien-estado");
+    const usuarioFinalSelect = document.getElementById("recepcion-bien-usuario-final");
+    const ubicacionEsbyeSelect = document.getElementById("recepcion-bien-ubicacion-esbye");
     if (!modalEl || !btnOpen || !btnSave || !btnConfirm) return;
 
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
@@ -1076,6 +1324,21 @@ function setupRecepcionBienesModal() {
     };
     const duplicateModal = duplicateNodes.duplicateModalEl
         ? bootstrap.Modal.getOrCreateInstance(duplicateNodes.duplicateModalEl)
+        : null;
+    const importModal = importModalEl
+        ? bootstrap.Modal.getOrCreateInstance(importModalEl)
+        : null;
+    const columnsModal = columnsModalEl
+        ? bootstrap.Modal.getOrCreateInstance(columnsModalEl)
+        : null;
+
+    const importConflictsModalEl = document.getElementById("modalImportConflicts");
+    const importConflictsSummary = document.getElementById("import-conflicts-summary");
+    const importConflictsAccordion = document.getElementById("import-conflicts-accordion");
+    const importConflictsCancelBtn = document.getElementById("btn-import-conflicts-cancel");
+    const importConflictsContinueBtn = document.getElementById("btn-import-conflicts-continue");
+    const importConflictsModal = importConflictsModalEl
+        ? bootstrap.Modal.getOrCreateInstance(importConflictsModalEl)
         : null;
 
     const duplicateController = typeof window.createDuplicateInventoryModal === "function"
@@ -1100,10 +1363,745 @@ function setupRecepcionBienesModal() {
         ? duplicateController.openDuplicateModal
         : async () => true;
 
+    const CHUNK_SIZE = 20;
+    let shouldReturnToRecepcionModal = false;
+    let shouldReturnFromColumnsModal = false;
+    let pendingChildModal = "";
+    let isTransientImportModalHide = false;
+    const RECEPCION_CANONICAL_FIELDS = [
+        { value: "", label: "- Ignorar columna -" },
+        { value: "cod_inventario", label: "Cod Inv." },
+        { value: "cod_esbye", label: "Cod. ESBYE" },
+        { value: "cuenta", label: "Cuenta" },
+        { value: "cantidad", label: "Cantidad" },
+        { value: "descripcion", label: "Descripcion" },
+        { value: "marca", label: "Marca" },
+        { value: "modelo", label: "Modelo" },
+        { value: "serie", label: "Serie" },
+        { value: "estado", label: "Estado" },
+        { value: "ubicacion", label: "Ubicacion" },
+        { value: "fecha_adquisicion", label: "Fecha Adquisicion" },
+        { value: "valor", label: "Valor" },
+        { value: "usuario_final", label: "Usuario Final" },
+        { value: "observacion", label: "Observacion" },
+        { value: "descripcion_esbye", label: "Descripcion ESBYE" },
+        { value: "marca_esbye", label: "Marca ESBYE" },
+        { value: "modelo_esbye", label: "Modelo ESBYE" },
+        { value: "serie_esbye", label: "Serie ESBYE" },
+        { value: "fecha_adquisicion_esbye", label: "Fecha ESBYE" },
+        { value: "valor_esbye", label: "Valor ESBYE" },
+        { value: "ubicacion_esbye", label: "Ubicacion ESBYE" },
+        { value: "observacion_esbye", label: "Observacion ESBYE" },
+    ];
+
+    const importState = {
+        step: 1,
+        sessionId: null,
+        headers: [],
+        previewRows: [],
+        totalRows: 0,
+        mappings: [],
+        lockedMainLocationColIdx: null,
+        startIndex: 0,
+        chunkSize: CHUNK_SIZE,
+        hasMore: false,
+        previewChunkData: null,
+    };
+
+    const escapeHtml = (text) => String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const getStatusBadge = (status) => {
+        if (status === "exact") return '<span class="badge text-bg-danger">Registrado (igual)</span>';
+        if (status === "similar") return '<span class="badge text-bg-warning">Similar</span>';
+        return '<span class="badge text-bg-success">Nuevo</span>';
+    };
+
+    const buildConflictDetailsHtml = (rowData, rowPosition) => {
+        const exact = Array.isArray(rowData.exact_matches) ? rowData.exact_matches : [];
+        const similar = Array.isArray(rowData.similar_matches) ? rowData.similar_matches : [];
+        const allMatches = exact.length ? exact : similar;
+        const statusLabel = exact.length ? "Coincidencia exacta" : "Coincidencia similar";
+        const fields = [
+            { label: "Fila Excel", value: (rowData.row_index || 0) + 1 },
+            { label: "Cod. Inventario", value: rowData.data?.cod_inventario || "-" },
+            { label: "Cod. ESBYE", value: rowData.data?.cod_esbye || "-" },
+            { label: "Descripcion", value: rowData.data?.descripcion || "-" },
+            { label: "Marca", value: rowData.data?.marca || "-" },
+            { label: "Modelo", value: rowData.data?.modelo || "-" },
+            { label: "Serie", value: rowData.data?.serie || "-" },
+        ];
+        const fieldsHtml = fields
+            .map((item) => `<div class="col-md-4 small"><strong>${escapeHtml(item.label)}:</strong> ${escapeHtml(item.value)}</div>`)
+            .join("");
+        const repeatedRowsHtml = allMatches.length
+            ? allMatches.map((item) => `
+                <div class="import-conflict-match-row">
+                    <div class="small"><strong>Item #${escapeHtml(item.item_numero || "-")}</strong></div>
+                    <div class="small text-muted">INV: ${escapeHtml(item.cod_inventario || "-")} | ESBYE: ${escapeHtml(item.cod_esbye || "-")}</div>
+                    <div class="small text-warning-emphasis">Coincide por: ${escapeHtml((item.match_fields || []).length ? item.match_fields.join(", ") : "revision manual")}</div>
+                    <div class="small">${escapeHtml(item.descripcion || "-")}</div>
+                    <div class="small text-muted">Ubicacion: ${escapeHtml(item.ubicacion || "-")} | Usuario: ${escapeHtml(item.usuario_final || "-")}</div>
+                </div>
+            `).join("")
+            : '<div class="small text-muted">Sin coincidencias listables.</div>';
+
+        return `
+            <div class="accordion-item border-warning-subtle">
+                <h2 class="accordion-header" id="recepcion-conflict-head-${rowPosition}">
+                    <button class="accordion-button ${rowPosition > 0 ? "collapsed" : ""}" type="button" data-bs-toggle="collapse" data-bs-target="#recepcion-conflict-body-${rowPosition}" aria-expanded="${rowPosition === 0 ? "true" : "false"}">
+                        <div class="d-flex flex-wrap align-items-center gap-2 w-100 pe-3">
+                            <span class="badge text-bg-warning">${escapeHtml(statusLabel)}</span>
+                            <span class="small fw-semibold">Fila ${(rowData.row_index || 0) + 1}</span>
+                            <span class="small text-muted">${escapeHtml(rowData.data?.descripcion || "Sin descripcion")}</span>
+                        </div>
+                    </button>
+                </h2>
+                <div id="recepcion-conflict-body-${rowPosition}" class="accordion-collapse collapse ${rowPosition === 0 ? "show" : ""}" data-bs-parent="#import-conflicts-accordion">
+                    <div class="accordion-body pt-2">
+                        <div class="row g-2 mb-2">${fieldsHtml}</div>
+                        <div class="import-conflict-matches-wrap">${repeatedRowsHtml}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
+    const openImportConflictsModal = (validationData) => {
+        const summary = validationData?.summary || {};
+        const rows = Array.isArray(validationData?.analyzed_rows) ? validationData.analyzed_rows : [];
+        const conflictRows = rows.filter((row) => row.status === "exact" || row.status === "similar");
+
+        if (!importConflictsModal || !importConflictsSummary || !importConflictsAccordion || !importConflictsCancelBtn || !importConflictsContinueBtn) {
+            return Promise.resolve(window.confirm(`Conflictos detectados. Iguales: ${summary.exact || 0}, similares: ${summary.similar || 0}. ¿Deseas continuar?`));
+        }
+
+        importConflictsSummary.textContent = `Se detectaron ${summary.exact || 0} fila(s) iguales y ${summary.similar || 0} similares en este bloque.`;
+        importConflictsAccordion.innerHTML = conflictRows.length
+            ? conflictRows.map((row, idx) => buildConflictDetailsHtml(row, idx)).join("")
+            : '<div class="alert alert-secondary mb-0">No hay conflictos detallados para mostrar.</div>';
+
+        return new Promise((resolve) => {
+            const importWasVisible = Boolean(importModalEl && importModalEl.classList.contains("show"));
+            let settled = false;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                cleanup();
+                resolve(value);
+            };
+            const reopenImportIfNeeded = () => {
+                if (!importWasVisible) return;
+                setTimeout(() => {
+                    importModal?.show();
+                    syncModalBackdropState();
+                }, 120);
+            };
+            const onContinue = () => {
+                finish(true);
+                importConflictsModal.hide();
+                reopenImportIfNeeded();
+            };
+            const onCancel = () => {
+                finish(false);
+                importConflictsModal.hide();
+                reopenImportIfNeeded();
+            };
+            const onHidden = () => {
+                finish(false);
+                reopenImportIfNeeded();
+            };
+            const cleanup = () => {
+                importConflictsContinueBtn.removeEventListener("click", onContinue);
+                importConflictsCancelBtn.removeEventListener("click", onCancel);
+                importConflictsModalEl.removeEventListener("hidden.bs.modal", onHidden);
+            };
+
+            importConflictsContinueBtn.addEventListener("click", onContinue);
+            importConflictsCancelBtn.addEventListener("click", onCancel);
+            importConflictsModalEl.addEventListener("hidden.bs.modal", onHidden);
+
+            const showConflicts = () => {
+                importConflictsModal.show();
+                syncModalBackdropState();
+            };
+
+            if (importWasVisible) {
+                const onImportHiddenOnce = () => {
+                    importModalEl.removeEventListener("hidden.bs.modal", onImportHiddenOnce);
+                    showConflicts();
+                };
+                isTransientImportModalHide = true;
+                importModalEl.addEventListener("hidden.bs.modal", onImportHiddenOnce);
+                importModal?.hide();
+            } else {
+                showConflicts();
+            }
+        });
+    };
+
+    const fillSimpleSelect = (select, items, placeholder = "Seleccione") => {
+        if (!select) return;
+        const current = String(select.value || "");
+        select.innerHTML = `<option value="">${placeholder}</option>`;
+        (items || []).forEach((item) => {
+            const option = document.createElement("option");
+            option.value = String(item.nombre || "");
+            option.textContent = String(item.nombre || "");
+            select.appendChild(option);
+        });
+        if (current && Array.from(select.options).some((opt) => opt.value === current)) {
+            select.value = current;
+        }
+    };
+
+    const syncRecepcionUbicacionReadonly = () => {
+        if (!ubicacionReadonly) return;
+        ubicacionReadonly.value = String(document.getElementById("recepcion-area-trabajo")?.value || "").trim();
+    };
+
+    const buildRecepcionAreaOptions = () => {
+        const out = [];
+        (structureData || []).forEach((block) => {
+            (block.pisos || []).forEach((floor) => {
+                (floor.areas || []).forEach((area) => {
+                    out.push(`${block.nombre} / ${floor.nombre} / ${area.nombre}`);
+                });
+            });
+        });
+        return out;
+    };
+
+    const loadRecepcionEsbyeAreaOptions = () => {
+        if (!ubicacionEsbyeSelect) return;
+        const current = String(ubicacionEsbyeSelect.value || "").trim();
+        ubicacionEsbyeSelect.innerHTML = '<option value="">Sin ubicación ESBYE</option>';
+        buildRecepcionAreaOptions().forEach((label) => {
+            const option = document.createElement("option");
+            option.value = label;
+            option.textContent = label;
+            ubicacionEsbyeSelect.appendChild(option);
+        });
+        if (current && Array.from(ubicacionEsbyeSelect.options).some((opt) => opt.value === current)) {
+            ubicacionEsbyeSelect.value = current;
+        }
+    };
+
+    const renderRunChunkPreview = (validation) => {
+        if (!previewRunBody) return;
+        const rows = Array.isArray(validation?.analyzed_rows) ? validation.analyzed_rows : [];
+        if (!rows.length) {
+            previewRunBody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">Sin datos de bloque para previsualizar.</td></tr>';
+            return;
+        }
+        const badge = (status) => {
+            if (status === "exact") return '<span class="badge text-bg-danger">Igual</span>';
+            if (status === "similar") return '<span class="badge text-bg-warning">Similar</span>';
+            return '<span class="badge text-bg-success">Nuevo</span>';
+        };
+        previewRunBody.innerHTML = rows.map((row) => {
+            const d = row.data || {};
+            return `
+                <tr>
+                    <td>${Number(row.row_index || 0) + 1}</td>
+                    <td>${badge(row.status)}</td>
+                    <td>${String(d.cod_inventario || "-")}</td>
+                    <td>${String(d.cod_esbye || "-")}</td>
+                    <td>${String(d.descripcion || "-")}</td>
+                    <td>${String(d.marca || "-")}</td>
+                    <td>${String(d.modelo || "-")}</td>
+                    <td>${String(d.serie || "-")}</td>
+                    <td>${String(d.ubicacion || "-")}</td>
+                    <td>${String(d.ubicacion_esbye || "-")}</td>
+                </tr>
+            `;
+        }).join("");
+    };
+
+    const loadRecepcionSelectOptions = async () => {
+        try {
+            const [estadosRes, cuentasRes, adminsRes] = await Promise.all([
+                api.get("/api/parametros/estados"),
+                api.get("/api/parametros/cuentas"),
+                api.get("/api/administradores"),
+            ]);
+            fillSimpleSelect(estadoSelect, estadosRes.data || [], "-- Seleccionar estado --");
+            fillSimpleSelect(cuentaSelect, cuentasRes.data || [], "-- Seleccionar cuenta --");
+            fillSimpleSelect(usuarioFinalSelect, adminsRes.data || [], "-- Seleccionar personal --");
+        } catch (_err) {
+            // Permite seguir usando el modal aun si no cargan catálogos.
+        }
+    };
+
+    const showImportStatus = (html, type = "info") => {
+        if (!importStatus) return;
+        importStatus.className = `alert alert-${type} small mt-3 py-2`;
+        importStatus.innerHTML = html;
+        importStatus.classList.remove("d-none");
+    };
+
+    const clearImportStatus = () => {
+        if (!importStatus) return;
+        importStatus.classList.add("d-none");
+        importStatus.innerHTML = "";
+    };
+
+    const resetImportState = () => {
+        importState.step = 1;
+        importState.sessionId = null;
+        importState.headers = [];
+        importState.previewRows = [];
+        importState.totalRows = 0;
+        importState.mappings = [];
+        importState.lockedMainLocationColIdx = null;
+        importState.startIndex = 0;
+        importState.hasMore = false;
+        importState.previewChunkData = null;
+        if (inputImportExcel) inputImportExcel.value = "";
+        if (mappingSelectsRow) mappingSelectsRow.innerHTML = "";
+        if (mappingHeadersRow) mappingHeadersRow.innerHTML = "";
+        if (mappingPreviewBody) mappingPreviewBody.innerHTML = "";
+        if (previewInfo) previewInfo.textContent = "";
+        if (reviewSummary) reviewSummary.textContent = "Listo para importar el primer bloque (20 filas).";
+        if (previewRunBody) {
+            previewRunBody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">Sin datos de bloque para previsualizar.</td></tr>';
+        }
+        clearImportStatus();
+        if (btnImportNext) {
+            btnImportNext.disabled = true;
+            btnImportNext.classList.remove("d-none");
+        }
+        if (btnImportBack) btnImportBack.disabled = true;
+    };
+
+    const setImportStep = (step) => {
+        importState.step = step;
+        [panel1, panel2, panel3].forEach((p, i) => {
+            if (p) p.classList.toggle("d-none", i + 1 !== step);
+        });
+        stepBadges.forEach((badge, i) => {
+            if (!badge) return;
+            const n = i + 1;
+            const done = n < step;
+            const active = n === step;
+            badge.className = `badge rounded-pill ${done ? "bg-success" : active ? "bg-primary" : "bg-secondary"}`;
+            badge.innerHTML = done ? '<i class="bi bi-check"></i>' : String(n);
+        });
+        stepLabels.forEach((label, i) => {
+            if (!label) return;
+            label.className = `small ${i + 1 === step ? "fw-semibold" : "text-muted"}`;
+        });
+        if (btnImportBack) btnImportBack.classList.toggle("d-none", step === 1);
+        if (btnImportNext) btnImportNext.classList.toggle("d-none", step !== 2);
+        if (btnImportRun) btnImportRun.classList.toggle("d-none", step !== 3);
+        if (btnImportBack) btnImportBack.disabled = step === 1;
+    };
+
+    const toMappingObject = () => {
+        const mapping = {};
+        importState.mappings.forEach((field, idx) => {
+            mapping[String(idx)] = field || "";
+        });
+        return mapping;
+    };
+
+    const normalizeLocationMappings = (headers, mappings) => {
+        const out = Array.isArray(mappings) ? [...mappings] : [];
+        const locationIndices = [];
+        (headers || []).forEach((header, idx) => {
+            const headerNorm = String(header || "").toLowerCase();
+            if (headerNorm.includes("ubicacion") || out[idx] === "ubicacion") {
+                locationIndices.push(idx);
+            }
+        });
+
+        if (locationIndices.length) {
+            const [firstIdx, secondIdx] = locationIndices;
+            if (Number.isInteger(firstIdx)) out[firstIdx] = "ubicacion";
+            if (Number.isInteger(secondIdx)) out[secondIdx] = "ubicacion_esbye";
+            importState.lockedMainLocationColIdx = Number.isInteger(firstIdx) ? firstIdx : null;
+        } else {
+            importState.lockedMainLocationColIdx = null;
+        }
+        return out;
+    };
+
+    const applyMappingHighlights = () => {
+        if (!mappingSelectsRow || !mappingHeadersRow || !mappingPreviewBody) return;
+        const allSelThs = mappingSelectsRow.querySelectorAll("th");
+        const allHdrThs = mappingHeadersRow.querySelectorAll("th");
+        const allRows = mappingPreviewBody.querySelectorAll("tr");
+
+        importState.mappings.forEach((mapping, colIdx) => {
+            const ignored = !mapping;
+            if (allSelThs[colIdx]) allSelThs[colIdx].classList.toggle("table-secondary", ignored);
+            if (allHdrThs[colIdx]) allHdrThs[colIdx].classList.toggle("table-secondary", ignored);
+            allRows.forEach((tr) => {
+                if (tr.children[colIdx]) tr.children[colIdx].classList.toggle("table-secondary", ignored);
+            });
+        });
+    };
+
+    const buildMappingSelect = (colIdx) => {
+        const sel = document.createElement("select");
+        sel.className = "form-select form-select-sm";
+        sel.style.fontSize = "0.78rem";
+        RECEPCION_CANONICAL_FIELDS.forEach(({ value, label }) => {
+            const opt = document.createElement("option");
+            opt.value = value;
+            opt.textContent = label;
+            if (value === importState.mappings[colIdx]) opt.selected = true;
+            sel.appendChild(opt);
+        });
+        const isMainLocationLocked = importState.lockedMainLocationColIdx === colIdx;
+        if (isMainLocationLocked) {
+            sel.value = "ubicacion";
+            sel.disabled = true;
+            sel.title = "La ubicación principal se asigna automáticamente para recepción.";
+        }
+        sel.addEventListener("change", () => {
+            importState.mappings[colIdx] = sel.value;
+            applyMappingHighlights();
+        });
+        return sel;
+    };
+
+    const renderMappingStep = () => {
+        if (!mappingSelectsRow || !mappingHeadersRow || !mappingPreviewBody) return;
+        mappingSelectsRow.innerHTML = "";
+        mappingHeadersRow.innerHTML = "";
+        mappingPreviewBody.innerHTML = "";
+
+        importState.headers.forEach((header, colIdx) => {
+            const thSel = document.createElement("th");
+            thSel.style.minWidth = "165px";
+            thSel.style.padding = "4px 6px";
+            thSel.appendChild(buildMappingSelect(colIdx));
+            mappingSelectsRow.appendChild(thSel);
+
+            const thHdr = document.createElement("th");
+            thHdr.className = "text-muted small fw-normal";
+            thHdr.style.padding = "2px 6px";
+            thHdr.textContent = header || `(col ${colIdx + 1})`;
+            mappingHeadersRow.appendChild(thHdr);
+        });
+
+        importState.previewRows.forEach((row) => {
+            const tr = document.createElement("tr");
+            importState.headers.forEach((_, colIdx) => {
+                const td = document.createElement("td");
+                td.className = "small";
+                td.style.maxWidth = "200px";
+                td.style.overflow = "hidden";
+                td.style.textOverflow = "ellipsis";
+                td.style.whiteSpace = "nowrap";
+                const value = String(row[colIdx] ?? "");
+                td.textContent = value;
+                td.title = value;
+                tr.appendChild(td);
+            });
+            mappingPreviewBody.appendChild(tr);
+        });
+
+        if (previewInfo) {
+            previewInfo.textContent = `Vista previa: ${importState.previewRows.length} de ${importState.totalRows} filas.`;
+        }
+        applyMappingHighlights();
+    };
+
+    const renderRecepcionColumnSelector = () => {
+        if (!recepcionColumnSelector) return;
+        recepcionColumnSelector.innerHTML = "";
+        const selected = new Set(normalizeRecepcionColumnIds(recepcionSelectedColumnIds));
+
+        RECEPCION_BIENES_COLUMNS.forEach((col) => {
+            const row = document.createElement("label");
+            row.className = "list-group-item list-group-item-action d-flex align-items-center py-2";
+            row.innerHTML = `
+                <input class="form-check-input me-3 recepcion-col-chk" type="checkbox" value="${col.id}" ${selected.has(col.id) ? "checked" : ""}>
+                <span class="small fw-medium">${col.label}</span>
+            `;
+            recepcionColumnSelector.appendChild(row);
+        });
+    };
+
+    const updateImportProgress = () => {
+        const endIndex = Math.min(importState.startIndex + importState.chunkSize, importState.totalRows);
+        if (chunkRange) {
+            if (importState.totalRows > 0) {
+                chunkRange.textContent = `${importState.startIndex + 1}-${endIndex} de ${importState.totalRows}`;
+            } else {
+                chunkRange.textContent = "0-0 de 0";
+            }
+        }
+        if (rowCount) {
+            rowCount.textContent = String(recepcionBienesTemp.length);
+        }
+    };
+
+    const handleImportFile = async (file) => {
+        if (!file) return;
+        if (!String(file.name || "").toLowerCase().endsWith(".xlsx")) {
+            showImportStatus('<i class="bi bi-x-circle me-1"></i>Solo se aceptan archivos .xlsx.', "danger");
+            return;
+        }
+
+        showImportStatus(`<span class="spinner-border spinner-border-sm me-2" role="status"></span>Procesando <strong>${String(file.name || "archivo")}</strong>...`);
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            const pre = await fetch("/api/inventario/previsualizar-excel", { method: "POST", body: formData });
+            const preData = await pre.json();
+            if (!pre.ok || preData.error) {
+                showImportStatus(`<i class="bi bi-x-circle me-1"></i>${preData.error || "No se pudo leer el Excel."}`, "danger");
+                return;
+            }
+
+            importState.sessionId = preData.session_id;
+            importState.headers = Array.isArray(preData.headers) ? preData.headers : [];
+            importState.previewRows = Array.isArray(preData.preview_rows) ? preData.preview_rows : [];
+            importState.totalRows = Number(preData.total_rows || 0);
+            importState.startIndex = 0;
+            importState.hasMore = importState.totalRows > 0;
+            const suggested = Array.isArray(preData.suggested_mapping) ? preData.suggested_mapping : [];
+            const rawMappings = importState.headers.map((_, idx) => String(suggested[idx] || ""));
+            importState.mappings = normalizeLocationMappings(importState.headers, rawMappings);
+
+            renderMappingStep();
+            updateImportProgress();
+            clearImportStatus();
+            if (btnImportNext) btnImportNext.disabled = false;
+            setImportStep(2);
+        } catch (_err) {
+            showImportStatus('<i class="bi bi-x-circle me-1"></i>Error de red al subir archivo.', "danger");
+        }
+    };
+
+    const importNextChunk = async () => {
+        if (!importState.sessionId) {
+            notify("Primero selecciona y procesa un archivo Excel.", true);
+            return;
+        }
+        syncRecepcionUbicacionReadonly();
+        const forcedLocation = String(ubicacionReadonly?.value || "").trim();
+        const forcedAreaId = String(document.getElementById("recepcion-ubicacion-area-id")?.value || "").trim();
+        if (!forcedLocation || !forcedAreaId) {
+            notify("Seleccione Bloque, Piso y Área en el acta antes de importar bienes.", true);
+            return;
+        }
+
+        btnImportRun?.setAttribute("disabled", "disabled");
+        showImportStatus("<span class=\"spinner-border spinner-border-sm me-2\" role=\"status\"></span>Verificando bloque...", "info");
+
+        try {
+            const payloadBase = {
+                session_id: importState.sessionId,
+                mapping: toMappingObject(),
+                forced_location: forcedLocation,
+                forced_area_id: Number(forcedAreaId),
+                start_index: importState.startIndex,
+                chunk_size: importState.chunkSize,
+            };
+
+            const validation = importState.previewChunkData && Number(importState.previewChunkData.start_index) === Number(importState.startIndex)
+                ? importState.previewChunkData
+                : await api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+                    ...payloadBase,
+                    validate_only: true,
+                });
+
+            const validationSummary = validation.summary || {};
+            const exactCount = Number(validationSummary.exact || 0);
+            const similarCount = Number(validationSummary.similar || 0);
+            const normalCount = Number(validationSummary.normal || 0);
+            if (reviewSummary) {
+                reviewSummary.innerHTML = `<strong>Nuevos:</strong> ${normalCount} &nbsp; <strong class="text-danger">Iguales:</strong> ${exactCount} &nbsp; <strong class="text-warning-emphasis">Similares:</strong> ${similarCount}`;
+            }
+
+            let forceDuplicate = false;
+            if (exactCount > 0 || similarCount > 0) {
+                const proceed = await openImportConflictsModal(validation);
+                if (!proceed) {
+                    showImportStatus("Bloque cancelado por el usuario. Puedes ajustar el mapeo y volver a intentar.", "warning");
+                    return;
+                }
+                forceDuplicate = true;
+            }
+
+            showImportStatus("<span class=\"spinner-border spinner-border-sm me-2\" role=\"status\"></span>Importando bloque...", "info");
+            const res = await api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+                ...payloadBase,
+                force_duplicate: forceDuplicate,
+            });
+            importState.previewChunkData = null;
+
+            const importedRows = Array.isArray(res.rows) ? res.rows : [];
+            importedRows.forEach((row) => {
+                recepcionBienesTemp.push({
+                    ...normalizeRecepcionRowLikeInventarioImport(row, forcedLocation),
+                });
+            });
+
+            importState.hasMore = Boolean(res.has_more);
+            importState.startIndex = Number(res.next_start_index || 0);
+            renderRecepcionBienesTable();
+            updateRecepcionSummary();
+            updateImportProgress();
+            document.dispatchEvent(new CustomEvent("informe:tablaExtraida"));
+
+            if (reviewSummary) {
+                const summary = res.summary || {};
+                reviewSummary.innerHTML = importState.hasMore
+                    ? `Se agregaron ${importedRows.length} filas. <strong>Nuevos:</strong> ${Number(summary.normal || 0)} · <strong class="text-danger">Iguales:</strong> ${Number(summary.exact || 0)} · <strong class="text-warning-emphasis">Similares:</strong> ${Number(summary.similar || 0)}. Continúa con el siguiente bloque.`
+                    : `Importación completada. Último bloque: ${importedRows.length} filas. <strong>Nuevos:</strong> ${Number(summary.normal || 0)} · <strong class="text-danger">Iguales:</strong> ${Number(summary.exact || 0)} · <strong class="text-warning-emphasis">Similares:</strong> ${Number(summary.similar || 0)}.`;
+            }
+            if (!importState.hasMore) {
+                if (btnImportRun) btnImportRun.textContent = "Importación finalizada";
+                btnImportRun?.setAttribute("disabled", "disabled");
+                clearImportStatus();
+                notify("Importación de recepción completada.");
+            } else {
+                if (btnImportRun) btnImportRun.innerHTML = '<i class="bi bi-box-arrow-in-down-right me-1"></i>Importar siguiente bloque (20)';
+                showImportStatus(`Bloque importado: ${importedRows.length} fila(s).`, "success");
+                const nextPreview = await api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+                    ...payloadBase,
+                    start_index: importState.startIndex,
+                    validate_only: true,
+                });
+                importState.previewChunkData = nextPreview;
+                renderRunChunkPreview(nextPreview);
+            }
+        } catch (error) {
+            notify(error.message || "Error al importar bloque de recepción.", true);
+        } finally {
+            if (importState.hasMore) btnImportRun?.removeAttribute("disabled");
+        }
+    };
+
     btnOpen.addEventListener("click", (event) => {
         event.preventDefault();
+        syncRecepcionUbicacionReadonly();
+        loadRecepcionSelectOptions();
+        loadRecepcionEsbyeAreaOptions();
         renderRecepcionBienesTable();
         modal.show();
+    });
+
+    btnImportExcel?.addEventListener("click", () => {
+        syncRecepcionUbicacionReadonly();
+        const forcedLocation = String(ubicacionReadonly?.value || "").trim();
+        const forcedAreaId = String(document.getElementById("recepcion-ubicacion-area-id")?.value || "").trim();
+        if (!forcedLocation || !forcedAreaId) {
+            notify("Seleccione Bloque, Piso y Área en el acta antes de importar bienes.", true);
+            return;
+        }
+        resetImportState();
+        setImportStep(1);
+        if (btnImportRun) {
+            btnImportRun.innerHTML = '<i class="bi bi-box-arrow-in-down-right me-1"></i>Importar bloque (20)';
+            btnImportRun.removeAttribute("disabled");
+        }
+        shouldReturnToRecepcionModal = true;
+        pendingChildModal = "import";
+        modal.hide();
+    });
+
+    inputImportExcel?.addEventListener("change", async () => {
+        const file = inputImportExcel.files?.[0];
+        if (!file) return;
+        await handleImportFile(file);
+    });
+
+    btnImportNext?.addEventListener("click", () => {
+        if (!importState.sessionId) {
+            notify("Primero selecciona un archivo Excel.", true);
+            return;
+        }
+        const selectedFields = importState.mappings.filter(Boolean);
+        if (!selectedFields.length) {
+            notify("Asigna al menos una columna antes de continuar.", true);
+            return;
+        }
+        btnImportNext.setAttribute("disabled", "disabled");
+        api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+            session_id: importState.sessionId,
+            mapping: toMappingObject(),
+            forced_location: String(ubicacionReadonly?.value || "").trim(),
+            forced_area_id: Number(document.getElementById("recepcion-ubicacion-area-id")?.value || 0),
+            start_index: importState.startIndex,
+            chunk_size: importState.chunkSize,
+            validate_only: true,
+        }).then((validation) => {
+            importState.previewChunkData = validation;
+            renderRunChunkPreview(validation);
+            const s = validation.summary || {};
+            if (reviewSummary) {
+                reviewSummary.innerHTML = `<strong>Nuevos:</strong> ${Number(s.normal || 0)} &nbsp; <strong class="text-danger">Iguales:</strong> ${Number(s.exact || 0)} &nbsp; <strong class="text-warning-emphasis">Similares:</strong> ${Number(s.similar || 0)}`;
+            }
+            setImportStep(3);
+            updateImportProgress();
+        }).catch((error) => {
+            notify(error.message || "No se pudo previsualizar el bloque actual.", true);
+        }).finally(() => {
+            btnImportNext.removeAttribute("disabled");
+        });
+    });
+
+    btnImportBack?.addEventListener("click", () => {
+        if (importState.step === 3) {
+            setImportStep(2);
+            return;
+        }
+        if (importState.step === 2) {
+            setImportStep(1);
+        }
+    });
+
+    btnImportRun?.addEventListener("click", async () => {
+        await importNextChunk();
+    });
+
+    importModalEl?.addEventListener("hidden.bs.modal", () => {
+        if (isTransientImportModalHide) {
+            isTransientImportModalHide = false;
+            return;
+        }
+        resetImportState();
+        if (shouldReturnToRecepcionModal) {
+            shouldReturnToRecepcionModal = false;
+            modal.show();
+        }
+    });
+
+    btnColumnas?.addEventListener("click", () => {
+        renderRecepcionColumnSelector();
+        shouldReturnFromColumnsModal = true;
+        pendingChildModal = "columns";
+        modal.hide();
+    });
+
+    btnColumnasGuardar?.addEventListener("click", () => {
+        const checked = Array.from(document.querySelectorAll(".recepcion-col-chk:checked")).map((node) => String(node.value || "").trim());
+        if (!checked.length) {
+            notify("Seleccione al menos una columna para mostrar en recepción.", true);
+            return;
+        }
+        recepcionSelectedColumnIds = normalizeRecepcionColumnIds(checked);
+        renderRecepcionBienesTable();
+        updateRecepcionSummary();
+        columnsModal?.hide();
+    });
+
+    columnsModalEl?.addEventListener("hidden.bs.modal", () => {
+        if (shouldReturnFromColumnsModal) {
+            shouldReturnFromColumnsModal = false;
+            modal.show();
+        }
     });
 
     btnCancel?.addEventListener("click", () => {
@@ -1149,8 +2147,23 @@ function setupRecepcionBienesModal() {
     });
 
     modalEl.addEventListener("hidden.bs.modal", () => {
+        if (pendingChildModal === "import") {
+            pendingChildModal = "";
+            importModal?.show();
+            setTimeout(() => inputImportExcel?.focus(), 0);
+            return;
+        }
+        if (pendingChildModal === "columns") {
+            pendingChildModal = "";
+            columnsModal?.show();
+            return;
+        }
         updateRecepcionSummary();
     });
+
+    document.getElementById("recepcion-area")?.addEventListener("change", syncRecepcionUbicacionReadonly);
+    document.getElementById("recepcion-piso")?.addEventListener("change", syncRecepcionUbicacionReadonly);
+    document.getElementById("recepcion-bloque")?.addEventListener("change", syncRecepcionUbicacionReadonly);
 }
 
 function fillActaFormFromData(tipo, formularioData) {
@@ -1205,6 +2218,11 @@ function applyHistorialPayloadToEditor(record) {
     fillActaFormFromData(record.tipo_acta, parsed.formulario || {});
     window._globalSelectedTableRows = Array.isArray(parsed.tabla) ? parsed.tabla : [];
     window._globalSelectedColumns = Array.isArray(parsed.columnas) ? parsed.columnas : [];
+    if (normalizeTipoActa(record.tipo_acta) === "recepcion") {
+        recepcionSelectedColumnIds = normalizeRecepcionColumnIds(parsed.columnas || []);
+        renderRecepcionBienesTable();
+        updateRecepcionSummary();
+    }
     activeHistorialTemplateSnapshotPath =
         (record && record.plantilla_snapshot_path) ||
         (parsed && parsed.plantilla && parsed.plantilla.snapshot_path) ||
@@ -1745,6 +2763,8 @@ async function cargarPersonalDatalist() {
 document.addEventListener("DOMContentLoaded", async () => {
     const canAccessActas = await checkActaTemplatesAccessGuard();
     if (!canAccessActas) return;
+
+    setupModalBackdropGuardian();
 
     setupTabs();
     initNumeroActaTracking();

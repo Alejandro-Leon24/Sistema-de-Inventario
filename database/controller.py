@@ -2021,8 +2021,6 @@ def reserve_numero_acta(year, preferred_numero_acta=None):
             seq, year_in_num = _split_numero_acta(preferred_numero_acta)
             if seq is None or year_in_num != target_year:
                 raise ValueError("Numero de acta invalido para reservar.")
-            if seq <= ultimo:
-                raise ValueError("El numero de acta debe ser mayor al ultimo consecutivo reservado.")
             existing = db.execute(
                 "SELECT 1 FROM historial_actas WHERE numero_acta = ? LIMIT 1",
                 (f"{seq:03d}-{target_year}",),
@@ -2033,9 +2031,10 @@ def reserve_numero_acta(year, preferred_numero_acta=None):
         else:
             reserved = ultimo + 1
 
+        nuevo_ultimo = max(ultimo, reserved)
         db.execute(
             "UPDATE secuencia_actas SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE anio = ?",
-            (reserved, target_year),
+            (nuevo_ultimo, target_year),
         )
         db.commit()
         return f"{reserved:03d}-{target_year}"

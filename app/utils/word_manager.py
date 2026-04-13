@@ -327,7 +327,7 @@ def _normalize_jinja_in_docx(template_path):
 # Configuración y estilos para las tablas extraidas
 TABLE_STYLES_CONFIG = {
     # Aquí puedes personalizar cómo se renderiza la tabla generada dinámicamente
-    "font_size": 10,
+    "font_size": 9,
     "font_name": "Arial",
     "header_bg_color": "D9EAF7",
     "header_font_color": "000000",
@@ -526,7 +526,7 @@ def build_dynamic_table_context(table_rows, table_columns):
     return columnas, filas
 
 
-def _set_cell_text(cell, value, *, bold=False, align=WD_PARAGRAPH_ALIGNMENT.LEFT, font_size=10):
+def _set_cell_text(cell, value, *, bold=False, align=WD_PARAGRAPH_ALIGNMENT.LEFT, font_size=9):
     cell.text = ""
     p = cell.paragraphs[0]
     p.alignment = align
@@ -575,8 +575,8 @@ def _build_area_summary_table_subdoc(subdoc, filas, context_data):
         align_desc = WD_PARAGRAPH_ALIGNMENT.CENTER if is_total else WD_PARAGRAPH_ALIGNMENT.LEFT
         align_cant = WD_PARAGRAPH_ALIGNMENT.CENTER
 
-        _set_cell_text(row_cells[0], descripcion, bold=is_total, align=align_desc, font_size=10)
-        _set_cell_text(row_cells[1], cantidad, bold=is_total, align=align_cant, font_size=10)
+        _set_cell_text(row_cells[0], descripcion, bold=is_total, align=align_desc, font_size=9)
+        _set_cell_text(row_cells[1], cantidad, bold=is_total, align=align_cant, font_size=9)
 
     desc_values = []
     for fila in filas:
@@ -698,7 +698,7 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns, context_data=
         for idx in range(len(columnas)):
             val = celdas[idx] if idx < len(celdas) else "-"
             run = row_cells[idx].paragraphs[0].add_run(str(val if val is not None else "-"))
-            run.font.size = Pt(10)
+            run.font.size = Pt(int(TABLE_STYLES_CONFIG.get("font_size", 9)))
 
     for row in table.rows:
         for idx, w in enumerate(column_widths):

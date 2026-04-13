@@ -527,3 +527,41 @@ body.inventory-column-dragging * {
 .import-conflict-match-row:last-child {
     border-bottom: 0;
 }
+
+#modalRecepcionBienes .form-label.small {
+    font-size: 0.72rem;
+    margin-bottom: 0.2rem;
+}
+
+#modalRecepcionBienes .form-control-sm,
+#modalRecepcionBienes .form-select-sm {
+    font-size: 0.74rem;
+    padding: 0.2rem 0.42rem;
+}
+
+#modalRecepcionBienes textarea.form-control-sm {
+    min-height: 44px;
+}
+
+#modalRecepcionBienes .card-body {
+    padding: 0.75rem;
+}
+
+#modalRecepcionBienes .table {
+    font-size: 0.73rem;
+}
+
+#modalRecepcionBienes .table th,
+#modalRecepcionBienes .table td {
+    padding: 0.22rem 0.34rem;
+    vertical-align: middle;
+}
+
+#modalRecepcionBienes #tbody-recepcion-bienes td:nth-child(3),
+#modalRecepcionBienes #tbody-recepcion-bienes td:nth-child(4),
+#modalRecepcionBienes #tbody-recepcion-bienes td:nth-child(5) {
+    max-width: 130px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

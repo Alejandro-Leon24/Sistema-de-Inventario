@@ -586,7 +586,9 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Cuenta</label>
-                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-cuenta" placeholder="Ej: 1.4.1">
+                                        <select class="form-select form-select-sm" id="recepcion-bien-cuenta">
+                                            <option value="">-- Seleccionar cuenta --</option>
+                                        </select>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Cantidad</label>
@@ -610,7 +612,13 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Estado</label>
-                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-estado" placeholder="Ej: BUENO">
+                                        <select class="form-select form-select-sm" id="recepcion-bien-estado">
+                                            <option value="">-- Seleccionar estado --</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Ubicación (acta)</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-ubicacion" readonly>
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Fecha adquisición</label>
@@ -622,11 +630,51 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Usuario final</label>
-                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-usuario-final" placeholder="Ej: Abg. Ana Perez">
+                                        <select class="form-select form-select-sm" id="recepcion-bien-usuario-final">
+                                            <option value="">-- Seleccionar personal --</option>
+                                        </select>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small">Observación</label>
                                         <textarea class="form-control form-control-sm" rows="2" id="recepcion-bien-observacion" placeholder="Notas adicionales"></textarea>
+                                    </div>
+
+                                    <div class="col-12 mt-2">
+                                        <h6 class="fw-bold text-uppercase text-primary">Sistema ESBYE</h6>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Descripción ESBYE</label>
+                                        <textarea class="form-control form-control-sm" rows="2" id="recepcion-bien-descripcion-esbye" placeholder="Descripción ESBYE"></textarea>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Marca ESBYE</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-marca-esbye" placeholder="Marca ESBYE">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Modelo ESBYE</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-modelo-esbye" placeholder="Modelo ESBYE">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label small">Serie ESBYE</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-serie-esbye" placeholder="Serie ESBYE">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Fecha ESBYE</label>
+                                        <input type="date" class="form-control form-control-sm" id="recepcion-bien-fecha-esbye">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label small">Valor ESBYE</label>
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-valor-esbye" placeholder="0,00">
+                                    </div>
+                                    <div class="col-md-12">
+                                        <label class="form-label small">Ubicación ESBYE</label>
+                                        <select class="form-select form-select-sm" id="recepcion-bien-ubicacion-esbye">
+                                            <option value="">Sin ubicación ESBYE</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Observación ESBYE</label>
+                                        <textarea class="form-control form-control-sm" rows="2" id="recepcion-bien-observacion-esbye" placeholder="Observación ESBYE"></textarea>
                                     </div>
                                 </div>
                             </div>
@@ -641,20 +689,17 @@
                             <div class="card-body d-flex flex-column">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <h6 class="fw-bold text-primary mb-0">Bienes registrados temporalmente</h6>
-                                    <span class="badge bg-primary" id="recepcion-bienes-count">0</span>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" id="btn-recepcion-columnas" title="Seleccionar columnas">
+                                            <i class="bi bi-layout-three-columns me-1"></i>Columnas
+                                        </button>
+                                        <span class="badge bg-primary" id="recepcion-bienes-count">0</span>
+                                    </div>
                                 </div>
                                 <div class="table-responsive" style="max-height: 450px;">
                                     <table class="table table-sm table-hover table-bordered align-middle">
                                         <thead class="table-light sticky-top">
-                                            <tr>
-                                                <th style="width:55px;">N</th>
-                                                <th>CÓD. INV.</th>
-                                                <th>DESCRIPCIÓN</th>
-                                                <th>MARCA</th>
-                                                <th>MODELO</th>
-                                                <th>CANT.</th>
-                                                <th style="width:90px;" class="text-center">Acciones</th>
-                                            </tr>
+                                            <tr id="thead-recepcion-bienes"></tr>
                                         </thead>
                                         <tbody id="tbody-recepcion-bienes">
                                             <tr><td colspan="7" class="text-center text-muted">Aún no hay bienes registrados.</td></tr>
@@ -670,9 +715,121 @@
             <div class="modal-footer bg-light justify-content-between">
                 <span class="small text-muted">Los datos son temporales y solo se guardan al generar el acta.</span>
                 <div>
+                    <button type="button" class="btn btn-outline-primary me-2" id="btn-recepcion-importar-excel"><i class="bi bi-file-earmark-arrow-up me-1"></i>Importar Excel</button>
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
                     <button type="button" class="btn btn-primary" id="btn-confirmar-recepcion-bienes"><i class="bi bi-check2-circle me-1"></i>Usar estos bienes</button>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalRecepcionColumnas" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title"><i class="bi bi-layout-three-columns me-2 text-primary"></i>Columnas en Recepción</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div id="recepcion-column-selector" class="list-group"></div>
+                <p class="small text-muted mt-2 mb-0">Estas columnas se mostrarán en la tabla temporal y se usarán en el acta.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-recepcion-columnas-guardar">Aplicar columnas</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalImportConflicts" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-warning-subtle">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle-fill me-2 text-warning-emphasis"></i>
+                    Conflictos en bloque de importación
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="import-conflicts-summary" class="small text-muted mb-2"></p>
+                <div class="accordion" id="import-conflicts-accordion"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-import-conflicts-cancel">
+                    Cancelar bloque
+                </button>
+                <button type="button" class="btn btn-warning btn-sm" id="btn-import-conflicts-continue">
+                    <i class="bi bi-check2-circle me-1"></i>Guardar de todas formas
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalRecepcionImportarExcel" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-file-earmark-arrow-up me-2 text-primary"></i>Importar bienes a Recepción</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="recepcion-import-step-file">
+                    <p class="small text-muted mb-2">Selecciona un Excel y luego asigna cada columna manualmente como en inventario.</p>
+                    <input type="file" id="recepcion-import-file-input" accept=".xlsx" class="form-control">
+                    <div id="recepcion-import-status" class="small mt-2 text-muted"></div>
+                </div>
+
+                <div id="recepcion-import-step-mapping" class="d-none">
+                    <p class="small text-muted mb-2">Mapea las columnas del Excel a campos del inventario.</p>
+                    <div class="table-responsive border rounded" style="max-height: 56vh; overflow: auto;">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr id="recepcion-import-mapping-selects-row"></tr>
+                                <tr id="recepcion-import-mapping-headers-row"></tr>
+                            </thead>
+                            <tbody id="recepcion-import-mapping-preview-body"></tbody>
+                        </table>
+                    </div>
+                    <p class="small text-muted mt-2 mb-0" id="recepcion-import-preview-info"></p>
+                </div>
+
+                <div id="recepcion-import-step-run" class="d-none">
+                    <div id="recepcion-import-run-info" class="small text-muted mb-2"></div>
+                    <div class="alert alert-info small mb-0" id="recepcion-import-run-result">Listo para importar el primer bloque (20 filas).</div>
+                    <div class="table-responsive border rounded mt-2" style="max-height: 38vh; overflow: auto;">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width:56px;">Fila</th>
+                                    <th style="width:110px;">Estado</th>
+                                    <th>COD INV.</th>
+                                    <th>COD. ESBYE</th>
+                                    <th>Descripción</th>
+                                    <th>Marca</th>
+                                    <th>Modelo</th>
+                                    <th>Serie</th>
+                                    <th>Ubicación</th>
+                                    <th>Ubicación ESBYE</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recepcion-import-preview-run-body">
+                                <tr>
+                                    <td colspan="10" class="text-center text-muted">Sin datos de bloque para previsualizar.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-recepcion-import-back" disabled>Anterior</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-recepcion-import-next" disabled>Siguiente</button>
+                <button type="button" class="btn btn-success btn-sm d-none" id="btn-recepcion-import-run">Importar bloque (20)</button>
             </div>
         </div>
     </div>

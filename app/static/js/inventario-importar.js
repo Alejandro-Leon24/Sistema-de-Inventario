@@ -8,7 +8,7 @@
     const CHUNK_SIZE = 20;
     const CANONICAL_FIELDS = [
         { value: "", label: "- Ignorar columna -" },
-        { value: "cod_inventario", label: "Cod. Inventario" },
+        { value: "cod_inventario", label: "Cod Inv." },
         { value: "cod_esbye", label: "Cod. ESBYE" },
         { value: "cuenta", label: "Cuenta" },
         { value: "cantidad", label: "Cantidad" },

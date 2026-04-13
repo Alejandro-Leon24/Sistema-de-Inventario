@@ -732,13 +732,12 @@ def api_generar_informe():
                 preferred_numero_acta=numero_acta if requested_numero_acta else None,
             )
         except ValueError:
-            max_for_year = get_max_numero_acta_for_year(current_year)
             return jsonify(
                 {
                     "success": False,
                     "error": (
-                        f"El numero de acta {numero_acta} no es válido para el consecutivo actual. "
-                        f"Use uno mayor a {max_for_year:03d}-{current_year} o deje el campo vacío para asignación automática."
+                        f"El numero de acta {numero_acta} no se puede reservar porque ya existe o es inválido. "
+                        "Use otro número o deje el campo vacío para asignación automática."
                     ),
                 }
             ), 409
@@ -1117,14 +1116,13 @@ def api_numero_acta_validar():
 
     max_for_year = get_max_numero_acta_for_year(current_year)
     exists = numero_acta_exists(numero_acta)
-    lower_than_max = seq < max_for_year
 
     return jsonify(
         {
             "success": True,
-            "valid": (not exists and not lower_than_max),
+            "valid": (not exists),
             "exists": exists,
-            "lower_than_max": lower_than_max,
+            "lower_than_max": seq < max_for_year,
             "max_numero_acta": f"{max_for_year:03d}-{current_year}" if max_for_year > 0 else None,
             "next_numero_acta": get_next_numero_acta(current_year),
         }

@@ -948,3 +948,138 @@ def api_confirmar_importacion():
             },
         }
     ), 201
+
+
+@inventory_bp.post("/api/inventario/excel-a-filas-recepcion")
+def api_excel_to_recepcion_rows():
+    payload = request.get_json(silent=True) or {}
+    session_id = str(payload.get("session_id") or "").strip()
+    forced_location = str(payload.get("forced_location") or "").strip()
+    forced_area_id_raw = payload.get("forced_area_id")
+    mapping = payload.get("mapping") or {}
+    validate_only = bool(payload.get("validate_only"))
+    force_duplicate = bool(payload.get("force_duplicate"))
+    start_index = max(_coerce_int(payload.get("start_index"), 0), 0)
+    chunk_size = _coerce_int(payload.get("chunk_size"), 20)
+    if chunk_size <= 0:
+        chunk_size = 20
+    chunk_size = min(chunk_size, 200)
+
+    if not session_id:
+        return jsonify({"error": "Falta session_id."}), 400
+    if not forced_location:
+        return jsonify({"error": "Debes seleccionar Bloque, Piso y Área antes de importar a recepción."}), 400
+
+    temp_path = _safe_import_session_path(session_id)
+    if temp_path is None:
+        return jsonify({"error": "La sesión de importación ha expirado. Sube el archivo nuevamente."}), 410
+
+    try:
+        forced_area_id = int(forced_area_id_raw) if forced_area_id_raw not in (None, "", "null") else None
+    except (TypeError, ValueError):
+        forced_area_id = None
+
+    try:
+        parsed = _load_excel_with_detected_headers(temp_path)
+        data_rows = parsed.get("data_rows") or []
+
+        # Si no se envía mapeo manual, usa el sugerido por encabezados.
+        if not isinstance(mapping, dict) or not mapping:
+            headers = parsed.get("headers") or []
+            mapping = {}
+            for idx, header in enumerate(headers):
+                mapping[str(idx)] = _header_to_canonical_field(header)
+
+        mapped_rows = _build_mapped_chunk(
+            data_rows,
+            mapping,
+            start_index=start_index,
+            chunk_size=chunk_size,
+        )
+        analyzed_rows = _analyze_chunk_against_inventory(mapped_rows)
+    except Exception:
+        logger.exception("Error parsing Excel for recepcion temp import")
+        return jsonify({"error": "No se pudo leer el Excel para recepción."}), 500
+
+    exact_rows = [row for row in analyzed_rows if row.get("status") == "exact"]
+    similar_rows = [row for row in analyzed_rows if row.get("status") == "similar"]
+    has_conflicts = bool(exact_rows or similar_rows)
+
+    rows = []
+    skipped = 0
+    for row in analyzed_rows:
+        row_data = dict(row.get("data") or {})
+        if not row_data:
+            skipped += 1
+            continue
+
+        # Ubicación forzada por el área seleccionada en acta de recepción.
+        row_data["ubicacion"] = forced_location
+        if forced_area_id is not None:
+            row_data["area_id"] = forced_area_id
+
+        rows.append(row_data)
+
+    total_data_rows = len(data_rows)
+    has_more = (start_index + chunk_size) < total_data_rows
+    summary = {
+        "exact": len(exact_rows),
+        "similar": len(similar_rows),
+        "normal": len(analyzed_rows) - len(exact_rows) - len(similar_rows),
+    }
+
+    if validate_only:
+        return jsonify(
+            {
+                "success": True,
+                "rows": rows,
+                "total_rows": total_data_rows,
+                "chunk_rows": len(rows),
+                "skipped": skipped,
+                "start_index": start_index,
+                "chunk_size": chunk_size,
+                "next_start_index": start_index + chunk_size,
+                "has_more": has_more,
+                "summary": summary,
+                "analyzed_rows": analyzed_rows,
+            }
+        )
+
+    if has_conflicts and not force_duplicate:
+        return jsonify(
+            {
+                "error": "Se detectaron filas ya registradas o similares en este bloque.",
+                "rows": rows,
+                "total_rows": total_data_rows,
+                "chunk_rows": len(rows),
+                "skipped": skipped,
+                "start_index": start_index,
+                "chunk_size": chunk_size,
+                "next_start_index": start_index + chunk_size,
+                "has_more": has_more,
+                "summary": summary,
+                "analyzed_rows": analyzed_rows,
+            }
+        ), 409
+
+    if not has_more:
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+
+    return jsonify(
+        {
+            "success": True,
+            "rows": rows,
+            "total_rows": total_data_rows,
+            "chunk_rows": len(rows),
+            "skipped": skipped,
+            "start_index": start_index,
+            "chunk_size": chunk_size,
+            "next_start_index": start_index + chunk_size,
+            "has_more": has_more,
+            "summary": summary,
+            "analyzed_rows": analyzed_rows,
+        }
+    )
