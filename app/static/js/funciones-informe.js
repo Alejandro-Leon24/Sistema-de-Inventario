@@ -383,7 +383,28 @@ async function refreshNumeroActaFormularioActivo(force = false) {
     if (!input) return;
     if (!shouldRefreshNumeroActaInput(input, force)) return;
 
-    const nextNumero = await obtenerNumeroActaSiguiente();
+    const nextNumero = await obtenerNumeroActaSiguiente(tipo);
+    if (nextNumero) setNumeroActaInputValue(input, nextNumero, true);
+}
+
+async function refreshNumeroActaPorTipo(tipoActa, force = false) {
+    const tipo = normalizeTipoActa(tipoActa || "entrega");
+    if (tipo === "aula") {
+        await refreshNumeroActaAula(force);
+        return;
+    }
+
+    const form = document.getElementById(`form-${tipo}`);
+    if (!form) {
+        await refreshNumeroActaFormularioActivo(force);
+        return;
+    }
+
+    const input = form.querySelector('input[name="numero_acta"]');
+    if (!input) return;
+    if (!shouldRefreshNumeroActaInput(input, force)) return;
+
+    const nextNumero = await obtenerNumeroActaSiguiente(tipo);
     if (nextNumero) setNumeroActaInputValue(input, nextNumero, true);
 }
 
@@ -410,9 +431,9 @@ async function refreshNumeroActaAula(force = false) {
     }
 }
 
-async function obtenerNumeroActaSiguiente() {
+async function obtenerNumeroActaSiguiente(tipoActa = "entrega") {
     try {
-        const response = await fetch("/api/historial/numero-acta/siguiente");
+        const response = await fetch(`/api/historial/numero-acta/siguiente?tipo_acta=${encodeURIComponent(String(tipoActa || "entrega"))}`);
         const payload = await response.json();
         if (!response.ok || !payload.success) return null;
         return payload.numero_acta || null;
@@ -427,20 +448,21 @@ async function autocompletarNumeroActa(form) {
     if (!input) return;
     if (String(input.value || "").trim()) return;
 
-    const nextNumero = await obtenerNumeroActaSiguiente();
+    const formTipo = String(form.id || "").replace(/^form-/, "") || "entrega";
+    const nextNumero = await obtenerNumeroActaSiguiente(formTipo);
     if (nextNumero) {
         setNumeroActaInputValue(input, nextNumero, true);
     }
 }
 
-async function validarNumeroActa(numeroActa) {
+async function validarNumeroActa(numeroActa, tipoActa = "entrega") {
     const value = String(numeroActa || "").trim();
     if (!value) {
         return { valid: false, error: "El número de acta es obligatorio." };
     }
 
     try {
-        const response = await fetch(`/api/historial/numero-acta/validar?numero_acta=${encodeURIComponent(value)}`);
+        const response = await fetch(`/api/historial/numero-acta/validar?numero_acta=${encodeURIComponent(value)}&tipo_acta=${encodeURIComponent(String(tipoActa || "entrega"))}`);
         const payload = await response.json();
         if (!response.ok || !payload.success) {
             return { valid: false, error: "No se pudo validar el número de acta." };
@@ -471,6 +493,25 @@ function initNumeroActaOnTabs() {
             }, 20);
         });
     });
+}
+
+function resetActaDraftState(tipo) {
+    const t = String(tipo || "").trim().toLowerCase();
+    if (t === "recepcion") {
+        recepcionBienesTemp = [];
+        clearRecepcionBienForm();
+        setRecepcionEditMode(-1);
+        renderRecepcionBienesTable();
+        updateRecepcionSummary();
+        return;
+    }
+
+    if (t === "entrega") {
+        window._globalSelectedTableRows = [];
+        window._globalSelectedColumns = [];
+        const targetDiv = document.querySelector("#sec-entrega .resultado-tabla-container");
+        hideResultadoTabla(targetDiv);
+    }
 }
 
 function getAulaBatchScopePayload() {
@@ -1130,6 +1171,13 @@ function setRecepcionEditMode(index) {
 function loadRecepcionBienIntoForm(index) {
     const item = recepcionBienesTemp[index];
     if (!item) return;
+
+    const normalizeSelectText = (value) => String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+
     const assignSelect = (id, value) => {
         const el = document.getElementById(id);
         const val = String(value || "").trim();
@@ -1138,7 +1186,40 @@ function loadRecepcionBienIntoForm(index) {
             el.value = "";
             return;
         }
-        if (!Array.from(el.options || []).some((opt) => String(opt.value) === val)) {
+
+        const options = Array.from(el.options || []);
+        const normalizedVal = normalizeSelectText(val);
+        let matched = options.find((opt) => normalizeSelectText(opt.value) === normalizedVal);
+        if (!matched) {
+            matched = options.find((opt) => normalizeSelectText(opt.textContent) === normalizedVal);
+        }
+        if (!matched) {
+            matched = options.find((opt) => normalizeSelectText(opt.textContent).includes(normalizedVal));
+        }
+        if (!matched) {
+            const valTokens = normalizedVal.split(/\s+/).filter(Boolean);
+            let best = null;
+            let bestScore = 0;
+            options.forEach((opt) => {
+                const optNorm = normalizeSelectText(opt.value || opt.textContent);
+                if (!optNorm) return;
+                const optTokens = optNorm.split(/\s+/).filter(Boolean);
+                const overlap = valTokens.filter((token) => optTokens.some((item) => item.includes(token) || token.includes(item))).length;
+                const score = valTokens.length ? overlap / valTokens.length : 0;
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = opt;
+                }
+            });
+            if (best && bestScore >= 0.6) matched = best;
+        }
+
+        if (matched) {
+            el.value = String(matched.value || "");
+            return;
+        }
+
+        if (!options.some((opt) => String(opt.value) === val)) {
             const opt = document.createElement("option");
             opt.value = val;
             opt.textContent = val;
@@ -1235,7 +1316,9 @@ function renderRecepcionBienesTable() {
             const idx = Number(tr.dataset.index);
             if (!Number.isFinite(idx)) return;
             // Asegura que los catálogos de selects estén listos antes de cargar el item.
-            await loadRecepcionSelectOptions();
+            if (typeof window.__loadRecepcionSelectOptions === "function") {
+                await window.__loadRecepcionSelectOptions();
+            }
             loadRecepcionBienIntoForm(idx);
         });
     });
@@ -1246,6 +1329,8 @@ function renderRecepcionBienesTable() {
             event.stopPropagation();
             const idx = Number(btn.dataset.index);
             if (!Number.isFinite(idx)) return;
+            const confirmed = window.confirm("¿Deseas eliminar este bien de la lista temporal?");
+            if (!confirmed) return;
             recepcionBienesTemp.splice(idx, 1);
             if (recepcionEditIndex === idx) {
                 clearRecepcionBienForm();
@@ -1311,7 +1396,6 @@ function setupRecepcionBienesModal() {
     const cuentaSelect = document.getElementById("recepcion-bien-cuenta");
     const estadoSelect = document.getElementById("recepcion-bien-estado");
     const usuarioFinalSelect = document.getElementById("recepcion-bien-usuario-final");
-    const ubicacionEsbyeSelect = document.getElementById("recepcion-bien-ubicacion-esbye");
     if (!modalEl || !btnOpen || !btnSave || !btnConfirm) return;
 
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
@@ -1368,6 +1452,7 @@ function setupRecepcionBienesModal() {
     let shouldReturnFromColumnsModal = false;
     let pendingChildModal = "";
     let isTransientImportModalHide = false;
+    let recepcionSelectsRequestId = 0;
     const RECEPCION_CANONICAL_FIELDS = [
         { value: "", label: "- Ignorar columna -" },
         { value: "cod_inventario", label: "Cod Inv." },
@@ -1393,6 +1478,17 @@ function setupRecepcionBienesModal() {
         { value: "ubicacion_esbye", label: "Ubicacion ESBYE" },
         { value: "observacion_esbye", label: "Observacion ESBYE" },
     ];
+
+    const BASE_TO_ESBYE_FIELD = {
+        descripcion: "descripcion_esbye",
+        marca: "marca_esbye",
+        modelo: "modelo_esbye",
+        serie: "serie_esbye",
+        fecha_adquisicion: "fecha_adquisicion_esbye",
+        valor: "valor_esbye",
+        ubicacion: "ubicacion_esbye",
+        observacion: "observacion_esbye",
+    };
 
     const importState = {
         step: 1,
@@ -1564,33 +1660,6 @@ function setupRecepcionBienesModal() {
         ubicacionReadonly.value = String(document.getElementById("recepcion-area-trabajo")?.value || "").trim();
     };
 
-    const buildRecepcionAreaOptions = () => {
-        const out = [];
-        (structureData || []).forEach((block) => {
-            (block.pisos || []).forEach((floor) => {
-                (floor.areas || []).forEach((area) => {
-                    out.push(`${block.nombre} / ${floor.nombre} / ${area.nombre}`);
-                });
-            });
-        });
-        return out;
-    };
-
-    const loadRecepcionEsbyeAreaOptions = () => {
-        if (!ubicacionEsbyeSelect) return;
-        const current = String(ubicacionEsbyeSelect.value || "").trim();
-        ubicacionEsbyeSelect.innerHTML = '<option value="">Sin ubicación ESBYE</option>';
-        buildRecepcionAreaOptions().forEach((label) => {
-            const option = document.createElement("option");
-            option.value = label;
-            option.textContent = label;
-            ubicacionEsbyeSelect.appendChild(option);
-        });
-        if (current && Array.from(ubicacionEsbyeSelect.options).some((opt) => opt.value === current)) {
-            ubicacionEsbyeSelect.value = current;
-        }
-    };
-
     const renderRunChunkPreview = (validation) => {
         if (!previewRunBody) return;
         const rows = Array.isArray(validation?.analyzed_rows) ? validation.analyzed_rows : [];
@@ -1623,12 +1692,17 @@ function setupRecepcionBienesModal() {
     };
 
     const loadRecepcionSelectOptions = async () => {
+        const requestId = ++recepcionSelectsRequestId;
         try {
             const [estadosRes, cuentasRes, adminsRes] = await Promise.all([
                 api.get("/api/parametros/estados"),
                 api.get("/api/parametros/cuentas"),
                 api.get("/api/administradores"),
             ]);
+
+            // Evita que respuestas viejas pisen los valores del formulario actual.
+            if (requestId !== recepcionSelectsRequestId) return;
+
             fillSimpleSelect(estadoSelect, estadosRes.data || [], "-- Seleccionar estado --");
             fillSimpleSelect(cuentaSelect, cuentasRes.data || [], "-- Seleccionar cuenta --");
             fillSimpleSelect(usuarioFinalSelect, adminsRes.data || [], "-- Seleccionar personal --");
@@ -1636,6 +1710,9 @@ function setupRecepcionBienesModal() {
             // Permite seguir usando el modal aun si no cargan catálogos.
         }
     };
+
+    // Exponer loader para handlers globales de la tabla temporal.
+    window.__loadRecepcionSelectOptions = loadRecepcionSelectOptions;
 
     const showImportStatus = (html, type = "info") => {
         if (!importStatus) return;
@@ -1711,6 +1788,18 @@ function setupRecepcionBienesModal() {
 
     const normalizeLocationMappings = (headers, mappings) => {
         const out = Array.isArray(mappings) ? [...mappings] : [];
+        const seenBase = {};
+
+        out.forEach((field, idx) => {
+            if (!field || !BASE_TO_ESBYE_FIELD[field]) return;
+            const headerNorm = String(Array.isArray(headers) ? headers[idx] : "").toLowerCase();
+            const seenCount = seenBase[field] || 0;
+            if (headerNorm.includes("esbye") || seenCount >= 1) {
+                out[idx] = BASE_TO_ESBYE_FIELD[field];
+            }
+            seenBase[field] = seenCount + 1;
+        });
+
         const locationIndices = [];
         (headers || []).forEach((header, idx) => {
             const headerNorm = String(header || "").toLowerCase();
@@ -1765,6 +1854,8 @@ function setupRecepcionBienesModal() {
         }
         sel.addEventListener("change", () => {
             importState.mappings[colIdx] = sel.value;
+            importState.mappings = normalizeLocationMappings(importState.headers, importState.mappings);
+            renderMappingStep();
             applyMappingHighlights();
         });
         return sel;
@@ -1987,7 +2078,6 @@ function setupRecepcionBienesModal() {
         event.preventDefault();
         syncRecepcionUbicacionReadonly();
         loadRecepcionSelectOptions();
-        loadRecepcionEsbyeAreaOptions();
         renderRecepcionBienesTable();
         modal.show();
     });
@@ -2793,7 +2883,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     applyAulaScopeMode();
 
-    const getTipoActivo = () => {
+    const getTipoActivo = (originEl = null) => {
+        if (originEl && typeof originEl.closest === "function") {
+            const fromForm = originEl.closest("form[id^='form-']");
+            if (fromForm?.id) {
+                return String(fromForm.id).replace(/^form-/, "");
+            }
+            const fromSection = originEl.closest(".tab-section");
+            if (fromSection?.id?.startsWith("sec-")) {
+                return String(fromSection.id).replace(/^sec-/, "");
+            }
+        }
+
         const activeBtn = document.querySelector(".settings-menu-btn.active");
         return (activeBtn?.id || "tab-entrega").replace("tab-", "");
     };
@@ -2808,13 +2909,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         document.body.removeChild(a);
     };
 
-    const generarYDescargarActa = async () => {
+    const generarYDescargarActa = async (originEl = null) => {
         if (isGeneratingActa) {
             notify("Ya se está generando un acta. Espere un momento...", true);
             return;
         }
 
-        const tipo = getTipoActivo();
+        const tipo = getTipoActivo(originEl);
         const form = document.getElementById(`form-${tipo}`);
         if (!form) {
             notify("No se encontró el formulario activo para generar el acta.", true);
@@ -2846,7 +2947,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             return;
         }
 
-        const numeroActaValidation = await validarNumeroActa(datosFormulario.numero_acta);
+        const numeroActaValidation = await validarNumeroActa(datosFormulario.numero_acta, tipo);
         if (!numeroActaValidation.valid) {
             notify(numeroActaValidation.error, true);
             isGeneratingActa = false;
@@ -2876,20 +2977,37 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         try {
             notify("Generando acta final (DOCX)...");
-            const response = await fetch("/api/informes/generar", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    tipo,
-                    datos_formulario: datosFormulario,
-                    datos_tabla: datosTabla,
-                    datos_columnas: datosColumnas,
-                    vista_previa: false,
-                    template_snapshot_path: activeHistorialTemplateSnapshotPath || undefined,
-                }),
-            });
+            const sendGenerate = async (forceSame = false) => {
+                const response = await fetch("/api/informes/generar", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        tipo,
+                        datos_formulario: datosFormulario,
+                        datos_tabla: datosTabla,
+                        datos_columnas: datosColumnas,
+                        vista_previa: false,
+                        force_same_acta: forceSame,
+                        template_snapshot_path: activeHistorialTemplateSnapshotPath || undefined,
+                    }),
+                });
+                const result = await response.json();
+                return { response, result };
+            };
 
-            const result = await response.json();
+            let { response, result } = await sendGenerate(false);
+            if (!response.ok && result?.duplicate_previous) {
+                const prev = String(result.previous_numero_acta || "").trim();
+                const msg = prev
+                    ? `Esta acta es igual a la acta N° "${prev}". ¿Deseas guardarla de todas formas?`
+                    : "Esta acta es igual a la anterior para este tipo. ¿Deseas guardarla de todas formas?";
+                const goOn = window.confirm(msg);
+                if (!goOn) {
+                    finishDownloadProgress();
+                    return;
+                }
+                ({ response, result } = await sendGenerate(true));
+            }
             if (!response.ok || !result.success) {
                 notify(result.error || "No se pudo generar el acta para descargar.", true);
                 finishDownloadProgress();
@@ -2903,7 +3021,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             setDownloadProgressMessage("El archivo DOCX se está descargando.");
             notify("Acta DOCX generada y descarga iniciada.");
             activeHistorialTemplateSnapshotPath = null;
-            await refreshNumeroActaFormularioActivo(true);
+            resetActaDraftState(tipo);
+            await refreshNumeroActaPorTipo(tipo, true);
         } catch (err) {
             console.error(err);
             notify("Error de red al generar y descargar el acta.", true);
@@ -2923,7 +3042,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.querySelectorAll(".btn-descargar-acta").forEach((btn) => {
         btn.addEventListener("click", async (e) => {
             e.preventDefault();
-            await generarYDescargarActa();
+            await generarYDescargarActa(e.currentTarget || e.target || null);
         });
     });
 

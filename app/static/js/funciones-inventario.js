@@ -153,10 +153,10 @@ async function initInventoryPage() {
 		detailContainer: document.getElementById("detalle-contenido"),
 		contextMenu: document.getElementById("context-menu"),
 		modalAreaSelect: document.getElementById("modal-area-select"),
-		modalAreaEsbyeSelect: document.getElementById("modal-area-esbye-select"),
 		modalCuentaSelect: document.getElementById("modal-cuenta-select"),
 		modalUsuarioFinalSelect: document.getElementById("modal-usuario-final-select"),
 		modalUbicacion: document.getElementById("modal-ubicacion"),
+		modalUbicacionEsbye: document.querySelector("#form-agregar-item [data-field='ubicacion_esbye']"),
 		modalAddButton: document.getElementById("btn-guardar-item"),
 		excelSingleRow: document.getElementById("excel-single-row"),
 		pageInfo: document.getElementById("inventory-pagination-info"),
@@ -393,11 +393,34 @@ async function initInventoryPage() {
 		addOption.value = INLINE_ADD_OPTION_VALUE;
 		addOption.textContent = config.quickLabel;
 		select.appendChild(addOption);
-		if (selectedValue && Array.from(select.options).some((opt) => opt.value === selectedValue)) {
-			select.value = selectedValue;
-		} else {
-			select.value = "";
+		const normalizedSelected = normalizeText(selectedValue);
+		let resolved = "";
+		if (normalizedSelected) {
+			const options = Array.from(select.options || []).filter((opt) => opt.value !== INLINE_ADD_OPTION_VALUE && opt.value !== "");
+			let match = options.find((opt) => normalizeText(opt.value) === normalizedSelected || normalizeText(opt.textContent) === normalizedSelected);
+			if (!match) {
+				match = options.find((opt) => normalizeText(opt.textContent).includes(normalizedSelected) || normalizedSelected.includes(normalizeText(opt.value)));
+			}
+			if (!match) {
+				const selectedTokens = normalizedSelected.split(/\s+/).filter(Boolean);
+				let best = null;
+				let bestScore = 0;
+				options.forEach((opt) => {
+					const optNorm = normalizeText(opt.value || opt.textContent);
+					if (!optNorm) return;
+					const optTokens = optNorm.split(/\s+/).filter(Boolean);
+					const overlap = selectedTokens.filter((token) => optTokens.some((item) => item.includes(token) || token.includes(item))).length;
+					const score = selectedTokens.length ? overlap / selectedTokens.length : 0;
+					if (score > bestScore) {
+						bestScore = score;
+						best = opt;
+					}
+				});
+				if (best && bestScore >= 0.6) match = best;
+			}
+			if (match) resolved = match.value;
 		}
+		select.value = resolved || "";
 	}
 
 	function refreshAddItemSelects() {
@@ -700,21 +723,11 @@ async function initInventoryPage() {
 	function renderAreaModalSelect() {
 		const areas = flattenAreas();
 		nodes.modalAreaSelect.innerHTML = '<option value="">Sin área</option>';
-		if (nodes.modalAreaEsbyeSelect) {
-			nodes.modalAreaEsbyeSelect.innerHTML = '<option value="">Sin ubicación ESBYE</option>';
-		}
 		areas.forEach((area) => {
 			const option = document.createElement("option");
 			option.value = area.id;
 			option.textContent = area.nombre;
 			nodes.modalAreaSelect.appendChild(option);
-
-			if (nodes.modalAreaEsbyeSelect) {
-				const optionEsbye = document.createElement("option");
-				optionEsbye.value = area.nombre;
-				optionEsbye.textContent = area.nombre;
-				nodes.modalAreaEsbyeSelect.appendChild(optionEsbye);
-			}
 		});
 	}
 
@@ -980,8 +993,8 @@ async function initInventoryPage() {
 		if (nodes.modalUbicacion) {
 			nodes.modalUbicacion.value = String(item.ubicacion || "");
 		}
-		if (nodes.modalAreaEsbyeSelect) {
-			nodes.modalAreaEsbyeSelect.value = String(item.ubicacion_esbye || "");
+		if (nodes.modalUbicacionEsbye) {
+			nodes.modalUbicacionEsbye.value = String(item.ubicacion_esbye || "");
 		}
 		setAddModalMode({ editing: true, itemId });
 		addModal.show();
@@ -1078,6 +1091,7 @@ async function initInventoryPage() {
 
 			let finished = false;
 			let openingQuickModal = false;
+			let changedByUser = false;
 
 			const finish = async (value) => {
 				if (finished) return;
@@ -1099,11 +1113,18 @@ async function initInventoryPage() {
 					await finish(createdValue);
 					return;
 				}
+				changedByUser = true;
 				await finish(select.value);
 			});
 
 			select.addEventListener("blur", async () => {
 				if (finished || openingQuickModal) return;
+				const hasOldValue = String(oldRawValue || "").trim().length > 0;
+				const hasCurrentValue = String(select.value || "").trim().length > 0;
+				if (!changedByUser && hasOldValue && !hasCurrentValue) {
+					await finish(oldRawValue);
+					return;
+				}
 				await finish(select.value);
 			});
 

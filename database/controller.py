@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import re
+from difflib import SequenceMatcher
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -308,6 +309,8 @@ def init_schema(base_dir: Path):
     _run_startup_migration_once("20260409_historial_actas_template_columns", _ensure_historial_actas_template_columns)
     _run_startup_migration_once("20260409_informes_area_sequence_table", _ensure_informes_area_sequence_table)
     _run_startup_migration_once("20260409_actas_sequence_table", _ensure_actas_sequence_table)
+    _run_startup_migration_once("20260414_historial_actas_numero_unique_by_type", _ensure_historial_actas_numero_unique_by_type)
+    _run_startup_migration_once("20260414_actas_sequence_by_type_table", _ensure_actas_sequence_by_type_table)
     _run_startup_migration_once("20260409_seed_default_param_values", _seed_default_param_values)
 
 
@@ -319,6 +322,20 @@ def _ensure_historial_actas_numero_column():
         db.execute("ALTER TABLE historial_actas ADD COLUMN numero_acta TEXT")
 
     db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_numero_acta ON historial_actas(numero_acta)")
+    db.commit()
+
+
+def _ensure_historial_actas_numero_unique_by_type():
+    db = get_db()
+    # El esquema nuevo permite mismo numero_acta en tipos diferentes.
+    db.execute("DROP INDEX IF EXISTS idx_historial_actas_numero_acta")
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_tipo_numero_acta
+        ON historial_actas(tipo_acta, numero_acta)
+        WHERE numero_acta IS NOT NULL AND TRIM(numero_acta) != ''
+        """
+    )
     db.commit()
 
 
@@ -359,6 +376,39 @@ def _ensure_actas_sequence_table():
             anio INTEGER PRIMARY KEY,
             ultimo_numero INTEGER NOT NULL DEFAULT 0,
             actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.commit()
+
+
+def _ensure_actas_sequence_by_type_table():
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS secuencia_actas_tipo (
+            tipo_acta TEXT NOT NULL,
+            anio INTEGER NOT NULL,
+            ultimo_numero INTEGER NOT NULL DEFAULT 0,
+            actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (tipo_acta, anio)
+        )
+        """
+    )
+    db.commit()
+
+
+def _ensure_actas_sequence_by_type_table_runtime():
+    """Asegura en runtime la tabla de secuencia por tipo para DBs antiguas o inconsistentes."""
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS secuencia_actas_tipo (
+            tipo_acta TEXT NOT NULL,
+            anio INTEGER NOT NULL,
+            ultimo_numero INTEGER NOT NULL DEFAULT 0,
+            actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (tipo_acta, anio)
         )
         """
     )
@@ -1889,22 +1939,138 @@ def get_personal():
     rows = db.execute("SELECT id, nombre, cargo FROM administradores WHERE activo = 1 ORDER BY nombre ASC").fetchall()
     return [{"id": row["id"], "nombre": row["nombre"], "cargo": row["cargo"]} for row in rows]
 
-def get_or_create_personal(nombre, cargo=None):
-    if not nombre or not str(nombre).strip():
-        return None
+
+def _normalize_personal_name(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = text.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u").replace("ü", "u")
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = " ".join(text.split())
+    tokens = text.split()
+    prefixes = {
+        "ing", "ingeniero", "ingeniera", "dr", "dra", "doctor", "doctora",
+        "lic", "licenciado", "licenciada", "abg", "abogada", "abogado",
+        "arq", "arquitecto", "arquitecta", "tec", "tecnico", "tecnica",
+        "sr", "sra", "srta", "msc", "mg", "mgs", "mgtr", "mtr", "mts", "mtro", "mt",
+        "prof", "profa", "tlgo", "tlga", "ts", "phd",
+    }
+    while tokens and tokens[0] in prefixes:
+        tokens.pop(0)
+    return " ".join(tokens)
+
+
+def _personal_name_variants(value):
+    normalized = _normalize_personal_name(value)
+    if not normalized:
+        return []
+    variants = [normalized]
+    tokens = normalized.split()
+    # Ayuda con prefijos/abreviaturas no contempladas (ej. "tlgo", "prof", etc.).
+    if len(tokens) >= 2:
+        variants.append(" ".join(tokens[1:]))
+    return [v for v in dict.fromkeys(variants) if v]
+
+
+def _resolve_existing_personal_name(nombre, min_similarity=0.86):
     db = get_db()
-    nombre = str(nombre).strip()
-    # Check if exists
-    row = db.execute("SELECT id FROM administradores WHERE UPPER(nombre) = UPPER(?)", (nombre,)).fetchone()
-    if row:
-        return row["id"]
-    # Create if not exists
+    raw_name = str(nombre or "").strip()
+    if not raw_name:
+        return None
+
+    # Coincidencia exacta (insensible a mayúsculas) para mantener el caso ya registrado.
+    exact_row = db.execute(
+        "SELECT nombre FROM administradores WHERE UPPER(nombre) = UPPER(?) LIMIT 1",
+        (raw_name,),
+    ).fetchone()
+    if exact_row:
+        return exact_row["nombre"]
+
+    candidates = db.execute(
+        "SELECT nombre FROM administradores"
+    ).fetchall()
+    if not candidates:
+        return None
+
+    target_variants = _personal_name_variants(raw_name)
+    if not target_variants:
+        return None
+
+    # Coincidencia exacta normalizada (ignora tildes/puntuación/títulos al inicio).
+    for row in candidates:
+        candidate_name = str(row["nombre"] or "").strip()
+        candidate_variants = _personal_name_variants(candidate_name)
+        if any(tv == cv for tv in target_variants for cv in candidate_variants):
+            return candidate_name
+
+    # Coincidencia difusa para casos con abreviaciones o variantes menores.
+    best_name = None
+    best_score = 0.0
+    target_tokens = set(" ".join(target_variants).split())
+    for row in candidates:
+        candidate_name = str(row["nombre"] or "").strip()
+        candidate_variants = _personal_name_variants(candidate_name)
+        if not candidate_variants:
+            continue
+        seq_score = max(
+            SequenceMatcher(None, tv, cv).ratio()
+            for tv in target_variants
+            for cv in candidate_variants
+        )
+        token_overlap = 0.0
+        candidate_tokens = set(" ".join(candidate_variants).split())
+        if target_tokens and candidate_tokens:
+            token_overlap = len(target_tokens.intersection(candidate_tokens)) / max(len(target_tokens), len(candidate_tokens))
+        score = (seq_score * 0.7) + (token_overlap * 0.3)
+        if score > best_score:
+            best_score = score
+            best_name = candidate_name
+
+    if best_name and best_score >= float(min_similarity):
+        return best_name
+    return None
+
+
+def resolve_or_create_personal_name(nombre, cargo=None, create_if_missing=True):
+    raw_name = str(nombre or "").strip()
+    if not raw_name:
+        return ""
+
+    matched_name = _resolve_existing_personal_name(raw_name)
+    if matched_name:
+        # Si existe pero estaba inactivo, se reactiva para mantener catálogo consistente.
+        db = get_db()
+        db.execute(
+            "UPDATE administradores SET activo = 1, actualizado_en = CURRENT_TIMESTAMP WHERE UPPER(nombre) = UPPER(?)",
+            (matched_name,),
+        )
+        db.commit()
+        return matched_name
+
+    if not create_if_missing:
+        return raw_name
+
+    db = get_db()
     cursor = db.execute(
-        "INSERT INTO administradores (nombre, cargo, activo) VALUES (?, ?, 1)", 
-        (nombre, cargo.strip() if cargo else None)
+        "INSERT INTO administradores (nombre, cargo, activo) VALUES (?, ?, 1)",
+        (raw_name, cargo.strip() if cargo else None),
     )
     db.commit()
-    return cursor.lastrowid
+    if cursor.lastrowid:
+        created = db.execute("SELECT nombre FROM administradores WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        if created and created["nombre"]:
+            return created["nombre"]
+    return raw_name
+
+def get_or_create_personal(nombre, cargo=None):
+    canonical_name = resolve_or_create_personal_name(nombre, cargo=cargo, create_if_missing=True)
+    if not canonical_name:
+        return None
+    db = get_db()
+    row = db.execute("SELECT id FROM administradores WHERE UPPER(nombre) = UPPER(?)", (canonical_name,)).fetchone()
+    if row:
+        return row["id"]
+    return None
 
 # --- HISTORIAL DE ACTAS ---
 def save_historial_acta(
@@ -1956,11 +2122,22 @@ def _split_numero_acta(numero_acta):
     return int(left), int(right)
 
 
-def get_max_numero_acta_for_year(year):
+def _normalize_tipo_acta(tipo_acta):
+    text = str(tipo_acta or "").strip().lower()
+    return text or "general"
+
+
+def get_max_numero_acta_for_year(year, tipo_acta=None):
     db = get_db()
     target_year = int(year)
+    where_tipo = ""
+    params = (target_year,)
+    if tipo_acta is not None:
+        where_tipo = " AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?)"
+        params = (target_year, _normalize_tipo_acta(tipo_acta))
+
     row = db.execute(
-        """
+        f"""
         SELECT COALESCE(
             MAX(CAST(substr(numero_acta, 1, instr(numero_acta, '-') - 1) AS INTEGER)),
             0
@@ -1971,50 +2148,55 @@ def get_max_numero_acta_for_year(year):
           AND instr(numero_acta, '-') > 1
           AND CAST(substr(numero_acta, instr(numero_acta, '-') + 1) AS INTEGER) = ?
           AND substr(numero_acta, 1, instr(numero_acta, '-') - 1) GLOB '[0-9]*'
+          {where_tipo}
         """,
-        (target_year,),
+        params,
     ).fetchone()
     return int(row["max_value"] if row else 0)
 
 
-def get_next_numero_acta(year):
+def get_next_numero_acta(year, tipo_acta=None):
+    _ensure_actas_sequence_by_type_table_runtime()
     db = get_db()
     target_year = int(year)
-    max_historial = get_max_numero_acta_for_year(target_year)
+    tipo_key = _normalize_tipo_acta(tipo_acta)
+    max_historial = get_max_numero_acta_for_year(target_year, tipo_acta=tipo_key)
     seq_row = db.execute(
-        "SELECT ultimo_numero FROM secuencia_actas WHERE anio = ?",
-        (target_year,),
+        "SELECT ultimo_numero FROM secuencia_actas_tipo WHERE tipo_acta = ? AND anio = ?",
+        (tipo_key, target_year),
     ).fetchone()
     max_sequence = int(seq_row["ultimo_numero"] or 0) if seq_row else 0
     next_value = max(max_historial, max_sequence) + 1
     return f"{next_value:03d}-{target_year}"
 
 
-def reserve_numero_acta(year, preferred_numero_acta=None):
+def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None):
+    _ensure_actas_sequence_by_type_table_runtime()
     db = get_db()
     target_year = int(year)
+    tipo_key = _normalize_tipo_acta(tipo_acta)
 
     db.execute("BEGIN IMMEDIATE")
     try:
         row = db.execute(
-            "SELECT ultimo_numero FROM secuencia_actas WHERE anio = ?",
-            (target_year,),
+            "SELECT ultimo_numero FROM secuencia_actas_tipo WHERE tipo_acta = ? AND anio = ?",
+            (tipo_key, target_year),
         ).fetchone()
 
         if row:
             ultimo = int(row["ultimo_numero"] or 0)
-            ultimo_historial = get_max_numero_acta_for_year(target_year)
+            ultimo_historial = get_max_numero_acta_for_year(target_year, tipo_acta=tipo_key)
             if ultimo_historial > ultimo:
                 ultimo = ultimo_historial
                 db.execute(
-                    "UPDATE secuencia_actas SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE anio = ?",
-                    (ultimo, target_year),
+                    "UPDATE secuencia_actas_tipo SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo_acta = ? AND anio = ?",
+                    (ultimo, tipo_key, target_year),
                 )
         else:
-            ultimo = get_max_numero_acta_for_year(target_year)
+            ultimo = get_max_numero_acta_for_year(target_year, tipo_acta=tipo_key)
             db.execute(
-                "INSERT INTO secuencia_actas (anio, ultimo_numero) VALUES (?, ?)",
-                (target_year, ultimo),
+                "INSERT INTO secuencia_actas_tipo (tipo_acta, anio, ultimo_numero) VALUES (?, ?, ?)",
+                (tipo_key, target_year, ultimo),
             )
 
         if preferred_numero_acta:
@@ -2022,8 +2204,8 @@ def reserve_numero_acta(year, preferred_numero_acta=None):
             if seq is None or year_in_num != target_year:
                 raise ValueError("Numero de acta invalido para reservar.")
             existing = db.execute(
-                "SELECT 1 FROM historial_actas WHERE numero_acta = ? LIMIT 1",
-                (f"{seq:03d}-{target_year}",),
+                "SELECT 1 FROM historial_actas WHERE numero_acta = ? AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?) LIMIT 1",
+                (f"{seq:03d}-{target_year}", tipo_key),
             ).fetchone()
             if existing:
                 raise ValueError("El numero de acta ya existe.")
@@ -2033,8 +2215,8 @@ def reserve_numero_acta(year, preferred_numero_acta=None):
 
         nuevo_ultimo = max(ultimo, reserved)
         db.execute(
-            "UPDATE secuencia_actas SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE anio = ?",
-            (nuevo_ultimo, target_year),
+            "UPDATE secuencia_actas_tipo SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo_acta = ? AND anio = ?",
+            (nuevo_ultimo, tipo_key, target_year),
         )
         db.commit()
         return f"{reserved:03d}-{target_year}"
@@ -2043,12 +2225,19 @@ def reserve_numero_acta(year, preferred_numero_acta=None):
         raise
 
 
-def numero_acta_exists(numero_acta):
+def numero_acta_exists(numero_acta, tipo_acta=None):
     db = get_db()
-    row = db.execute(
-        "SELECT 1 FROM historial_actas WHERE numero_acta = ? LIMIT 1",
-        (str(numero_acta or "").strip(),),
-    ).fetchone()
+    numero = str(numero_acta or "").strip()
+    if tipo_acta is None:
+        row = db.execute(
+            "SELECT 1 FROM historial_actas WHERE numero_acta = ? LIMIT 1",
+            (numero,),
+        ).fetchone()
+    else:
+        row = db.execute(
+            "SELECT 1 FROM historial_actas WHERE numero_acta = ? AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?) LIMIT 1",
+            (numero, _normalize_tipo_acta(tipo_acta)),
+        ).fetchone()
     return bool(row)
 
 def get_historial_actas(tipo_acta=None):

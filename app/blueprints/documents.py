@@ -699,8 +699,9 @@ def api_generar_informe():
         context_data["recibido_por"] = context_data.get("usuario_final")
 
     current_year = datetime.now().year
+    tipo_norm = str(tipo or "").strip().lower() or "entrega"
     requested_numero_acta = str(context_data.get("numero_acta") or "").strip()
-    numero_acta = requested_numero_acta or get_next_numero_acta(current_year)
+    numero_acta = requested_numero_acta or get_next_numero_acta(current_year, tipo_acta=tipo_norm)
 
     if not NUMERO_ACTA_PATTERN.match(numero_acta):
         return jsonify(
@@ -725,11 +726,60 @@ def api_generar_informe():
             }
         ), 400
 
+    tabla_data = payload.get("datos_tabla", [])
+    tabla_columnas = payload.get("datos_columnas", [])
+    force_same_acta = bool(payload.get("force_same_acta"))
+
+    if not vista_previa and not force_same_acta:
+        db = get_db()
+        last_row = db.execute(
+            """
+            SELECT numero_acta, datos_json
+            FROM historial_actas
+            WHERE LOWER(COALESCE(tipo_acta, '')) = LOWER(?)
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (tipo_norm,),
+        ).fetchone()
+        if last_row and str(last_row["datos_json"] or "").strip():
+            try:
+                previous_payload = json.loads(last_row["datos_json"])
+            except Exception:
+                previous_payload = {}
+
+            current_form = dict(context_data_raw or {})
+            previous_form = dict((previous_payload or {}).get("formulario") or {})
+            current_form.pop("numero_acta", None)
+            previous_form.pop("numero_acta", None)
+
+            current_signature = {
+                "formulario": current_form,
+                "tabla": tabla_data,
+                "columnas": tabla_columnas,
+            }
+            previous_signature = {
+                "formulario": previous_form,
+                "tabla": (previous_payload or {}).get("tabla") or [],
+                "columnas": (previous_payload or {}).get("columnas") or [],
+            }
+
+            if json.dumps(current_signature, ensure_ascii=False, sort_keys=True) == json.dumps(previous_signature, ensure_ascii=False, sort_keys=True):
+                return jsonify(
+                    {
+                        "success": False,
+                        "duplicate_previous": True,
+                        "previous_numero_acta": str(last_row["numero_acta"] or "").strip() or None,
+                        "error": "Esta acta es igual a la última guardada para este tipo. ¿Desea guardarla de todas formas?",
+                    }
+                ), 409
+
     if not vista_previa:
         try:
             numero_acta = reserve_numero_acta(
                 current_year,
                 preferred_numero_acta=numero_acta if requested_numero_acta else None,
+                tipo_acta=tipo_norm,
             )
         except ValueError:
             return jsonify(
@@ -745,11 +795,8 @@ def api_generar_informe():
     context_data["numero_acta"] = numero_acta
     context_data_raw["numero_acta"] = numero_acta
 
-    tabla_data = payload.get("datos_tabla", [])
-    tabla_columnas = payload.get("datos_columnas", [])
     entrega_selected_ids = []
 
-    tipo_norm = str(tipo or "").strip().lower()
     target_area_id = None
     if not vista_previa and tipo_norm in {"entrega", "recepcion"}:
         target_area_id = _resolve_area_from_form(context_data)
@@ -848,6 +895,14 @@ def api_generar_informe():
     for campo in nombres_campos_personal:
         if campo in context_data and context_data[campo]:
             get_or_create_personal(context_data[campo])
+
+    if isinstance(tabla_data, list):
+        for row in tabla_data:
+            if not isinstance(row, dict):
+                continue
+            usuario_final = str(row.get("usuario_final") or "").strip()
+            if usuario_final:
+                get_or_create_personal(usuario_final)
 
     requested_snapshot_path = str(payload.get("template_snapshot_path") or "").strip()
     template_path = os.path.join(UPLOAD_FOLDER, f"{tipo}.docx")
@@ -1096,13 +1151,15 @@ def api_get_historial_all():
 @documents_bp.route("/api/historial/numero-acta/siguiente", methods=["GET"])
 def api_numero_acta_siguiente():
     current_year = datetime.now().year
-    next_num = get_next_numero_acta(current_year)
-    return jsonify({"success": True, "numero_acta": next_num, "year": current_year})
+    tipo_acta = str(request.args.get("tipo_acta") or "entrega").strip().lower()
+    next_num = get_next_numero_acta(current_year, tipo_acta=tipo_acta)
+    return jsonify({"success": True, "numero_acta": next_num, "year": current_year, "tipo_acta": tipo_acta})
 
 
 @documents_bp.route("/api/historial/numero-acta/validar", methods=["GET"])
 def api_numero_acta_validar():
     numero_acta = str(request.args.get("numero_acta") or "").strip()
+    tipo_acta = str(request.args.get("tipo_acta") or "entrega").strip().lower()
     current_year = datetime.now().year
 
     if not NUMERO_ACTA_PATTERN.match(numero_acta):
@@ -1114,8 +1171,8 @@ def api_numero_acta_validar():
     if year != current_year:
         return jsonify({"success": True, "valid": False, "reason": "year"})
 
-    max_for_year = get_max_numero_acta_for_year(current_year)
-    exists = numero_acta_exists(numero_acta)
+    max_for_year = get_max_numero_acta_for_year(current_year, tipo_acta=tipo_acta)
+    exists = numero_acta_exists(numero_acta, tipo_acta=tipo_acta)
 
     return jsonify(
         {
@@ -1124,7 +1181,8 @@ def api_numero_acta_validar():
             "exists": exists,
             "lower_than_max": seq < max_for_year,
             "max_numero_acta": f"{max_for_year:03d}-{current_year}" if max_for_year > 0 else None,
-            "next_numero_acta": get_next_numero_acta(current_year),
+            "next_numero_acta": get_next_numero_acta(current_year, tipo_acta=tipo_acta),
+            "tipo_acta": tipo_acta,
         }
     )
 

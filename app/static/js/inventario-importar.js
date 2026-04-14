@@ -57,6 +57,16 @@
     ];
 
     const EDITABLE_REVIEW_FIELDS = new Set(REVIEW_TABLE_FIELDS);
+    const BASE_TO_ESBYE_FIELD = {
+        descripcion: "descripcion_esbye",
+        marca: "marca_esbye",
+        modelo: "modelo_esbye",
+        serie: "serie_esbye",
+        fecha_adquisicion: "fecha_adquisicion_esbye",
+        valor: "valor_esbye",
+        ubicacion: "ubicacion_esbye",
+        observacion: "observacion_esbye",
+    };
 
     function escapeHtml(text) {
         return String(text || "")
@@ -72,6 +82,66 @@
             .replace(/[\u0300-\u036f]/g, "")
             .toLowerCase()
             .trim();
+    }
+
+    function normalizeDateInputValue(value) {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+        if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(raw)) {
+            const [day, month, year] = raw.split(/[\/\-]/).map((part) => Number(part));
+            return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        }
+        const parsed = new Date(raw);
+        if (!Number.isNaN(parsed.getTime())) {
+            return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+        }
+        return "";
+    }
+
+    function resolveSelectOptionValue(options, rawValue) {
+        const value = String(rawValue || "").trim();
+        if (!value) return "";
+        const normalizedValue = normalizeText(value);
+        const list = Array.isArray(options) ? options : [];
+        if (!list.length) return "";
+
+        let exact = list.find((name) => normalizeText(name) === normalizedValue);
+        if (exact) return exact;
+
+        let contains = list.find((name) => normalizeText(name).includes(normalizedValue) || normalizedValue.includes(normalizeText(name)));
+        if (contains) return contains;
+
+        const targetTokens = normalizedValue.split(/\s+/).filter(Boolean);
+        let best = "";
+        let bestScore = 0;
+        list.forEach((name) => {
+            const norm = normalizeText(name);
+            if (!norm) return;
+            const tokens = norm.split(/\s+/).filter(Boolean);
+            const overlap = targetTokens.filter((token) => tokens.some((item) => item.includes(token) || token.includes(item))).length;
+            const score = targetTokens.length ? overlap / targetTokens.length : 0;
+            if (score > bestScore) {
+                bestScore = score;
+                best = name;
+            }
+        });
+        return bestScore >= 0.6 ? best : "";
+    }
+
+    function normalizeEsbyeDuplicateMappings(headers, mappings) {
+        const out = Array.isArray(mappings) ? [...mappings] : [];
+        const seen = {};
+        (out || []).forEach((field, idx) => {
+            if (!field || !BASE_TO_ESBYE_FIELD[field]) return;
+            const headerNorm = normalizeText(Array.isArray(headers) ? headers[idx] : "");
+            const count = seen[field] || 0;
+            if (headerNorm.includes("esbye") || count >= 1) {
+                out[idx] = BASE_TO_ESBYE_FIELD[field];
+            }
+            seen[field] = count + 1;
+        });
+        return out;
     }
 
     function extractAulaCode(value) {
@@ -218,8 +288,37 @@
                 reviewRows: [],
                 selectedReviewRowIndex: null,
                 areaOptions: [],
+                cuentaOptions: [],
+                usuarioOptions: [],
+                estadoOptions: [],
                 isSaving: false,
             };
+        }
+
+        async function loadReviewSelectOptions() {
+            try {
+                const [cuentasRes, adminsRes, estadosRes] = await Promise.all([
+                    fetch("/api/parametros/cuentas"),
+                    fetch("/api/administradores"),
+                    fetch("/api/parametros/estados"),
+                ]);
+                const cuentasJson = await cuentasRes.json();
+                const adminsJson = await adminsRes.json();
+                const estadosJson = await estadosRes.json();
+                state.cuentaOptions = Array.isArray(cuentasJson?.data)
+                    ? cuentasJson.data.map((it) => String(it?.nombre || "").trim()).filter(Boolean)
+                    : [];
+                state.usuarioOptions = Array.isArray(adminsJson?.data)
+                    ? adminsJson.data.map((it) => String(it?.nombre || "").trim()).filter(Boolean)
+                    : [];
+                state.estadoOptions = Array.isArray(estadosJson?.data)
+                    ? estadosJson.data.map((it) => String(it?.nombre || "").trim()).filter(Boolean)
+                    : [];
+            } catch (_err) {
+                state.cuentaOptions = [];
+                state.usuarioOptions = [];
+                state.estadoOptions = [];
+            }
         }
 
         function setStep(step) {
@@ -286,7 +385,8 @@
                 state.previewRows = data.preview_rows || [];
                 state.totalRows = Number(data.total_rows || 0);
                 const suggested = Array.isArray(data.suggested_mapping) ? data.suggested_mapping : [];
-                state.mappings = state.headers.map((_, idx) => suggested[idx] || "");
+                const rawMappings = state.headers.map((_, idx) => suggested[idx] || "");
+                state.mappings = normalizeEsbyeDuplicateMappings(state.headers, rawMappings);
 
                 clearStatus();
                 renderMappingStep();
@@ -309,6 +409,8 @@
             });
             sel.addEventListener("change", () => {
                 state.mappings[colIdx] = sel.value;
+                state.mappings = normalizeEsbyeDuplicateMappings(state.headers, state.mappings);
+                renderMappingStep();
                 applyColumnHighlights();
             });
             return sel;
@@ -729,6 +831,7 @@
             btnDeleteRow.classList.add("d-none");
 
             await loadAreasForSelect();
+            await loadReviewSelectOptions();
             await validateCurrentChunk();
         }
 
@@ -836,12 +939,69 @@
                 return;
             }
 
+            if (field === "cuenta" || field === "usuario_final" || field === "estado") {
+                const select = document.createElement("select");
+                select.className = "form-select form-select-sm import-editing-select";
+
+                const base = document.createElement("option");
+                base.value = "";
+                base.textContent = field === "cuenta"
+                    ? "-- Seleccionar cuenta --"
+                    : field === "usuario_final"
+                        ? "-- Seleccionar personal --"
+                        : "-- Seleccionar estado --";
+                select.appendChild(base);
+
+                const options = field === "cuenta"
+                    ? state.cuentaOptions
+                    : field === "usuario_final"
+                        ? state.usuarioOptions
+                        : state.estadoOptions;
+                options.forEach((name) => {
+                    const option = document.createElement("option");
+                    option.value = name;
+                    option.textContent = name;
+                    select.appendChild(option);
+                });
+
+                if (current && !options.some((name) => normalizeText(name) === normalizeText(current))) {
+                    const currentOption = document.createElement("option");
+                    currentOption.value = current;
+                    currentOption.textContent = `${current} (actual)`;
+                    select.appendChild(currentOption);
+                }
+
+                select.value = resolveSelectOptionValue(options, current) || current;
+                cell.replaceWith(select);
+                select.focus();
+
+                const commit = () => {
+                    row.data[field] = String(select.value || "").trim();
+                    row.status = "normal";
+                    renderReviewRows();
+                    renderReviewSummary({
+                        exact: state.reviewRows.filter((r) => r.status === "exact").length,
+                        similar: state.reviewRows.filter((r) => r.status === "similar").length,
+                        normal: state.reviewRows.filter((r) => r.status === "normal").length,
+                    });
+                };
+
+                select.addEventListener("change", commit, { once: true });
+                select.addEventListener("blur", commit, { once: true });
+                return;
+            }
+
             const input = document.createElement("input");
             input.className = "form-control form-control-sm import-editing-input";
-            input.value = current;
+            if (field === "fecha_adquisicion" || field === "fecha_adquisicion_esbye") {
+                input.type = "date";
+                input.value = normalizeDateInputValue(current);
+            } else {
+                input.value = current;
+            }
             cell.replaceWith(input);
             input.focus();
-            input.select();
+            if (input.type !== "date") input.select();
 
             const commit = () => {
                 row.data[field] = String(input.value || "").trim();

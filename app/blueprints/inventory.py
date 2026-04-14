@@ -9,6 +9,7 @@ import unicodedata
 
 from flask import Blueprint, jsonify, request
 from database.db import get_db
+from database.controller import resolve_or_create_personal_name
 
 from database.inventory_repository import (
     ALLOWED_INVENTORY_FIELDS,
@@ -129,6 +130,17 @@ _HEADER_ALIAS_TO_FIELD = {
     "observacion esbye": "observacion_esbye",
 }
 
+_BASE_TO_ESBYE_FIELD = {
+    "descripcion": "descripcion_esbye",
+    "marca": "marca_esbye",
+    "modelo": "modelo_esbye",
+    "serie": "serie_esbye",
+    "fecha_adquisicion": "fecha_adquisicion_esbye",
+    "valor": "valor_esbye",
+    "ubicacion": "ubicacion_esbye",
+    "observacion": "observacion_esbye",
+}
+
 
 def _normalize_text(value):
     text = str(value or "").strip().lower()
@@ -148,6 +160,28 @@ def _header_to_canonical_field(header_value):
         if normalized in alias or alias in normalized:
             return canonical
     return ""
+
+
+def _normalize_suggested_mapping_by_repetition(headers, suggested_mapping):
+    normalized_headers = [_normalize_text(header) for header in (headers or [])]
+    result = []
+    seen_base_count = {}
+
+    for idx, raw_field in enumerate(suggested_mapping or []):
+        field = str(raw_field or "").strip()
+        header_norm = normalized_headers[idx] if idx < len(normalized_headers) else ""
+
+        if field in _BASE_TO_ESBYE_FIELD:
+            base_field = field
+            seen_count = seen_base_count.get(base_field, 0)
+            # Si el encabezado menciona ESBYE o es la segunda repetición del mismo campo,
+            # mapear automáticamente a su variante ESBYE.
+            if "esbye" in header_norm or seen_count >= 1:
+                field = _BASE_TO_ESBYE_FIELD[base_field]
+            seen_base_count[base_field] = seen_count + 1
+        result.append(field)
+
+    return result
 
 
 def _header_row_score(row_values):
@@ -806,6 +840,7 @@ def api_previsualizar_excel():
         preview_rows = all_data_rows[:_MAX_EXCEL_PREVIEW_ROWS]
         total_rows = len(all_data_rows)
         suggested_mapping = [_header_to_canonical_field(header) for header in headers]
+        suggested_mapping = _normalize_suggested_mapping_by_repetition(headers, suggested_mapping)
     except Exception:
         logger.exception("Error reading uploaded Excel file")
         try:
@@ -917,6 +952,14 @@ def api_confirmar_importacion():
                 row_data["area_id"] = guessed_area_id
         if area_id is not None and not row_data.get("area_id"):
             row_data["area_id"] = area_id
+
+        raw_usuario = str(row_data.get("usuario_final") or "").strip()
+        if raw_usuario:
+            row_data["usuario_final"] = resolve_or_create_personal_name(
+                raw_usuario,
+                create_if_missing=True,
+            )
+
         rows_as_dicts.append(row_data)
 
     try:
@@ -1017,6 +1060,13 @@ def api_excel_to_recepcion_rows():
         row_data["ubicacion"] = forced_location
         if forced_area_id is not None:
             row_data["area_id"] = forced_area_id
+
+        raw_usuario = str(row_data.get("usuario_final") or "").strip()
+        if raw_usuario:
+            row_data["usuario_final"] = resolve_or_create_personal_name(
+                raw_usuario,
+                create_if_missing=False,
+            )
 
         rows.append(row_data)
 
