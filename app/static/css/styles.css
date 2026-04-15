@@ -149,6 +149,12 @@ body.inventory-column-dragging * {
     background-color: #e9ecef !important; /* Un poco más oscuro para que resalte más que el hover */
 }
 
+.code-sc-cell {
+    background-color: #fde2e2 !important;
+    color: #7c1d1d;
+    font-weight: 600;
+}
+
 .editable-cell {
     cursor: cell;
 }

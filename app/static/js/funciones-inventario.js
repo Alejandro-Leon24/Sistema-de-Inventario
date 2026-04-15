@@ -66,6 +66,15 @@ function formatValue(field, value) {
 	return value;
 }
 
+function normalizeCodeToPlaceholder(value) {
+	const text = String(value || "").trim();
+	const compact = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+	if (!compact || compact === "sc" || compact === "sincodigo" || compact === "sincod") {
+		return "S/C";
+	}
+	return text;
+}
+
 const escapeHtmlText = window.appHelpers.escapeHtmlText;
 
 function buildDuplicateWarningMessage(duplicates = [], payload = {}) {
@@ -924,6 +933,9 @@ async function initInventoryPage() {
 		const inputs = document.querySelectorAll("#form-agregar-item [data-field]");
 		inputs.forEach((input) => {
 			let value = input.value.trim();
+			if (input.dataset.field === "cod_inventario" || input.dataset.field === "cod_esbye") {
+				value = normalizeCodeToPlaceholder(value);
+			}
 			if (input.dataset.field === "cantidad") {
 				const quantity = Number(value);
 				value = Number.isInteger(quantity) && quantity > 0 ? quantity : null;
@@ -1159,6 +1171,9 @@ async function initInventoryPage() {
 			if (done) return;
 			done = true;
 			let newValue = String(input.value || "").trim();
+			if (field === "cod_inventario" || field === "cod_esbye") {
+				newValue = normalizeCodeToPlaceholder(newValue);
+			}
 			if (field === "cantidad") {
 				const quantity = Number(newValue);
 				if (!Number.isInteger(quantity) || quantity <= 0) {

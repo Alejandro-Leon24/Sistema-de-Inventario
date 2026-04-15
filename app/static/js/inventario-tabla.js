@@ -27,6 +27,13 @@
 		}
 
 		function renderRows() {
+			const isNoCodeValue = (value) => {
+				const compact = String(value || "")
+					.trim()
+					.toLowerCase()
+					.replace(/[^a-z0-9]/g, "");
+				return compact === "sc" || compact === "sincodigo" || compact === "sincod";
+			};
 			const columns = getOrderedColumns();
 			body.innerHTML = "";
 			state.items.forEach((item, index) => {
@@ -47,6 +54,9 @@
 					td.textContent = displayValue;
 					td.title = String(displayValue || "");
 					td.classList.add("inventory-cell");
+					if ((column.field === "cod_inventario" || column.field === "cod_esbye") && isNoCodeValue(displayValue)) {
+						td.classList.add("code-sc-cell");
+					}
 					if (column.editable) td.classList.add("editable-cell");
 					if (column.field === "item_numero") td.classList.add("fw-bold", "text-primary");
 					if (state.columnWidths[column.field]) {

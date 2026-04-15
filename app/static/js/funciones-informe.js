@@ -179,14 +179,27 @@ function normalizeImportMoneyLikeInventario(value) {
     return num.toFixed(2);
 }
 
+function normalizeCodeToPlaceholder(value) {
+    const text = String(value || "").trim();
+    const compact = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!compact || compact === "sc" || compact === "sincodigo" || compact === "sincod") {
+        return "S/C";
+    }
+    return text;
+}
+
+function isNoCodeValue(value) {
+    return normalizeCodeToPlaceholder(value) === "S/C";
+}
+
 function normalizeRecepcionRowLikeInventarioImport(row, forcedLocation) {
     const src = row && typeof row === "object" ? row : {};
     const toText = (v) => String(v ?? "").trim();
     const cantidadNum = parseInt(String(src.cantidad ?? "").trim(), 10);
     return {
         ...src,
-        cod_inventario: toText(src.cod_inventario),
-        cod_esbye: toText(src.cod_esbye),
+        cod_inventario: normalizeCodeToPlaceholder(src.cod_inventario),
+        cod_esbye: normalizeCodeToPlaceholder(src.cod_esbye),
         cuenta: toText(src.cuenta),
         descripcion: toText(src.descripcion),
         marca: toText(src.marca),
@@ -1098,8 +1111,8 @@ function getRecepcionBienFormValues() {
     const cantidadRaw = String(document.getElementById("recepcion-bien-cantidad")?.value || "1").trim();
     const cantidad = Number(cantidadRaw);
     return {
-        cod_inventario: String(document.getElementById("recepcion-bien-cod-inventario")?.value || "").trim(),
-        cod_esbye: String(document.getElementById("recepcion-bien-cod-esbye")?.value || "").trim(),
+        cod_inventario: normalizeCodeToPlaceholder(document.getElementById("recepcion-bien-cod-inventario")?.value),
+        cod_esbye: normalizeCodeToPlaceholder(document.getElementById("recepcion-bien-cod-esbye")?.value),
         cuenta: String(document.getElementById("recepcion-bien-cuenta")?.value || "").trim(),
         cantidad: Number.isFinite(cantidad) && cantidad > 0 ? Math.trunc(cantidad) : 0,
         descripcion: String(document.getElementById("recepcion-bien-descripcion")?.value || "").trim(),
@@ -1303,7 +1316,10 @@ function renderRecepcionBienesTable() {
         selectedCols.forEach((col) => {
             const raw = item?.[col.id];
             const value = raw == null || String(raw).trim() === "" ? "-" : String(raw);
-            rowHtml += `<td title="${escapeCell(value)}">${escapeCell(value)}</td>`;
+            const codeClass = (col.id === "cod_inventario" || col.id === "cod_esbye") && isNoCodeValue(value)
+                ? " class=\"code-sc-cell\""
+                : "";
+            rowHtml += `<td${codeClass} title="${escapeCell(value)}">${escapeCell(value)}</td>`;
         });
         rowHtml += `<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-recepcion-bien-eliminar" data-index="${idx}"><i class="bi bi-trash"></i></button></td>`;
         tr.innerHTML = rowHtml;
@@ -1674,12 +1690,14 @@ function setupRecepcionBienesModal() {
         };
         previewRunBody.innerHTML = rows.map((row) => {
             const d = row.data || {};
+            const invCode = normalizeCodeToPlaceholder(d.cod_inventario);
+            const esbyeCode = normalizeCodeToPlaceholder(d.cod_esbye);
             return `
                 <tr>
                     <td>${Number(row.row_index || 0) + 1}</td>
                     <td>${badge(row.status)}</td>
-                    <td>${String(d.cod_inventario || "-")}</td>
-                    <td>${String(d.cod_esbye || "-")}</td>
+                    <td class="${isNoCodeValue(invCode) ? "code-sc-cell" : ""}">${String(invCode || "-")}</td>
+                    <td class="${isNoCodeValue(esbyeCode) ? "code-sc-cell" : ""}">${String(esbyeCode || "-")}</td>
                     <td>${String(d.descripcion || "-")}</td>
                     <td>${String(d.marca || "-")}</td>
                     <td>${String(d.modelo || "-")}</td>
@@ -2691,7 +2709,13 @@ function renderExtraccionTable(items) {
         const checked = selectedItemIds.has(itemId) ? "checked" : "";
         let html = `<td class="text-center"><input class="form-check-input item-extract-chk" type="checkbox" value="${itemId}" ${checked}></td>`;
         selectedColumns.forEach((id) => {
-            html += `<td>${item[id] || "-"}</td>`;
+            const value = id === "cod_inventario" || id === "cod_esbye"
+                ? normalizeCodeToPlaceholder(item[id])
+                : (item[id] || "-");
+            const cellClass = (id === "cod_inventario" || id === "cod_esbye") && isNoCodeValue(value)
+                ? ' class="code-sc-cell"'
+                : "";
+            html += `<td${cellClass}>${value}</td>`;
         });
         tr.innerHTML = html;
         tbody.appendChild(tr);

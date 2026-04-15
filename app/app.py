@@ -1,4 +1,3 @@
-import shutil
 import sys
 from pathlib import Path
 
@@ -19,19 +18,7 @@ from database.db import init_app
 
 
 def _resolve_database_path(base_dir: Path) -> Path:
-    target_db = base_dir / "inventario.db"
-    legacy_db = base_dir / "prueba.db"
-
-    if target_db.exists():
-        return target_db
-
-    if legacy_db.exists():
-        try:
-            legacy_db.replace(target_db)
-        except OSError:
-            shutil.copy2(legacy_db, target_db)
-
-    return target_db
+    return base_dir / "inventario.db"
 
 
 def create_app() -> Flask:

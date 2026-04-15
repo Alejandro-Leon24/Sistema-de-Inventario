@@ -114,6 +114,33 @@ CANONICAL_COLUMN_ORDER = [
     "observacion_esbye",
 ]
 
+_PLACEHOLDER_NO_CODE = "S/C"
+_CODE_FIELDS = {"cod_inventario", "cod_esbye"}
+
+
+def _normalize_inventory_code_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return _PLACEHOLDER_NO_CODE
+
+    compact = re.sub(r"[^a-z0-9]", "", text.lower())
+    if compact in {"sc", "sincodigo", "sincod"}:
+        return _PLACEHOLDER_NO_CODE
+    return text
+
+
+def _normalize_inventory_code_fields(payload):
+    if not isinstance(payload, dict):
+        return payload
+    for code_field in _CODE_FIELDS:
+        if code_field in payload:
+            payload[code_field] = _normalize_inventory_code_value(payload.get(code_field))
+    return payload
+
+
+def _is_placeholder_no_code(value):
+    return _normalize_inventory_code_value(value).upper() == _PLACEHOLDER_NO_CODE
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 AREA_DETAIL_COLUMNS = [
@@ -1437,6 +1464,7 @@ def get_inventory_item(item_id):
 def create_inventory_item(payload, commit=True):
     db = get_db()
     fields = {k: payload.get(k) for k in ALLOWED_INVENTORY_FIELDS if k in payload}
+    _normalize_inventory_code_fields(fields)
     fields["cantidad"] = int(fields.get("cantidad") or 1)
     fields["valor"] = float(fields.get("valor")) if fields.get("valor") not in (None, "") else None
     fields["valor_esbye"] = float(fields.get("valor_esbye")) if fields.get("valor_esbye") not in (None, "") else None
@@ -1472,7 +1500,9 @@ def update_inventory_item(item_id, payload):
 
     updates = []
     values = []
-    for field, value in payload.items():
+    normalized_payload = dict(payload or {})
+    _normalize_inventory_code_fields(normalized_payload)
+    for field, value in normalized_payload.items():
         if field not in ALLOWED_INVENTORY_FIELDS:
             continue
         if field == "cantidad":
@@ -1525,8 +1555,12 @@ def clear_inventory_items(reset_sequence=True):
 
 
 def find_inventory_code_duplicates(cod_inventario=None, cod_esbye=None, limit=50, exclude_item_id=None):
-    inventory_code = str(cod_inventario or "").strip()
-    esbye_code = str(cod_esbye or "").strip()
+    inventory_code = _normalize_inventory_code_value(cod_inventario)
+    esbye_code = _normalize_inventory_code_value(cod_esbye)
+    if _is_placeholder_no_code(inventory_code):
+        inventory_code = ""
+    if _is_placeholder_no_code(esbye_code):
+        esbye_code = ""
     if not inventory_code and not esbye_code:
         return []
 
@@ -1606,6 +1640,7 @@ def bulk_insert_inventory_rows(rows, area_id=None):
                 if index >= len(CANONICAL_COLUMN_ORDER):
                     break
                 payload[CANONICAL_COLUMN_ORDER[index]] = raw_value
+            _normalize_inventory_code_fields(payload)
             if area_id and not payload.get("area_id"):
                 payload["area_id"] = area_id
 
@@ -1711,6 +1746,8 @@ def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
                 else:
                     has_data = True
                 payload[field] = value
+
+            _normalize_inventory_code_fields(payload)
 
             if "area_id" in raw_row and raw_row.get("area_id") not in (None, ""):
                 try:

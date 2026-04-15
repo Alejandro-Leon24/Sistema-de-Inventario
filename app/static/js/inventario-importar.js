@@ -84,6 +84,15 @@
             .trim();
     }
 
+    function normalizeCodeToPlaceholder(value) {
+        const text = String(value || "").trim();
+        const compact = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (!compact || compact === "sc" || compact === "sincodigo" || compact === "sincod") {
+            return "S/C";
+        }
+        return text;
+    }
+
     function normalizeDateInputValue(value) {
         const raw = String(value || "").trim();
         if (!raw) return "";
@@ -565,6 +574,14 @@
         }
 
         function renderReviewRows() {
+            const isNoCodeValue = (value) => {
+                const compact = String(value || "")
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]/g, "");
+                return compact === "sc" || compact === "sincodigo" || compact === "sincod";
+            };
+
             reviewBody.innerHTML = "";
             state.reviewRows.forEach((row, localIndex) => {
                 const tr = document.createElement("tr");
@@ -591,6 +608,9 @@
                     td.title = "Doble clic para editar";
                     const value = row.data[field] == null ? "" : String(row.data[field]);
                     td.textContent = value || "-";
+                    if ((field === "cod_inventario" || field === "cod_esbye") && isNoCodeValue(value)) {
+                        td.classList.add("code-sc-cell");
+                    }
                     tr.appendChild(td);
                 });
 
@@ -1004,7 +1024,10 @@
             if (input.type !== "date") input.select();
 
             const commit = () => {
-                row.data[field] = String(input.value || "").trim();
+                const rawValue = String(input.value || "").trim();
+                row.data[field] = (field === "cod_inventario" || field === "cod_esbye")
+                    ? normalizeCodeToPlaceholder(rawValue)
+                    : rawValue;
                 row.status = "normal";
                 if (field === "ubicacion") {
                     const suggestion = suggestAreaId(row.data.ubicacion);

@@ -142,6 +142,30 @@ _BASE_TO_ESBYE_FIELD = {
 }
 
 
+def _normalize_code_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return "S/C"
+
+    compact = re.sub(r"[^a-z0-9]", "", text.lower())
+    if compact in {"sc", "sincodigo", "sincod"}:
+        return "S/C"
+    return text
+
+
+def _normalize_code_compare_value(value):
+    normalized = _normalize_compare_value(_normalize_code_value(value))
+    return "" if normalized == "s c" else normalized
+
+
+def _normalize_codes_in_row_data(row_data):
+    if not isinstance(row_data, dict):
+        return row_data
+    row_data["cod_inventario"] = _normalize_code_value(row_data.get("cod_inventario"))
+    row_data["cod_esbye"] = _normalize_code_value(row_data.get("cod_esbye"))
+    return row_data
+
+
 def _normalize_text(value):
     text = str(value or "").strip().lower()
     text = unicodedata.normalize("NFD", text)
@@ -324,13 +348,13 @@ def _inventory_summary_item(row):
 def _build_match_fields(imported_row, db_summary):
     matches = []
 
-    inv_import = _normalize_compare_value(_get_row_value(imported_row, "cod_inventario"))
-    inv_db = _normalize_compare_value(db_summary.get("cod_inventario"))
+    inv_import = _normalize_code_compare_value(_get_row_value(imported_row, "cod_inventario"))
+    inv_db = _normalize_code_compare_value(db_summary.get("cod_inventario"))
     if inv_import and inv_import == inv_db:
         matches.append("cod_inventario")
 
-    esbye_import = _normalize_compare_value(_get_row_value(imported_row, "cod_esbye"))
-    esbye_db = _normalize_compare_value(db_summary.get("cod_esbye"))
+    esbye_import = _normalize_code_compare_value(_get_row_value(imported_row, "cod_esbye"))
+    esbye_db = _normalize_code_compare_value(db_summary.get("cod_esbye"))
     if esbye_import and esbye_import == esbye_db:
         matches.append("cod_esbye")
 
@@ -473,17 +497,18 @@ def _analyze_chunk_against_inventory(chunk_rows):
         if not _is_empty_row_key(row_key):
             exact_index.setdefault(row_key, []).append(summary)
 
-        inv_code = _normalize_compare_value(row["cod_inventario"])
+        inv_code = _normalize_code_compare_value(row["cod_inventario"])
         if inv_code:
             inv_code_index.setdefault(inv_code, []).append(summary)
 
-        esbye_code = _normalize_compare_value(row["cod_esbye"])
+        esbye_code = _normalize_code_compare_value(row["cod_esbye"])
         if esbye_code:
             esbye_code_index.setdefault(esbye_code, []).append(summary)
 
     analyzed = []
     for row in chunk_rows:
         row_data = dict(row.get("data") or {})
+        _normalize_codes_in_row_data(row_data)
         exact_matches = []
         similar_matches = []
 
@@ -491,11 +516,11 @@ def _analyze_chunk_against_inventory(chunk_rows):
         if not _is_empty_row_key(row_key):
             exact_matches = exact_index.get(row_key, [])
 
-        inv_code = _normalize_compare_value(row_data.get("cod_inventario"))
+        inv_code = _normalize_code_compare_value(row_data.get("cod_inventario"))
         if inv_code:
             similar_matches.extend(inv_code_index.get(inv_code, []))
 
-        esbye_code = _normalize_compare_value(row_data.get("cod_esbye"))
+        esbye_code = _normalize_code_compare_value(row_data.get("cod_esbye"))
         if esbye_code:
             similar_matches.extend(esbye_code_index.get(esbye_code, []))
 
@@ -552,6 +577,7 @@ def _build_mapped_chunk(data_rows, mapping, start_index, chunk_size, rows_overri
                 canonical = str(field or "").strip()
                 if canonical in ALLOWED_INVENTORY_FIELDS and canonical != "item_numero":
                     clean_data[canonical] = value
+            _normalize_codes_in_row_data(clean_data)
             normalized_rows.append(
                 {
                     "row_index": start_index + idx,
@@ -582,6 +608,7 @@ def _build_mapped_chunk(data_rows, mapping, start_index, chunk_size, rows_overri
 
             row_dict[canonical] = value
         if row_dict:
+            _normalize_codes_in_row_data(row_dict)
             chunk.append({"row_index": idx, "data": row_dict})
     return chunk
 
