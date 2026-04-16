@@ -426,7 +426,7 @@ def extract_variables_from_template(file_path):
         if variables:
             return variables
     except Exception as e:
-        logger.warning(f"Extractor docxtpl falló para {file_path}: {e}")
+        logger.info(f"Extractor docxtpl no pudo parsear {file_path}; usando fallback: {e}")
 
     try:
         variables = _extract_with_python_docx(file_path)

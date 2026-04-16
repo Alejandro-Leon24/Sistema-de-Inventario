@@ -10,6 +10,7 @@ from database.controller import (
     reserve_numero_acta,
     reserve_numeros_informe_area,
     save_historial_acta,
+    update_historial_acta,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "reserve_numero_acta",
     "reserve_numeros_informe_area",
     "save_historial_acta",
+    "update_historial_acta",
 ]

@@ -30,6 +30,8 @@ let isGeneratingActa = false;
 let closeDownloadModalTimer = null;
 let informeEventSource = null;
 let activeHistorialTemplateSnapshotPath = null;
+let activeEditingActaId = null;
+let activeEditingActaTipo = null;
 let activeAulaBatchJobId = null;
 let activeAulaBatchModal = null;
 let activeAulaBatchPaused = false;
@@ -468,14 +470,22 @@ async function autocompletarNumeroActa(form) {
     }
 }
 
-async function validarNumeroActa(numeroActa, tipoActa = "entrega") {
+async function validarNumeroActa(numeroActa, tipoActa = "entrega", editingActaId = null) {
     const value = String(numeroActa || "").trim();
     if (!value) {
         return { valid: false, error: "El número de acta es obligatorio." };
     }
 
     try {
-        const response = await fetch(`/api/historial/numero-acta/validar?numero_acta=${encodeURIComponent(value)}&tipo_acta=${encodeURIComponent(String(tipoActa || "entrega"))}`);
+        const params = new URLSearchParams({
+            numero_acta: value,
+            tipo_acta: String(tipoActa || "entrega"),
+        });
+        const editingId = Number(editingActaId || 0);
+        if (Number.isInteger(editingId) && editingId > 0) {
+            params.set("editing_acta_id", String(editingId));
+        }
+        const response = await fetch(`/api/historial/numero-acta/validar?${params.toString()}`);
         const payload = await response.json();
         if (!response.ok || !payload.success) {
             return { valid: false, error: "No se pudo validar el número de acta." };
@@ -510,6 +520,8 @@ function initNumeroActaOnTabs() {
 
 function resetActaDraftState(tipo) {
     const t = String(tipo || "").trim().toLowerCase();
+    activeEditingActaId = null;
+    activeEditingActaTipo = null;
     if (t === "recepcion") {
         recepcionBienesTemp = [];
         clearRecepcionBienForm();
@@ -1509,6 +1521,7 @@ function setupRecepcionBienesModal() {
     const importState = {
         step: 1,
         sessionId: null,
+        sourceFile: null,
         headers: [],
         previewRows: [],
         totalRows: 0,
@@ -1518,6 +1531,7 @@ function setupRecepcionBienesModal() {
         chunkSize: CHUNK_SIZE,
         hasMore: false,
         previewChunkData: null,
+        isRecoveringSession: false,
     };
 
     const escapeHtml = (text) => String(text || "")
@@ -1748,6 +1762,7 @@ function setupRecepcionBienesModal() {
     const resetImportState = () => {
         importState.step = 1;
         importState.sessionId = null;
+        importState.sourceFile = null;
         importState.headers = [];
         importState.previewRows = [];
         importState.totalRows = 0;
@@ -1756,6 +1771,7 @@ function setupRecepcionBienesModal() {
         importState.startIndex = 0;
         importState.hasMore = false;
         importState.previewChunkData = null;
+        importState.isRecoveringSession = false;
         if (inputImportExcel) inputImportExcel.value = "";
         if (mappingSelectsRow) mappingSelectsRow.innerHTML = "";
         if (mappingHeadersRow) mappingHeadersRow.innerHTML = "";
@@ -1952,14 +1968,20 @@ function setupRecepcionBienesModal() {
         }
     };
 
-    const handleImportFile = async (file) => {
+    const handleImportFile = async (file, options = {}) => {
+        const reuseMappings = Boolean(options.reuseMappings);
+        const silent = Boolean(options.silent);
+        const keepCurrentStep = Boolean(options.keepCurrentStep);
         if (!file) return;
         if (!String(file.name || "").toLowerCase().endsWith(".xlsx")) {
-            showImportStatus('<i class="bi bi-x-circle me-1"></i>Solo se aceptan archivos .xlsx.', "danger");
-            return;
+            if (!silent) showImportStatus('<i class="bi bi-x-circle me-1"></i>Solo se aceptan archivos .xlsx.', "danger");
+            return false;
         }
 
-        showImportStatus(`<span class="spinner-border spinner-border-sm me-2" role="status"></span>Procesando <strong>${String(file.name || "archivo")}</strong>...`);
+        importState.sourceFile = file;
+        if (!silent) {
+            showImportStatus(`<span class="spinner-border spinner-border-sm me-2" role="status"></span>Procesando <strong>${String(file.name || "archivo")}</strong>...`);
+        }
         const formData = new FormData();
         formData.append("file", file);
 
@@ -1967,10 +1989,11 @@ function setupRecepcionBienesModal() {
             const pre = await fetch("/api/inventario/previsualizar-excel", { method: "POST", body: formData });
             const preData = await pre.json();
             if (!pre.ok || preData.error) {
-                showImportStatus(`<i class="bi bi-x-circle me-1"></i>${preData.error || "No se pudo leer el Excel."}`, "danger");
-                return;
+                if (!silent) showImportStatus(`<i class="bi bi-x-circle me-1"></i>${preData.error || "No se pudo leer el Excel."}`, "danger");
+                return false;
             }
 
+            const previousMappings = Array.isArray(importState.mappings) ? [...importState.mappings] : [];
             importState.sessionId = preData.session_id;
             importState.headers = Array.isArray(preData.headers) ? preData.headers : [];
             importState.previewRows = Array.isArray(preData.preview_rows) ? preData.preview_rows : [];
@@ -1979,15 +2002,67 @@ function setupRecepcionBienesModal() {
             importState.hasMore = importState.totalRows > 0;
             const suggested = Array.isArray(preData.suggested_mapping) ? preData.suggested_mapping : [];
             const rawMappings = importState.headers.map((_, idx) => String(suggested[idx] || ""));
-            importState.mappings = normalizeLocationMappings(importState.headers, rawMappings);
+            if (reuseMappings && previousMappings.length === importState.headers.length && previousMappings.some(Boolean)) {
+                importState.mappings = normalizeLocationMappings(importState.headers, previousMappings);
+            } else {
+                importState.mappings = normalizeLocationMappings(importState.headers, rawMappings);
+            }
 
             renderMappingStep();
             updateImportProgress();
-            clearImportStatus();
+            if (!silent) clearImportStatus();
             if (btnImportNext) btnImportNext.disabled = false;
-            setImportStep(2);
+            if (!keepCurrentStep) setImportStep(2);
+            return true;
         } catch (_err) {
-            showImportStatus('<i class="bi bi-x-circle me-1"></i>Error de red al subir archivo.', "danger");
+            if (!silent) showImportStatus('<i class="bi bi-x-circle me-1"></i>Error de red al subir archivo.', "danger");
+            return false;
+        }
+    };
+
+    const recoverRecepcionImportSession = async () => {
+        if (importState.isRecoveringSession) return false;
+        if (!importState.sourceFile) {
+            showImportStatus('<i class="bi bi-x-circle me-1"></i>La sesión expiró y no hay archivo en memoria para reconectar. Selecciona el Excel nuevamente.', "danger");
+            return false;
+        }
+
+        importState.isRecoveringSession = true;
+        const keepStep = importState.step;
+        const keepStartIndex = importState.startIndex;
+        try {
+            showImportStatus('<span class="spinner-border spinner-border-sm me-2" role="status"></span>Reconectando sesión de importación...', "warning");
+            const restored = await handleImportFile(importState.sourceFile, {
+                reuseMappings: true,
+                silent: true,
+                keepCurrentStep: true,
+            });
+            if (!restored) return false;
+
+            importState.startIndex = keepStartIndex;
+            setImportStep(keepStep);
+            updateImportProgress();
+            showImportStatus('<i class="bi bi-check-circle-fill me-1"></i>Sesión restablecida. Reintentando...', "success");
+            return true;
+        } finally {
+            importState.isRecoveringSession = false;
+        }
+    };
+
+    const sendRecepcionImportRequest = async (payload, allowRecover = true) => {
+        try {
+            return await api.send("/api/inventario/excel-a-filas-recepcion", "POST", payload);
+        } catch (error) {
+            if (allowRecover && error?.status === 410) {
+                const recovered = await recoverRecepcionImportSession();
+                if (recovered) {
+                    return await api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+                        ...payload,
+                        session_id: importState.sessionId,
+                    });
+                }
+            }
+            throw error;
         }
     };
 
@@ -2019,7 +2094,7 @@ function setupRecepcionBienesModal() {
 
             const validation = importState.previewChunkData && Number(importState.previewChunkData.start_index) === Number(importState.startIndex)
                 ? importState.previewChunkData
-                : await api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+                : await sendRecepcionImportRequest({
                     ...payloadBase,
                     validate_only: true,
                 });
@@ -2043,7 +2118,7 @@ function setupRecepcionBienesModal() {
             }
 
             showImportStatus("<span class=\"spinner-border spinner-border-sm me-2\" role=\"status\"></span>Importando bloque...", "info");
-            const res = await api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+            const res = await sendRecepcionImportRequest({
                 ...payloadBase,
                 force_duplicate: forceDuplicate,
             });
@@ -2077,7 +2152,7 @@ function setupRecepcionBienesModal() {
             } else {
                 if (btnImportRun) btnImportRun.innerHTML = '<i class="bi bi-box-arrow-in-down-right me-1"></i>Importar siguiente bloque (20)';
                 showImportStatus(`Bloque importado: ${importedRows.length} fila(s).`, "success");
-                const nextPreview = await api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+                const nextPreview = await sendRecepcionImportRequest({
                     ...payloadBase,
                     start_index: importState.startIndex,
                     validate_only: true,
@@ -2136,7 +2211,7 @@ function setupRecepcionBienesModal() {
             return;
         }
         btnImportNext.setAttribute("disabled", "disabled");
-        api.send("/api/inventario/excel-a-filas-recepcion", "POST", {
+        sendRecepcionImportRequest({
             session_id: importState.sessionId,
             mapping: toMappingObject(),
             forced_location: String(ubicacionReadonly?.value || "").trim(),
@@ -2335,6 +2410,11 @@ function applyHistorialPayloadToEditor(record) {
         (record && record.plantilla_snapshot_path) ||
         (parsed && parsed.plantilla && parsed.plantilla.snapshot_path) ||
         null;
+    {
+        const parsedId = Number(record && record.id);
+        activeEditingActaId = Number.isInteger(parsedId) && parsedId > 0 ? parsedId : null;
+        activeEditingActaTipo = normalizeTipoActa(record && record.tipo_acta);
+    }
 
     const activeTarget = document.querySelector(".settings-menu-btn.active")?.getAttribute("data-target");
     const targetDiv = activeTarget ? document.querySelector(`#${activeTarget} .resultado-tabla-container`) : null;
@@ -2971,7 +3051,16 @@ document.addEventListener("DOMContentLoaded", async () => {
             return;
         }
 
-        const numeroActaValidation = await validarNumeroActa(datosFormulario.numero_acta, tipo);
+        const editingActaIdForTipo =
+            activeEditingActaId && normalizeTipoActa(activeEditingActaTipo) === normalizeTipoActa(tipo)
+                ? activeEditingActaId
+                : null;
+
+        const numeroActaValidation = await validarNumeroActa(
+            datosFormulario.numero_acta,
+            tipo,
+            editingActaIdForTipo,
+        );
         if (!numeroActaValidation.valid) {
             notify(numeroActaValidation.error, true);
             isGeneratingActa = false;
@@ -3012,6 +3101,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                         datos_columnas: datosColumnas,
                         vista_previa: false,
                         force_same_acta: forceSame,
+                        editing_acta_id: editingActaIdForTipo || undefined,
                         template_snapshot_path: activeHistorialTemplateSnapshotPath || undefined,
                     }),
                 });
@@ -3033,6 +3123,16 @@ document.addEventListener("DOMContentLoaded", async () => {
                 ({ response, result } = await sendGenerate(true));
             }
             if (!response.ok || !result.success) {
+                if (response.status === 409 && result?.next_numero_acta) {
+                    const numeroSugerido = String(result.next_numero_acta || "").trim();
+                    if (numeroSugerido) {
+                        const numeroInput = form.querySelector('input[name="numero_acta"]');
+                        setNumeroActaInputValue(numeroInput, numeroSugerido, true);
+                    }
+                    notify(result.error || "El número de acta cambió mientras se generaba. Se actualizó al siguiente disponible.", true);
+                    finishDownloadProgress();
+                    return;
+                }
                 notify(result.error || "No se pudo generar el acta para descargar.", true);
                 finishDownloadProgress();
                 return;
@@ -3045,6 +3145,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             setDownloadProgressMessage("El archivo DOCX se está descargando.");
             notify("Acta DOCX generada y descarga iniciada.");
             activeHistorialTemplateSnapshotPath = null;
+            activeEditingActaId = null;
+            activeEditingActaTipo = null;
             resetActaDraftState(tipo);
             await refreshNumeroActaPorTipo(tipo, true);
         } catch (err) {

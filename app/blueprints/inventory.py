@@ -1,5 +1,6 @@
 import sqlite3
 import logging
+import json
 import os
 import re
 import tempfile
@@ -14,7 +15,6 @@ from database.controller import resolve_or_create_personal_name
 from database.inventory_repository import (
     ALLOWED_INVENTORY_FIELDS,
     bulk_insert_inventory_dicts,
-    bulk_insert_inventory_rows,
     clear_inventory_items,
     create_inventory_item,
     delete_inventory_item,
@@ -72,6 +72,133 @@ _IMPORT_CANONICAL_FIELDS = [
     "observacion_esbye",
 ]
 
+# Orden real del pegado rapido desde Excel en Inventario (tabla/formulario).
+_PASTE_CANONICAL_FIELDS = [
+    "cod_inventario",
+    "cod_esbye",
+    "cuenta",
+    "cantidad",
+    "descripcion",
+    "marca",
+    "modelo",
+    "serie",
+    "estado",
+    "ubicacion",
+    "fecha_adquisicion",
+    "valor",
+    "usuario_final",
+    "observacion",
+    "descripcion_esbye",
+    "marca_esbye",
+    "modelo_esbye",
+    "serie_esbye",
+    "fecha_adquisicion_esbye",
+    "valor_esbye",
+    "ubicacion_esbye",
+    "observacion_esbye",
+]
+
+
+def _looks_like_person_name(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    tokens = [tok for tok in re.split(r"\s+", text) if tok]
+    alpha_tokens = [tok for tok in tokens if re.search(r"[A-Za-zÁÉÍÓÚáéíóúÑñ]", tok)]
+    if len(alpha_tokens) < 2:
+        return False
+    lowered = _normalize_text(text)
+    non_person_markers = {"s m", "s s", "n a", "na", "ninguno", "sin datos"}
+    return lowered not in non_person_markers
+
+
+def _looks_like_date_text(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(
+        re.fullmatch(r"\d{4}-\d{2}-\d{2}", text)
+        or re.fullmatch(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", text)
+        or re.fullmatch(r"\d+(?:\.\d+)?", text)
+    )
+
+
+def _looks_like_money_text(value):
+    text = str(value or "").strip().replace(" ", "")
+    if not text:
+        return False
+    return bool(re.fullmatch(r"[-+]?\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d+)?|[-+]?\d+(?:[\.,]\d+)?", text))
+
+
+def _score_paste_mapping(mapped):
+    score = 0
+    if _looks_like_person_name(mapped.get("usuario_final")):
+        score += 4
+    elif mapped.get("usuario_final") not in (None, ""):
+        score -= 3
+
+    cantidad_text = str(mapped.get("cantidad") or "").strip()
+    if re.fullmatch(r"\d+", cantidad_text):
+        cantidad_num = int(cantidad_text)
+        if 0 < cantidad_num <= 1000:
+            score += 2
+    elif cantidad_text:
+        score -= 1
+
+    fecha_text = str(mapped.get("fecha_adquisicion") or "").strip()
+    if _looks_like_date_text(fecha_text):
+        score += 2
+    elif fecha_text:
+        score -= 2
+
+    valor_text = str(mapped.get("valor") or "").strip()
+    if _looks_like_money_text(valor_text):
+        score += 2
+    elif valor_text:
+        score -= 2
+    ubicacion = str(mapped.get("ubicacion") or "").strip().lower()
+    if ubicacion and ("/" in ubicacion or "bloque" in ubicacion or "piso" in ubicacion or "area" in ubicacion):
+        score += 2
+    if str(mapped.get("cod_inventario") or "").strip():
+        score += 1
+    if str(mapped.get("descripcion") or "").strip():
+        score += 1
+    return score
+
+
+def _map_paste_row_best_effort(raw_row):
+    cells = list(raw_row or [])
+    if not cells:
+        return {}
+
+    candidate_orders = [_PASTE_CANONICAL_FIELDS, _IMPORT_CANONICAL_FIELDS]
+    best_row = {}
+    best_score = -1
+
+    for order in candidate_orders:
+        max_offset = min(3, max(len(cells) - 1, 0))
+        possible_offsets = list(range(0, max_offset + 1))
+
+        for offset in possible_offsets:
+            mapped = {}
+            for idx, field in enumerate(order):
+                src_idx = idx + offset
+                if src_idx >= len(cells):
+                    break
+                value = cells[src_idx]
+                if isinstance(value, str):
+                    value = value.strip()
+                if value in (None, ""):
+                    continue
+                mapped[field] = value
+
+            score = _score_paste_mapping(mapped)
+            if score > best_score:
+                best_score = score
+                best_row = mapped
+
+    return best_row
+
 _EXACT_ROW_COMPARE_FIELDS = [
     "cod_inventario",
     "cod_esbye",
@@ -94,8 +221,6 @@ _HEADER_ALIAS_TO_FIELD = {
     "codigo inventario": "cod_inventario",
     "cod inventario": "cod_inventario",
     "cod inv": "cod_inventario",
-    "codigo": "cod_inventario",
-    "item": "cod_inventario",
     "cod esbye": "cod_esbye",
     "codigo esbye": "cod_esbye",
     "esbye": "cod_esbye",
@@ -174,10 +299,33 @@ def _normalize_text(value):
     return " ".join(text.split())
 
 
+def _looks_like_inventory_code_header(normalized_header):
+    normalized = str(normalized_header or "").strip()
+    if not normalized:
+        return False
+    if "esbye" in normalized:
+        return False
+
+    compact = normalized.replace(" ", "")
+    if re.search(r"\bcod(?:igo)?\s*(inv|inventario)\b", normalized):
+        return True
+    if re.search(r"\bcod(?:igo)?\s*(jaf|prov)\b", normalized):
+        return True
+    if "codjaf" in compact or "codprov" in compact:
+        return True
+
+    tokens = set(normalized.split())
+    has_code_word = "cod" in tokens or "codigo" in tokens
+    has_jaf_or_prov = "jaf" in tokens or "prov" in tokens
+    return has_code_word and has_jaf_or_prov
+
+
 def _header_to_canonical_field(header_value):
     normalized = _normalize_text(header_value)
     if not normalized:
         return ""
+    if _looks_like_inventory_code_header(normalized):
+        return "cod_inventario"
     if normalized in _HEADER_ALIAS_TO_FIELD:
         return _HEADER_ALIAS_TO_FIELD[normalized]
     for alias, canonical in _HEADER_ALIAS_TO_FIELD.items():
@@ -781,11 +929,64 @@ def api_paste_inventario():
     rows = payload.get("rows") or []
     if not isinstance(rows, list) or not rows:
         return jsonify({"error": "Debe enviar una lista de filas para pegar."}), 400
+
+    area_id_raw = payload.get("area_id")
     try:
-        inserted_ids = bulk_insert_inventory_rows(rows, payload.get("area_id"))
+        area_id = int(area_id_raw) if area_id_raw not in (None, "", "null") else None
+    except (TypeError, ValueError):
+        area_id = None
+
+    rows_as_dicts = []
+    missing_areas = set()
+    for raw_row in rows:
+        if not isinstance(raw_row, list):
+            continue
+
+        row_data = _map_paste_row_best_effort(raw_row)
+
+        if not row_data:
+            continue
+
+        if not row_data.get("area_id"):
+            guessed_area_id = _guess_area_id_from_location_text(row_data.get("ubicacion"))
+            if guessed_area_id is not None:
+                row_data["area_id"] = guessed_area_id
+        if area_id is not None and not row_data.get("area_id"):
+            row_data["area_id"] = area_id
+
+        if row_data.get("ubicacion") and not row_data.get("area_id"):
+            missing_areas.add(str(row_data.get("ubicacion") or "").strip())
+
+        # Reutiliza exactamente la misma normalizacion de usuario_final del importador Excel.
+        raw_usuario = str(row_data.get("usuario_final") or "").strip()
+        if raw_usuario:
+            row_data["usuario_final"] = resolve_or_create_personal_name(
+                raw_usuario,
+                create_if_missing=True,
+            )
+
+        rows_as_dicts.append(row_data)
+
+    missing_areas.discard("")
+    if missing_areas:
+        return jsonify(
+            {
+                "error": "Se encontraron ubicaciones/areas que no existen en la configuración.",
+                "code": "area_not_found",
+                "missing_areas": sorted(missing_areas),
+            }
+        ), 409
+
+    try:
+        result = bulk_insert_inventory_dicts(rows_as_dicts, area_id=area_id)
     except sqlite3.IntegrityError as error:
         return jsonify({"error": f"Error al pegar datos por duplicado: {error}"}), 409
-    return jsonify({"inserted_ids": inserted_ids}), 201
+    return jsonify(
+        {
+            "inserted": int(result.get("inserted") or 0),
+            "skipped": int(result.get("skipped") or 0),
+        }
+    ), 201
 
 
 @inventory_bp.get("/api/inventario/search-diagnostics")

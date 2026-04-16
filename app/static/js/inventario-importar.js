@@ -84,6 +84,13 @@
             .trim();
     }
 
+    function normalizeSelectComparable(value) {
+        return normalizeText(value)
+            .replace(/[^a-z0-9\s]/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
     function normalizeCodeToPlaceholder(value) {
         const text = String(value || "").trim();
         const compact = text.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -111,21 +118,25 @@
     function resolveSelectOptionValue(options, rawValue) {
         const value = String(rawValue || "").trim();
         if (!value) return "";
-        const normalizedValue = normalizeText(value);
+        const normalizedValue = normalizeSelectComparable(value);
         const list = Array.isArray(options) ? options : [];
         if (!list.length) return "";
 
-        let exact = list.find((name) => normalizeText(name) === normalizedValue);
+        let exact = list.find((name) => normalizeSelectComparable(name) === normalizedValue);
         if (exact) return exact;
 
-        let contains = list.find((name) => normalizeText(name).includes(normalizedValue) || normalizedValue.includes(normalizeText(name)));
+        let contains = list.find(
+            (name) =>
+                normalizeSelectComparable(name).includes(normalizedValue)
+                || normalizedValue.includes(normalizeSelectComparable(name))
+        );
         if (contains) return contains;
 
         const targetTokens = normalizedValue.split(/\s+/).filter(Boolean);
         let best = "";
         let bestScore = 0;
         list.forEach((name) => {
-            const norm = normalizeText(name);
+            const norm = normalizeSelectComparable(name);
             if (!norm) return;
             const tokens = norm.split(/\s+/).filter(Boolean);
             const overlap = targetTokens.filter((token) => tokens.some((item) => item.includes(token) || token.includes(item))).length;
@@ -288,6 +299,7 @@
             return {
                 step: 1,
                 sessionId: null,
+                sourceFile: null,
                 headers: [],
                 previewRows: [],
                 totalRows: 0,
@@ -301,6 +313,7 @@
                 usuarioOptions: [],
                 estadoOptions: [],
                 isSaving: false,
+                isRecoveringSession: false,
             };
         }
 
@@ -367,17 +380,24 @@
             return mapping;
         }
 
-        async function handleFile(file) {
-            if (!file.name.toLowerCase().endsWith(".xlsx")) {
-                showStatus('<i class="bi bi-x-circle me-1"></i>Solo se aceptan archivos .xlsx.', "danger");
-                return;
+        async function handleFile(file, options = {}) {
+            const reuseMappings = Boolean(options.reuseMappings);
+            const silent = Boolean(options.silent);
+            const keepCurrentStep = Boolean(options.keepCurrentStep);
+
+            if (!file?.name || !file.name.toLowerCase().endsWith(".xlsx")) {
+                if (!silent) showStatus('<i class="bi bi-x-circle me-1"></i>Solo se aceptan archivos .xlsx.', "danger");
+                return false;
             }
             if (file.size > 10 * 1024 * 1024) {
-                showStatus('<i class="bi bi-x-circle me-1"></i>El archivo supera 10 MB.', "danger");
-                return;
+                if (!silent) showStatus('<i class="bi bi-x-circle me-1"></i>El archivo supera 10 MB.', "danger");
+                return false;
             }
 
-            showStatus(`<span class="spinner-border spinner-border-sm me-2" role="status"></span>Procesando <strong>${escapeHtml(file.name)}</strong>...`);
+            state.sourceFile = file;
+            if (!silent) {
+                showStatus(`<span class="spinner-border spinner-border-sm me-2" role="status"></span>Procesando <strong>${escapeHtml(file.name)}</strong>...`);
+            }
             const formData = new FormData();
             formData.append("file", file);
 
@@ -385,23 +405,66 @@
                 const res = await fetch("/api/inventario/previsualizar-excel", { method: "POST", body: formData });
                 const data = await res.json();
                 if (!res.ok || data.error) {
-                    showStatus(`<i class="bi bi-x-circle me-1"></i>${escapeHtml(data.error || "Error al procesar archivo")}`, "danger");
-                    return;
+                    if (!silent) {
+                        showStatus(`<i class="bi bi-x-circle me-1"></i>${escapeHtml(data.error || "Error al procesar archivo")}`, "danger");
+                    }
+                    return false;
                 }
 
+                const previousMappings = Array.isArray(state.mappings) ? [...state.mappings] : [];
                 state.sessionId = data.session_id;
                 state.headers = data.headers || [];
                 state.previewRows = data.preview_rows || [];
                 state.totalRows = Number(data.total_rows || 0);
                 const suggested = Array.isArray(data.suggested_mapping) ? data.suggested_mapping : [];
                 const rawMappings = state.headers.map((_, idx) => suggested[idx] || "");
-                state.mappings = normalizeEsbyeDuplicateMappings(state.headers, rawMappings);
+                if (reuseMappings && previousMappings.length === state.headers.length && previousMappings.some(Boolean)) {
+                    state.mappings = normalizeEsbyeDuplicateMappings(state.headers, previousMappings);
+                } else {
+                    state.mappings = normalizeEsbyeDuplicateMappings(state.headers, rawMappings);
+                }
 
-                clearStatus();
+                if (!silent) {
+                    clearStatus();
+                }
                 renderMappingStep();
-                setStep(2);
+                if (!keepCurrentStep) {
+                    setStep(2);
+                }
+                return true;
             } catch (_error) {
-                showStatus('<i class="bi bi-x-circle me-1"></i>Error de red al subir archivo.', "danger");
+                if (!silent) {
+                    showStatus('<i class="bi bi-x-circle me-1"></i>Error de red al subir archivo.', "danger");
+                }
+                return false;
+            }
+        }
+
+        async function recoverExpiredImportSession() {
+            if (state.isRecoveringSession) return false;
+            if (!state.sourceFile) {
+                showStatus('<i class="bi bi-x-circle me-1"></i>La sesión expiró y no hay archivo en memoria para reconectar. Selecciona el Excel nuevamente.', "danger");
+                return false;
+            }
+
+            state.isRecoveringSession = true;
+            const keepStep = state.step;
+            const keepStartIndex = state.startIndex;
+            try {
+                showStatus('<span class="spinner-border spinner-border-sm me-2" role="status"></span>Reconectando sesión de importación...', "warning");
+                const restored = await handleFile(state.sourceFile, {
+                    reuseMappings: true,
+                    silent: true,
+                    keepCurrentStep: true,
+                });
+                if (!restored) return false;
+
+                state.startIndex = keepStartIndex;
+                setStep(keepStep);
+                showStatus('<i class="bi bi-check-circle-fill me-1"></i>Sesión restablecida. Reintentando...', "success");
+                return true;
+            } finally {
+                state.isRecoveringSession = false;
             }
         }
 
@@ -667,6 +730,13 @@
                     }),
                 });
                 const data = await res.json();
+                if (res.status === 410) {
+                    const recovered = await recoverExpiredImportSession();
+                    if (recovered) {
+                        await validateCurrentChunk();
+                        return;
+                    }
+                }
                 if (!res.ok || !data.success) {
                     resultArea.className = "alert alert-danger mt-3 small";
                     resultArea.innerHTML = `<i class="bi bi-x-circle me-1"></i>${escapeHtml(data.error || "No se pudo validar el bloque")}`;
@@ -780,6 +850,16 @@
 
             try {
                 let { res, data } = await saveCurrentChunk(false);
+                if (res.status === 410) {
+                    const recovered = await recoverExpiredImportSession();
+                    if (!recovered) {
+                        resultArea.className = "alert alert-danger mt-3 small";
+                        resultArea.innerHTML = '<i class="bi bi-x-circle me-1"></i>La sesión de importación expiró y no se pudo restablecer automáticamente.';
+                        resultArea.classList.remove("d-none");
+                        return;
+                    }
+                    ({ res, data } = await saveCurrentChunk(false));
+                }
                 if (res.status === 409) {
                     const summary = data.summary || {};
                     const goOn = await openImportConflictsModal(data);
@@ -791,6 +871,16 @@
                         return;
                     }
                     ({ res, data } = await saveCurrentChunk(true));
+                    if (res.status === 410) {
+                        const recovered = await recoverExpiredImportSession();
+                        if (!recovered) {
+                            resultArea.className = "alert alert-danger mt-3 small";
+                            resultArea.innerHTML = '<i class="bi bi-x-circle me-1"></i>La sesión de importación expiró y no se pudo restablecer automáticamente.';
+                            resultArea.classList.remove("d-none");
+                            return;
+                        }
+                        ({ res, data } = await saveCurrentChunk(true));
+                    }
                 }
 
                 if (!res.ok || !data.success) {
@@ -996,7 +1086,9 @@
                 select.focus();
 
                 const commit = () => {
-                    row.data[field] = String(select.value || "").trim();
+                    const rawSelected = String(select.value || "").trim();
+                    const resolvedSelected = resolveSelectOptionValue(options, rawSelected);
+                    row.data[field] = resolvedSelected || rawSelected;
                     row.status = "normal";
                     renderReviewRows();
                     renderReviewSummary({

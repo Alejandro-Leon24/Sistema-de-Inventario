@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import re
+import unicodedata
 from difflib import SequenceMatcher
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -332,6 +333,9 @@ def init_schema(base_dir: Path):
     _run_startup_migration_once("20260409_inventory_codes_allow_duplicates", _ensure_inventory_codes_allow_duplicates)
     _run_startup_migration_once("20260409_inventory_search_indexes", _ensure_inventory_search_indexes)
     _run_startup_migration_once("20260409_inventory_fts", _ensure_inventory_fts)
+    _run_startup_migration_once("20260416_inventory_search_indexes_extended", _ensure_inventory_search_indexes)
+    _run_startup_migration_once("20260416_inventory_fts_extended", _ensure_inventory_fts)
+    _run_startup_migration_once("20260416_inventory_estado_canonical", _ensure_inventory_estado_canonical_runtime)
     _run_startup_migration_once("20260409_historial_actas_numero_column", _ensure_historial_actas_numero_column)
     _run_startup_migration_once("20260409_historial_actas_template_columns", _ensure_historial_actas_template_columns)
     _run_startup_migration_once("20260409_informes_area_sequence_table", _ensure_informes_area_sequence_table)
@@ -339,6 +343,42 @@ def init_schema(base_dir: Path):
     _run_startup_migration_once("20260414_historial_actas_numero_unique_by_type", _ensure_historial_actas_numero_unique_by_type)
     _run_startup_migration_once("20260414_actas_sequence_by_type_table", _ensure_actas_sequence_by_type_table)
     _run_startup_migration_once("20260409_seed_default_param_values", _seed_default_param_values)
+
+    # Refuerzo runtime para evitar esquemas de busqueda desactualizados en equipos que ya migraron antes.
+    _ensure_inventory_search_indexes()
+    _ensure_inventory_fts()
+
+
+def _ensure_inventory_estado_canonical_runtime():
+    db = get_db()
+    estado_options = _get_estado_catalog_options()
+    if not estado_options:
+        return
+
+    normalized_to_canonical = {}
+    for name in estado_options:
+        key = _normalize_catalog_text(name)
+        if key and key not in normalized_to_canonical:
+            normalized_to_canonical[key] = name
+
+    if not normalized_to_canonical:
+        return
+
+    rows = db.execute(
+        "SELECT id, estado FROM inventario_items WHERE TRIM(COALESCE(estado, '')) <> ''"
+    ).fetchall()
+    updates = []
+    for row in rows:
+        current = str(row["estado"] or "").strip()
+        if not current:
+            continue
+        canonical = normalized_to_canonical.get(_normalize_catalog_text(current))
+        if canonical and canonical != current:
+            updates.append((canonical, row["id"]))
+
+    if updates:
+        db.executemany("UPDATE inventario_items SET estado = ? WHERE id = ?", updates)
+        db.commit()
 
 
 def _ensure_historial_actas_numero_column():
@@ -353,17 +393,8 @@ def _ensure_historial_actas_numero_column():
 
 
 def _ensure_historial_actas_numero_unique_by_type():
-    db = get_db()
-    # El esquema nuevo permite mismo numero_acta en tipos diferentes.
-    db.execute("DROP INDEX IF EXISTS idx_historial_actas_numero_acta")
-    db.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_tipo_numero_acta
-        ON historial_actas(tipo_acta, numero_acta)
-        WHERE numero_acta IS NOT NULL AND TRIM(numero_acta) != ''
-        """
-    )
-    db.commit()
+    _ensure_historial_actas_numero_unique_by_type_runtime()
+    get_db().commit()
 
 
 def _ensure_historial_actas_template_columns():
@@ -437,6 +468,116 @@ def _ensure_actas_sequence_by_type_table_runtime():
             actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (tipo_acta, anio)
         )
+        """
+    )
+    db.commit()
+
+
+def _ensure_historial_actas_table_without_global_unique_runtime():
+    """Reconstruye historial_actas si quedó con UNIQUE global en numero_acta."""
+    db = get_db()
+    has_global_unique_numero = False
+    for idx in db.execute("PRAGMA index_list(historial_actas)").fetchall():
+        if not int(idx["unique"] or 0):
+            continue
+        idx_name = str(idx["name"] or "").strip()
+        if not idx_name:
+            continue
+        cols = [
+            str(col["name"] or "").strip().lower()
+            for col in db.execute(f"PRAGMA index_info({idx_name})").fetchall()
+        ]
+        if cols == ["numero_acta"]:
+            has_global_unique_numero = True
+            break
+
+    if not has_global_unique_numero:
+        table_sql_row = db.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'historial_actas'"
+        ).fetchone()
+        table_sql = str((table_sql_row["sql"] if table_sql_row else "") or "")
+        normalized_sql = " ".join(table_sql.upper().replace('"', "").split())
+        has_global_unique_numero = (
+            "NUMERO_ACTA TEXT UNIQUE" in normalized_sql
+            or "UNIQUE(NUMERO_ACTA)" in normalized_sql
+            or "UNIQUE (NUMERO_ACTA)" in normalized_sql
+        )
+
+    if not has_global_unique_numero:
+        return
+
+    existing_columns = {row["name"] for row in db.execute("PRAGMA table_info(historial_actas)").fetchall()}
+    if "plantilla_hash" not in existing_columns:
+        db.execute("ALTER TABLE historial_actas ADD COLUMN plantilla_hash TEXT")
+        existing_columns.add("plantilla_hash")
+    if "plantilla_snapshot_path" not in existing_columns:
+        db.execute("ALTER TABLE historial_actas ADD COLUMN plantilla_snapshot_path TEXT")
+        existing_columns.add("plantilla_snapshot_path")
+
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS historial_actas_tmp (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo_acta TEXT NOT NULL,
+                numero_acta TEXT,
+                fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                datos_json TEXT,
+                docx_path TEXT,
+                pdf_path TEXT,
+                plantilla_hash TEXT,
+                plantilla_snapshot_path TEXT
+            )
+            """
+        )
+
+        db.execute(
+            """
+            INSERT INTO historial_actas_tmp (
+                id,
+                tipo_acta,
+                numero_acta,
+                fecha,
+                datos_json,
+                docx_path,
+                pdf_path,
+                plantilla_hash,
+                plantilla_snapshot_path
+            )
+            SELECT
+                id,
+                tipo_acta,
+                numero_acta,
+                fecha,
+                datos_json,
+                docx_path,
+                pdf_path,
+                plantilla_hash,
+                plantilla_snapshot_path
+            FROM historial_actas
+            """
+        )
+
+        db.execute("DROP TABLE historial_actas")
+        db.execute("ALTER TABLE historial_actas_tmp RENAME TO historial_actas")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_historial_actas_plantilla_snapshot_path ON historial_actas(plantilla_snapshot_path)")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _ensure_historial_actas_numero_unique_by_type_runtime():
+    """Asegura en runtime que la unicidad de numero_acta sea por tipo_acta."""
+    db = get_db()
+    _ensure_historial_actas_table_without_global_unique_runtime()
+    db.execute("DROP INDEX IF EXISTS idx_historial_actas_numero_acta")
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_tipo_numero_acta
+        ON historial_actas(tipo_acta, numero_acta)
+        WHERE numero_acta IS NOT NULL AND TRIM(numero_acta) != ''
         """
     )
     db.commit()
@@ -1130,12 +1271,29 @@ def _ensure_inventory_search_indexes():
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_cod_esbye ON inventario_items(cod_esbye)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_area_id ON inventario_items(area_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_item_numero_id ON inventario_items(item_numero, id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_cuenta ON inventario_items(cuenta)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_estado ON inventario_items(estado)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_marca ON inventario_items(marca)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_modelo ON inventario_items(modelo)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_serie ON inventario_items(serie)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_usuario_final ON inventario_items(usuario_final)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_observacion ON inventario_items(observacion)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_desc_esbye ON inventario_items(descripcion_esbye)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_marca_esbye ON inventario_items(marca_esbye)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_modelo_esbye ON inventario_items(modelo_esbye)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_serie_esbye ON inventario_items(serie_esbye)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_ubicacion_esbye ON inventario_items(ubicacion_esbye)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_observacion_esbye ON inventario_items(observacion_esbye)")
     db.commit()
 
 
 def _ensure_inventory_fts():
     db = get_db()
     try:
+        db.execute("DROP TRIGGER IF EXISTS inventario_items_ai")
+        db.execute("DROP TRIGGER IF EXISTS inventario_items_ad")
+        db.execute("DROP TRIGGER IF EXISTS inventario_items_au")
+        db.execute("DROP TABLE IF EXISTS inventario_items_fts")
         db.execute(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS inventario_items_fts
@@ -1143,6 +1301,20 @@ def _ensure_inventory_fts():
                 descripcion,
                 cod_inventario,
                 cod_esbye,
+                cuenta,
+                estado,
+                marca,
+                modelo,
+                serie,
+                usuario_final,
+                ubicacion,
+                observacion,
+                descripcion_esbye,
+                marca_esbye,
+                modelo_esbye,
+                serie_esbye,
+                ubicacion_esbye,
+                observacion_esbye,
                 content='inventario_items',
                 content_rowid='id'
             )
@@ -1153,8 +1325,18 @@ def _ensure_inventory_fts():
             CREATE TRIGGER IF NOT EXISTS inventario_items_ai
             AFTER INSERT ON inventario_items
             BEGIN
-                INSERT INTO inventario_items_fts(rowid, descripcion, cod_inventario, cod_esbye)
-                VALUES (new.id, new.descripcion, new.cod_inventario, new.cod_esbye);
+                INSERT INTO inventario_items_fts(
+                    rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
+                    marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
+                    ubicacion_esbye, observacion_esbye
+                )
+                VALUES (
+                    new.id, new.descripcion, new.cod_inventario, new.cod_esbye, new.cuenta, new.estado,
+                    new.marca, new.modelo, new.serie, new.usuario_final, new.ubicacion, new.observacion,
+                    new.descripcion_esbye, new.marca_esbye, new.modelo_esbye, new.serie_esbye,
+                    new.ubicacion_esbye, new.observacion_esbye
+                );
             END
             """
         )
@@ -1163,8 +1345,18 @@ def _ensure_inventory_fts():
             CREATE TRIGGER IF NOT EXISTS inventario_items_ad
             AFTER DELETE ON inventario_items
             BEGIN
-                INSERT INTO inventario_items_fts(inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye)
-                VALUES('delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye);
+                INSERT INTO inventario_items_fts(
+                    inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
+                    marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
+                    ubicacion_esbye, observacion_esbye
+                )
+                VALUES (
+                    'delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye, old.cuenta, old.estado,
+                    old.marca, old.modelo, old.serie, old.usuario_final, old.ubicacion, old.observacion,
+                    old.descripcion_esbye, old.marca_esbye, old.modelo_esbye, old.serie_esbye,
+                    old.ubicacion_esbye, old.observacion_esbye
+                );
             END
             """
         )
@@ -1173,36 +1365,66 @@ def _ensure_inventory_fts():
             CREATE TRIGGER IF NOT EXISTS inventario_items_au
             AFTER UPDATE ON inventario_items
             BEGIN
-                INSERT INTO inventario_items_fts(inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye)
-                VALUES('delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye);
-                INSERT INTO inventario_items_fts(rowid, descripcion, cod_inventario, cod_esbye)
-                VALUES (new.id, new.descripcion, new.cod_inventario, new.cod_esbye);
+                INSERT INTO inventario_items_fts(
+                    inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
+                    marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
+                    ubicacion_esbye, observacion_esbye
+                )
+                VALUES (
+                    'delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye, old.cuenta, old.estado,
+                    old.marca, old.modelo, old.serie, old.usuario_final, old.ubicacion, old.observacion,
+                    old.descripcion_esbye, old.marca_esbye, old.modelo_esbye, old.serie_esbye,
+                    old.ubicacion_esbye, old.observacion_esbye
+                );
+                INSERT INTO inventario_items_fts(
+                    rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
+                    marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
+                    ubicacion_esbye, observacion_esbye
+                )
+                VALUES (
+                    new.id, new.descripcion, new.cod_inventario, new.cod_esbye, new.cuenta, new.estado,
+                    new.marca, new.modelo, new.serie, new.usuario_final, new.ubicacion, new.observacion,
+                    new.descripcion_esbye, new.marca_esbye, new.modelo_esbye, new.serie_esbye,
+                    new.ubicacion_esbye, new.observacion_esbye
+                );
             END
             """
         )
-        fts_count_row = db.execute("SELECT COUNT(1) AS total FROM inventario_items_fts").fetchone()
-        items_count_row = db.execute("SELECT COUNT(1) AS total FROM inventario_items").fetchone()
-        if (fts_count_row["total"] or 0) != (items_count_row["total"] or 0):
-            db.execute("INSERT INTO inventario_items_fts(inventario_items_fts) VALUES ('rebuild')")
+        db.execute("INSERT INTO inventario_items_fts(inventario_items_fts) VALUES ('rebuild')")
         db.commit()
     except sqlite3.OperationalError:
         # Some SQLite builds might not include FTS5; LIKE fallback remains active.
         db.rollback()
 
 
-def _has_inventory_fts():
+def _has_inventory_fts(required_columns=None):
     db = get_db()
     row = db.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'inventario_items_fts'"
     ).fetchone()
-    return row is not None
+    if row is None:
+        return False
+    if not required_columns:
+        return True
+
+    fts_columns = {
+        str(col["name"] or "").strip().lower()
+        for col in db.execute("PRAGMA table_info(inventario_items_fts)").fetchall()
+    }
+    required = {str(name).strip().lower() for name in (required_columns or set())}
+    return required.issubset(fts_columns)
 
 
 def _build_fts_query(raw_search):
-    tokens = re.findall(r"[\w\-]+", str(raw_search or ""), flags=re.UNICODE)
+    # Evita que caracteres como '-' generen expresiones invalidas en FTS5
+    # (ej. FJCP-000155 podria interpretarse como operador/columna).
+    tokens = re.findall(r"[A-Za-z0-9_]+", str(raw_search or ""), flags=re.UNICODE)
     if not tokens:
         return ""
-    return " AND ".join([f'{token}*' for token in tokens])
+    safe_tokens = [str(token).replace('"', '""') for token in tokens if str(token).strip()]
+    return " AND ".join([f'"{token}"*' for token in safe_tokens])
 
 
 def _build_inventory_where_clause(filters=None):
@@ -1222,7 +1444,29 @@ def _build_inventory_where_clause(filters=None):
     if filters.get("search"):
         raw_search = filters["search"].strip()
         fts_query = _build_fts_query(raw_search)
-        if fts_query and _has_inventory_fts():
+        required_fts_columns = {
+            "descripcion",
+            "cod_inventario",
+            "cod_esbye",
+            "cuenta",
+            "estado",
+            "marca",
+            "modelo",
+            "serie",
+            "usuario_final",
+            "ubicacion",
+            "observacion",
+            "descripcion_esbye",
+            "marca_esbye",
+            "modelo_esbye",
+            "serie_esbye",
+            "ubicacion_esbye",
+            "observacion_esbye",
+        }
+        if fts_query and not _has_inventory_fts(required_columns=required_fts_columns):
+            _ensure_inventory_fts()
+
+        if fts_query and _has_inventory_fts(required_columns=required_fts_columns):
             where_clauses.append(
                 "i.id IN (SELECT rowid FROM inventario_items_fts WHERE inventario_items_fts MATCH ?)"
             )
@@ -1230,15 +1474,188 @@ def _build_inventory_where_clause(filters=None):
         else:
             token = f"%{raw_search}%"
             where_clauses.append(
-                "(i.descripcion LIKE ? OR i.cod_inventario LIKE ? OR i.cod_esbye LIKE ? OR i.cuenta LIKE ? OR i.ubicacion LIKE ? OR i.marca LIKE ? OR i.modelo LIKE ? OR i.serie LIKE ? OR i.usuario_final LIKE ? OR i.observacion LIKE ? OR i.descripcion_esbye LIKE ? OR i.marca_esbye LIKE ? OR i.modelo_esbye LIKE ? OR i.serie_esbye LIKE ? OR i.ubicacion_esbye LIKE ? OR i.observacion_esbye LIKE ?)"
+                "(i.descripcion LIKE ? OR i.cod_inventario LIKE ? OR i.cod_esbye LIKE ? OR i.cuenta LIKE ? OR i.estado LIKE ? OR i.condicion LIKE ? OR i.ubicacion LIKE ? OR i.marca LIKE ? OR i.modelo LIKE ? OR i.serie LIKE ? OR i.usuario_final LIKE ? OR i.observacion LIKE ? OR i.descripcion_esbye LIKE ? OR i.marca_esbye LIKE ? OR i.modelo_esbye LIKE ? OR i.serie_esbye LIKE ? OR i.ubicacion_esbye LIKE ? OR i.observacion_esbye LIKE ? OR i.fecha_adquisicion LIKE ? OR i.fecha_adquisicion_esbye LIKE ?)"
             )
-            params.extend([token, token, token, token, token, token, token, token, token, token, token, token, token, token, token, token])
+            params.extend([
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+                token,
+            ])
 
     where_sql = ""
     if where_clauses:
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
     return where_sql, params
+
+
+def _normalize_area_lookup_token(value):
+    text = str(value or "").strip().lower()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return re.sub(r"\s+", " ", text)
+
+
+def _extract_compact_aula_code_for_lookup(text):
+    normalized = _normalize_area_lookup_token(text)
+    if not normalized:
+        return ""
+    match = re.search(r"(\d+[a-z]\s*-?\s*\d+)", normalized)
+    if not match:
+        return ""
+    return re.sub(r"\s+", "", match.group(1))
+
+
+def _extract_floor_hint_for_lookup(text):
+    normalized = _normalize_area_lookup_token(text)
+    if "planta baja" in normalized:
+        return "planta baja"
+    if "primer" in normalized and "piso" in normalized:
+        return "primer piso"
+    if "segundo" in normalized and "piso" in normalized:
+        return "segundo piso"
+    if "tercer" in normalized and "piso" in normalized:
+        return "tercer piso"
+    return ""
+
+
+def _build_area_lookup_maps(db):
+    rows = db.execute(
+        """
+        SELECT a.id, a.nombre AS area_nombre, p.nombre AS piso_nombre, b.nombre AS bloque_nombre
+        FROM areas a
+        JOIN pisos p ON p.id = a.piso_id
+        JOIN bloques b ON b.id = p.bloque_id
+        """
+    ).fetchall()
+
+    by_full_name = {}
+    by_area_name = {}
+    candidates = []
+    for row in rows:
+        area_id = int(row["id"])
+        block_name = str(row["bloque_nombre"] or "").strip()
+        floor_name = str(row["piso_nombre"] or "").strip()
+        area_name = str(row["area_nombre"] or "").strip()
+        full_name = " / ".join([part for part in [block_name, floor_name, area_name] if part])
+        full_key = _normalize_area_lookup_token(full_name)
+        if full_key:
+            by_full_name[full_key] = {
+                "id": area_id,
+                "display": full_name,
+            }
+
+        area_key = _normalize_area_lookup_token(area_name)
+        if area_key:
+            by_area_name.setdefault(area_key, []).append(
+                {
+                    "id": area_id,
+                    "display": full_name,
+                }
+            )
+
+        candidates.append(
+            {
+                "id": area_id,
+                "display": full_name,
+                "area_name": _normalize_area_lookup_token(area_name),
+                "floor_name": _normalize_area_lookup_token(floor_name),
+                "block_name": _normalize_area_lookup_token(block_name),
+                "full_name": _normalize_area_lookup_token(f"{block_name} {floor_name} {area_name}"),
+            }
+        )
+
+    return by_full_name, by_area_name, candidates
+
+
+def _resolve_area_from_location_text(raw_location, by_full_name, by_area_name, candidates):
+    normalized_input = _normalize_area_lookup_token(raw_location)
+    if not normalized_input:
+        return None
+
+    direct = by_full_name.get(normalized_input)
+    if direct:
+        return direct
+
+    compact = re.sub(r"\s*/\s*", " / ", normalized_input)
+    direct = by_full_name.get(compact)
+    if direct:
+        return direct
+
+    by_area = by_area_name.get(normalized_input)
+    if by_area and len(by_area) == 1:
+        return by_area[0]
+
+    # Fallback: heurística equivalente al flujo de importación Excel.
+    target_tokens = [token for token in re.split(r"\s+|/|-", normalized_input) if token]
+    target_aula_code = _extract_compact_aula_code_for_lookup(normalized_input)
+    floor_hint = _extract_floor_hint_for_lookup(normalized_input)
+
+    best_match = None
+    best_score = 0
+
+    for candidate in candidates:
+        area_name = candidate.get("area_name") or ""
+        floor_name = candidate.get("floor_name") or ""
+        block_name = candidate.get("block_name") or ""
+        full_name = candidate.get("full_name") or ""
+
+        score = 0
+        if normalized_input == area_name or normalized_input == full_name:
+            score += 30
+        if normalized_input in full_name:
+            score += 10
+
+        area_code = _extract_compact_aula_code_for_lookup(area_name)
+        if target_aula_code and area_code and target_aula_code == area_code:
+            score += 35
+
+        area_tokens = [token for token in re.split(r"\s+|/|-", full_name) if token]
+        token_hits = 0
+        for token in target_tokens:
+            if len(token) < 3:
+                continue
+            if any(token in candidate_token or candidate_token in token for candidate_token in area_tokens):
+                token_hits += 1
+        score += min(token_hits * 2, 16)
+
+        if floor_hint and floor_hint in floor_name:
+            score += 8
+
+        block_letter_match = re.search(r"\d+([a-z])", target_aula_code or "")
+        if block_letter_match:
+            block_letter = block_letter_match.group(1)
+            if f"bloque {block_letter}" in block_name:
+                score += 10
+
+        if score > best_score:
+            best_score = score
+            best_match = candidate
+
+    if best_match and best_score >= 10:
+        return {
+            "id": best_match["id"],
+            "display": best_match["display"],
+        }
+
+    return None
 
 
 def get_inventory_search_diagnostics(search_text=None):
@@ -1461,10 +1878,95 @@ def get_inventory_item(item_id):
     return _row_to_inventory_item(row)
 
 
+def _normalize_catalog_text(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = (
+        text.replace("á", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+        .replace("ü", "u")
+    )
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return " ".join(text.split())
+
+
+def _resolve_catalog_name(raw_value, options):
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+
+    normalized_value = _normalize_catalog_text(value)
+    clean_options = [str(opt or "").strip() for opt in (options or []) if str(opt or "").strip()]
+    if not normalized_value or not clean_options:
+        return value
+
+    exact = next((opt for opt in clean_options if _normalize_catalog_text(opt) == normalized_value), None)
+    if exact:
+        return exact
+
+    contains = next(
+        (
+            opt
+            for opt in clean_options
+            if _normalize_catalog_text(opt) in normalized_value or normalized_value in _normalize_catalog_text(opt)
+        ),
+        None,
+    )
+    if contains:
+        return contains
+
+    target_tokens = [tok for tok in normalized_value.split() if tok]
+    best_option = ""
+    best_score = 0.0
+    for opt in clean_options:
+        opt_norm = _normalize_catalog_text(opt)
+        if not opt_norm:
+            continue
+        opt_tokens = [tok for tok in opt_norm.split() if tok]
+        overlap = sum(
+            1
+            for tok in target_tokens
+            if any(tok in opt_tok or opt_tok in tok for opt_tok in opt_tokens)
+        )
+        score = (overlap / len(target_tokens)) if target_tokens else 0.0
+        if score > best_score:
+            best_score = score
+            best_option = opt
+
+    return best_option if best_score >= 0.6 else value
+
+
+def _get_estado_catalog_options():
+    db = get_db()
+    rows = db.execute(
+        "SELECT nombre FROM param_estados WHERE TRIM(COALESCE(nombre, '')) <> '' ORDER BY nombre ASC"
+    ).fetchall()
+    return [str(row["nombre"]).strip() for row in rows if str(row["nombre"] or "").strip()]
+
+
+def _canonicalize_estado_value(value, estado_options=None):
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    options = estado_options if estado_options is not None else _get_estado_catalog_options()
+    return _resolve_catalog_name(raw, options)
+
+
 def create_inventory_item(payload, commit=True):
     db = get_db()
     fields = {k: payload.get(k) for k in ALLOWED_INVENTORY_FIELDS if k in payload}
     _normalize_inventory_code_fields(fields)
+    if fields.get("estado") not in (None, ""):
+        fields["estado"] = _canonicalize_estado_value(fields.get("estado"))
+    if fields.get("usuario_final") not in (None, ""):
+        fields["usuario_final"] = resolve_or_create_personal_name(
+            fields.get("usuario_final"),
+            create_if_missing=True,
+        )
     fields["cantidad"] = int(fields.get("cantidad") or 1)
     fields["valor"] = float(fields.get("valor")) if fields.get("valor") not in (None, "") else None
     fields["valor_esbye"] = float(fields.get("valor_esbye")) if fields.get("valor_esbye") not in (None, "") else None
@@ -1505,6 +2007,10 @@ def update_inventory_item(item_id, payload):
     for field, value in normalized_payload.items():
         if field not in ALLOWED_INVENTORY_FIELDS:
             continue
+        if field == "estado" and value not in (None, ""):
+            value = _canonicalize_estado_value(value)
+        if field == "usuario_final" and value not in (None, ""):
+            value = resolve_or_create_personal_name(value, create_if_missing=True)
         if field == "cantidad":
             value = int(value or 1)
         if field == "valor":
@@ -1628,9 +2134,12 @@ def bulk_insert_inventory_rows(rows, area_id=None):
     db = get_db()
     normalized_values = []
     insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
+    missing_area_names = set()
+    estado_options = _get_estado_catalog_options()
     try:
         db.execute("BEGIN IMMEDIATE")
         start_item_numero = _next_item_numero_in_tx(db)
+        by_full_name, by_area_name, area_candidates = _build_area_lookup_maps(db)
         for row_index, row in enumerate(rows):
             payload = {
                 "item_numero": start_item_numero + row_index,
@@ -1644,10 +2153,52 @@ def bulk_insert_inventory_rows(rows, area_id=None):
             if area_id and not payload.get("area_id"):
                 payload["area_id"] = area_id
 
-            payload["cantidad"] = int(payload.get("cantidad") or 1)
-            payload["valor"] = float(payload.get("valor")) if payload.get("valor") not in (None, "") else None
-            payload["valor_esbye"] = float(payload.get("valor_esbye")) if payload.get("valor_esbye") not in (None, "") else None
+            if not payload.get("area_id") and payload.get("ubicacion") not in (None, ""):
+                resolved_area = _resolve_area_from_location_text(
+                    payload.get("ubicacion"),
+                    by_full_name,
+                    by_area_name,
+                    area_candidates,
+                )
+                if resolved_area:
+                    payload["area_id"] = resolved_area["id"]
+                    payload["ubicacion"] = resolved_area["display"]
+                else:
+                    missing_area_names.add(str(payload.get("ubicacion") or "").strip())
+
+            if payload.get("usuario_final") not in (None, ""):
+                payload["usuario_final"] = resolve_or_create_personal_name(
+                    payload.get("usuario_final"),
+                    create_if_missing=True,
+                )
+            if payload.get("estado") not in (None, ""):
+                payload["estado"] = _canonicalize_estado_value(payload.get("estado"), estado_options)
+
+            try:
+                payload["cantidad"] = int(payload.get("cantidad") or 1)
+            except (TypeError, ValueError):
+                payload["cantidad"] = 1
+
+            for money_field in ("valor", "valor_esbye"):
+                raw_money = payload.get(money_field)
+                if raw_money in (None, ""):
+                    payload[money_field] = None
+                    continue
+                text_money = str(raw_money).strip().replace(" ", "")
+                if "," in text_money and "." in text_money:
+                    text_money = text_money.replace(".", "").replace(",", ".")
+                elif "," in text_money:
+                    text_money = text_money.replace(",", ".")
+                try:
+                    payload[money_field] = float(text_money)
+                except (TypeError, ValueError):
+                    payload[money_field] = None
+
             normalized_values.append(tuple(payload.get(column) for column in insert_columns))
+
+        missing_area_names.discard("")
+        if missing_area_names:
+            raise ValueError(json.dumps(sorted(missing_area_names), ensure_ascii=False))
 
         if normalized_values:
             placeholders = ", ".join(["?"] * len(insert_columns))
@@ -1661,11 +2212,14 @@ def bulk_insert_inventory_rows(rows, area_id=None):
         raise
 
     if not normalized_values:
-        return []
+        return {"inserted_ids": [], "missing_area_names": []}
 
     last_insert_rowid = db.execute("SELECT last_insert_rowid() AS last_id").fetchone()["last_id"]
     first_insert_rowid = last_insert_rowid - len(normalized_values) + 1
-    return list(range(first_insert_rowid, last_insert_rowid + 1))
+    return {
+        "inserted_ids": list(range(first_insert_rowid, last_insert_rowid + 1)),
+        "missing_area_names": [],
+    }
 
 
 def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
@@ -1673,6 +2227,7 @@ def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
     insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
     normalized_values = []
     skipped = 0
+    estado_options = _get_estado_catalog_options()
 
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -1784,6 +2339,9 @@ def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
 
             for date_field in ("fecha_adquisicion", "fecha_adquisicion_esbye"):
                 payload[date_field] = _normalize_import_date(payload.get(date_field))
+
+            if payload.get("estado") not in (None, ""):
+                payload["estado"] = _canonicalize_estado_value(payload.get("estado"), estado_options)
 
             normalized_values.append(tuple(payload.get(column) for column in insert_columns))
 
@@ -1990,7 +2548,7 @@ def _normalize_personal_name(value):
         "lic", "licenciado", "licenciada", "abg", "abogada", "abogado",
         "arq", "arquitecto", "arquitecta", "tec", "tecnico", "tecnica",
         "sr", "sra", "srta", "msc", "mg", "mgs", "mgtr", "mtr", "mts", "mtro", "mt",
-        "prof", "profa", "tlgo", "tlga", "ts", "phd",
+        "mrt", "prof", "profa", "tlgo", "tlga", "ts", "phd",
     }
     while tokens and tokens[0] in prefixes:
         tokens.pop(0)
@@ -2119,6 +2677,7 @@ def save_historial_acta(
     plantilla_hash=None,
     plantilla_snapshot_path=None,
 ):
+    _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     stored_docx_path = _to_storage_relative_path(docx_path)
     stored_pdf_path = _to_storage_relative_path(pdf_path)
@@ -2149,6 +2708,50 @@ def save_historial_acta(
     return cursor.lastrowid
 
 
+def update_historial_acta(
+    acta_id,
+    tipo_acta,
+    datos_json,
+    docx_path,
+    pdf_path,
+    numero_acta=None,
+    plantilla_hash=None,
+    plantilla_snapshot_path=None,
+):
+    _ensure_historial_actas_numero_unique_by_type_runtime()
+    db = get_db()
+    stored_docx_path = _to_storage_relative_path(docx_path)
+    stored_pdf_path = _to_storage_relative_path(pdf_path)
+    stored_snapshot_path = _to_storage_relative_path(plantilla_snapshot_path)
+    cursor = db.execute(
+        """
+        UPDATE historial_actas
+        SET
+            tipo_acta = ?,
+            numero_acta = ?,
+            fecha = CURRENT_TIMESTAMP,
+            datos_json = ?,
+            docx_path = ?,
+            pdf_path = ?,
+            plantilla_hash = ?,
+            plantilla_snapshot_path = ?
+        WHERE id = ?
+        """,
+        (
+            tipo_acta,
+            numero_acta,
+            datos_json,
+            stored_docx_path,
+            stored_pdf_path,
+            plantilla_hash,
+            stored_snapshot_path,
+            int(acta_id),
+        ),
+    )
+    db.commit()
+    return int(cursor.rowcount or 0)
+
+
 def _split_numero_acta(numero_acta):
     text = str(numero_acta or "").strip()
     if "-" not in text:
@@ -2165,6 +2768,7 @@ def _normalize_tipo_acta(tipo_acta):
 
 
 def get_max_numero_acta_for_year(year, tipo_acta=None):
+    _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     target_year = int(year)
     where_tipo = ""
@@ -2194,6 +2798,7 @@ def get_max_numero_acta_for_year(year, tipo_acta=None):
 
 def get_next_numero_acta(year, tipo_acta=None):
     _ensure_actas_sequence_by_type_table_runtime()
+    _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     target_year = int(year)
     tipo_key = _normalize_tipo_acta(tipo_acta)
@@ -2209,6 +2814,7 @@ def get_next_numero_acta(year, tipo_acta=None):
 
 def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None):
     _ensure_actas_sequence_by_type_table_runtime()
+    _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     target_year = int(year)
     tipo_key = _normalize_tipo_acta(tipo_acta)
@@ -2263,6 +2869,7 @@ def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None):
 
 
 def numero_acta_exists(numero_acta, tipo_acta=None):
+    _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     numero = str(numero_acta or "").strip()
     if tipo_acta is None:

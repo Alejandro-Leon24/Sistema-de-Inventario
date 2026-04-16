@@ -24,11 +24,11 @@ from database.historial_repository import (
     get_max_numero_acta_for_year,
     get_next_numero_acta,
     get_next_numero_informe_area,
-    numero_acta_exists,
     reserve_numero_acta,
     reserve_numeros_informe_area,
     get_or_create_personal,
     save_historial_acta,
+    update_historial_acta,
 )
 from database.db import get_db
 
@@ -700,6 +700,27 @@ def api_generar_informe():
 
     current_year = datetime.now().year
     tipo_norm = str(tipo or "").strip().lower() or "entrega"
+    editing_acta_id = _parse_positive_int(payload.get("editing_acta_id"))
+    editing_row = None
+    if editing_acta_id:
+        editing_row = get_db().execute(
+            """
+            SELECT id, tipo_acta, numero_acta
+            FROM historial_actas
+            WHERE id = ?
+            """,
+            (editing_acta_id,),
+        ).fetchone()
+        if not editing_row:
+            editing_acta_id = None
+        elif str(editing_row["tipo_acta"] or "").strip().lower() != tipo_norm:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "La acta en edición no corresponde al tipo actual.",
+                }
+            ), 400
+
     requested_numero_acta = str(context_data.get("numero_acta") or "").strip()
     numero_acta = requested_numero_acta or get_next_numero_acta(current_year, tipo_acta=tipo_norm)
 
@@ -726,74 +747,66 @@ def api_generar_informe():
             }
         ), 400
 
+    context_data["numero_acta"] = numero_acta
+    context_data_raw["numero_acta"] = numero_acta
+
     tabla_data = payload.get("datos_tabla", [])
     tabla_columnas = payload.get("datos_columnas", [])
     force_same_acta = bool(payload.get("force_same_acta"))
 
     if not vista_previa and not force_same_acta:
         db = get_db()
-        last_row = db.execute(
-            """
-            SELECT numero_acta, datos_json
-            FROM historial_actas
-            WHERE LOWER(COALESCE(tipo_acta, '')) = LOWER(?)
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (tipo_norm,),
-        ).fetchone()
-        if last_row and str(last_row["datos_json"] or "").strip():
+        duplicate_query = [
+            "SELECT id, numero_acta, datos_json",
+            "FROM historial_actas",
+            "WHERE LOWER(COALESCE(tipo_acta, '')) = LOWER(?)",
+        ]
+        duplicate_params = [tipo_norm]
+        if editing_acta_id:
+            duplicate_query.append("AND id != ?")
+            duplicate_params.append(editing_acta_id)
+        duplicate_query.extend(["ORDER BY id DESC"])
+        history_rows = db.execute("\n".join(duplicate_query), tuple(duplicate_params)).fetchall()
+
+        current_form = dict(context_data_raw or {})
+        current_form.pop("numero_acta", None)
+        current_signature = {
+            "formulario": current_form,
+            "tabla": tabla_data,
+            "columnas": tabla_columnas,
+        }
+        current_signature_json = json.dumps(current_signature, ensure_ascii=False, sort_keys=True)
+
+        similar_numero_acta = None
+        for row in history_rows:
+            if not str(row["datos_json"] or "").strip():
+                continue
             try:
-                previous_payload = json.loads(last_row["datos_json"])
+                previous_payload = json.loads(row["datos_json"])
             except Exception:
-                previous_payload = {}
+                continue
 
-            current_form = dict(context_data_raw or {})
             previous_form = dict((previous_payload or {}).get("formulario") or {})
-            current_form.pop("numero_acta", None)
             previous_form.pop("numero_acta", None)
-
-            current_signature = {
-                "formulario": current_form,
-                "tabla": tabla_data,
-                "columnas": tabla_columnas,
-            }
             previous_signature = {
                 "formulario": previous_form,
                 "tabla": (previous_payload or {}).get("tabla") or [],
                 "columnas": (previous_payload or {}).get("columnas") or [],
             }
+            previous_signature_json = json.dumps(previous_signature, ensure_ascii=False, sort_keys=True)
+            if previous_signature_json == current_signature_json:
+                similar_numero_acta = str(row["numero_acta"] or "").strip() or None
+                break
 
-            if json.dumps(current_signature, ensure_ascii=False, sort_keys=True) == json.dumps(previous_signature, ensure_ascii=False, sort_keys=True):
-                return jsonify(
-                    {
-                        "success": False,
-                        "duplicate_previous": True,
-                        "previous_numero_acta": str(last_row["numero_acta"] or "").strip() or None,
-                        "error": "Esta acta es igual a la última guardada para este tipo. ¿Desea guardarla de todas formas?",
-                    }
-                ), 409
-
-    if not vista_previa:
-        try:
-            numero_acta = reserve_numero_acta(
-                current_year,
-                preferred_numero_acta=numero_acta if requested_numero_acta else None,
-                tipo_acta=tipo_norm,
-            )
-        except ValueError:
+        if similar_numero_acta:
             return jsonify(
                 {
                     "success": False,
-                    "error": (
-                        f"El numero de acta {numero_acta} no se puede reservar porque ya existe o es inválido. "
-                        "Use otro número o deje el campo vacío para asignación automática."
-                    ),
+                    "duplicate_previous": True,
+                    "previous_numero_acta": similar_numero_acta,
+                    "error": "Esta acta es igual a una acta guardada previamente para este tipo. ¿Desea guardarla de todas formas?",
                 }
             ), 409
-
-    context_data["numero_acta"] = numero_acta
-    context_data_raw["numero_acta"] = numero_acta
 
     entrega_selected_ids = []
 
@@ -809,7 +822,6 @@ def api_generar_informe():
 
     if not vista_previa and tipo_norm == "entrega":
         required_entrega = [
-            "numero_acta",
             "fecha_corte",
             "fecha_emision",
             "accion_personal",
@@ -850,7 +862,6 @@ def api_generar_informe():
 
     if not vista_previa and tipo_norm == "recepcion":
         required_recepcion = [
-            "numero_acta",
             "entregado_por",
             "rol_entrega",
             "recibido_por",
@@ -922,6 +933,37 @@ def api_generar_informe():
         doc_name = f"acta_{tipo}"
         generate_pdf = False
         tipo_slug = str(tipo).replace("_", "-").strip().lower() or "entrega"
+
+        if not vista_previa:
+            try:
+                preserve_edit_numero = bool(
+                    editing_row
+                    and requested_numero_acta
+                    and str(editing_row["numero_acta"] or "").strip() == requested_numero_acta
+                )
+                if preserve_edit_numero:
+                    numero_acta = requested_numero_acta
+                else:
+                    numero_acta = reserve_numero_acta(
+                        current_year,
+                        preferred_numero_acta=numero_acta if requested_numero_acta else None,
+                        tipo_acta=tipo_norm,
+                    )
+                context_data["numero_acta"] = numero_acta
+                context_data_raw["numero_acta"] = numero_acta
+            except ValueError:
+                next_numero = get_next_numero_acta(current_year, tipo_acta=tipo_norm)
+                return jsonify(
+                    {
+                        "success": False,
+                        "error": (
+                            f"El número de acta {numero_acta} ya no está disponible. "
+                            f"Use {next_numero} o deje el campo vacío para asignación automática."
+                        ),
+                        "code": "numero_acta_unavailable",
+                        "next_numero_acta": next_numero,
+                    }
+                ), 409
 
         if not vista_previa:
             folder_name = f"acta-{tipo_slug}"
@@ -1088,15 +1130,27 @@ def api_generar_informe():
                     "variables": plantilla_variables,
                 },
             }
-            save_historial_acta(
-                tipo,
-                json.dumps(datos_completos),
-                docx_path,
-                pdf_path,
-                numero_acta=numero_acta,
-                plantilla_hash=plantilla_hash,
-                plantilla_snapshot_path=plantilla_snapshot_path,
-            )
+            if editing_acta_id and editing_row:
+                update_historial_acta(
+                    editing_acta_id,
+                    tipo,
+                    json.dumps(datos_completos),
+                    docx_path,
+                    pdf_path,
+                    numero_acta=numero_acta,
+                    plantilla_hash=plantilla_hash,
+                    plantilla_snapshot_path=plantilla_snapshot_path,
+                )
+            else:
+                save_historial_acta(
+                    tipo,
+                    json.dumps(datos_completos),
+                    docx_path,
+                    pdf_path,
+                    numero_acta=numero_acta,
+                    plantilla_hash=plantilla_hash,
+                    plantilla_snapshot_path=plantilla_snapshot_path,
+                )
             publish_event("actas_changed", {"tipo": tipo})
         else:
             with PREVIEW_CACHE_LOCK:
@@ -1123,7 +1177,29 @@ def api_generar_informe():
                 "message": "Archivo generado exitosamente en " + (docx_path if docx_path else "ruta desconocida"),
             }
         )
+    except sqlite3.IntegrityError:
+        try:
+            get_db().rollback()
+        except Exception:
+            pass
+        logger.exception("Conflicto de integridad al guardar acta tipo=%s numero=%s", tipo, numero_acta)
+        next_numero = get_next_numero_acta(current_year, tipo_acta=tipo_norm)
+        return jsonify(
+            {
+                "success": False,
+                "error": (
+                    f"El número de acta {numero_acta} ya fue usado por otra operación. "
+                    f"Se sugiere usar {next_numero}."
+                ),
+                "code": "numero_acta_conflict",
+                "next_numero_acta": next_numero,
+            }
+        ), 409
     except Exception as error:
+        try:
+            get_db().rollback()
+        except Exception:
+            pass
         logger.exception("Error no controlado generando informe tipo=%s", tipo)
         return jsonify({"success": False, "error": str(error)}), 500
 
@@ -1160,6 +1236,7 @@ def api_numero_acta_siguiente():
 def api_numero_acta_validar():
     numero_acta = str(request.args.get("numero_acta") or "").strip()
     tipo_acta = str(request.args.get("tipo_acta") or "entrega").strip().lower()
+    editing_acta_id = _parse_positive_int(request.args.get("editing_acta_id"))
     current_year = datetime.now().year
 
     if not NUMERO_ACTA_PATTERN.match(numero_acta):
@@ -1172,7 +1249,19 @@ def api_numero_acta_validar():
         return jsonify({"success": True, "valid": False, "reason": "year"})
 
     max_for_year = get_max_numero_acta_for_year(current_year, tipo_acta=tipo_acta)
-    exists = numero_acta_exists(numero_acta, tipo_acta=tipo_acta)
+    db = get_db()
+    exists_query = [
+        "SELECT id",
+        "FROM historial_actas",
+        "WHERE LOWER(COALESCE(tipo_acta, '')) = LOWER(?)",
+        "AND numero_acta = ?",
+    ]
+    exists_params = [tipo_acta, numero_acta]
+    if editing_acta_id:
+        exists_query.append("AND id != ?")
+        exists_params.append(editing_acta_id)
+    exists_query.extend(["LIMIT 1"])
+    exists = bool(db.execute("\n".join(exists_query), tuple(exists_params)).fetchone())
 
     return jsonify(
         {

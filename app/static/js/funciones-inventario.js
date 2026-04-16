@@ -122,7 +122,7 @@ async function initInventoryPage() {
 		activeBlockId: "",
 		activeFloorId: "",
 		activeAreaId: "",
-		order: "asc",
+		order: "desc",
 		search: "",
 		page: 1,
 		perPage: 50,
@@ -391,6 +391,12 @@ async function initInventoryPage() {
 
 	function renderSelectWithQuickAdd(select, config, selectedValue = "") {
 		if (!select || !config) return;
+		const normalizeSelectComparable = (value) =>
+			normalizeText(value)
+				.replace(/[^a-z0-9\s]/g, " ")
+				.replace(/\s+/g, " ")
+				.trim();
+
 		select.innerHTML = `<option value="">${config.placeholder}</option>`;
 		(config.items || []).forEach((item) => {
 			const option = document.createElement("option");
@@ -402,20 +408,28 @@ async function initInventoryPage() {
 		addOption.value = INLINE_ADD_OPTION_VALUE;
 		addOption.textContent = config.quickLabel;
 		select.appendChild(addOption);
-		const normalizedSelected = normalizeText(selectedValue);
+		const normalizedSelected = normalizeSelectComparable(selectedValue);
 		let resolved = "";
 		if (normalizedSelected) {
 			const options = Array.from(select.options || []).filter((opt) => opt.value !== INLINE_ADD_OPTION_VALUE && opt.value !== "");
-			let match = options.find((opt) => normalizeText(opt.value) === normalizedSelected || normalizeText(opt.textContent) === normalizedSelected);
+			let match = options.find(
+				(opt) =>
+					normalizeSelectComparable(opt.value) === normalizedSelected
+					|| normalizeSelectComparable(opt.textContent) === normalizedSelected
+			);
 			if (!match) {
-				match = options.find((opt) => normalizeText(opt.textContent).includes(normalizedSelected) || normalizedSelected.includes(normalizeText(opt.value)));
+				match = options.find(
+					(opt) =>
+						normalizeSelectComparable(opt.textContent).includes(normalizedSelected)
+						|| normalizedSelected.includes(normalizeSelectComparable(opt.value))
+				);
 			}
 			if (!match) {
 				const selectedTokens = normalizedSelected.split(/\s+/).filter(Boolean);
 				let best = null;
 				let bestScore = 0;
 				options.forEach((opt) => {
-					const optNorm = normalizeText(opt.value || opt.textContent);
+					const optNorm = normalizeSelectComparable(opt.value || opt.textContent);
 					if (!optNorm) return;
 					const optTokens = optNorm.split(/\s+/).filter(Boolean);
 					const overlap = selectedTokens.filter((token) => optTokens.some((item) => item.includes(token) || token.includes(item))).length;
@@ -605,6 +619,82 @@ async function initInventoryPage() {
 			.trim();
 	}
 
+	function resolveAreaFromPastedText(rawText) {
+		const input = normalizeText(rawText);
+		if (!input) return null;
+
+		const targetTokens = input.split(/[\s/\-]+/).filter(Boolean);
+		const extractCompactAulaCode = (text) => {
+			const normalized = normalizeText(text);
+			const match = normalized.match(/(\d+[a-z]\s*-?\s*\d+)/);
+			return match ? match[1].replace(/\s+/g, "") : "";
+		};
+		const extractFloorHint = (text) => {
+			const normalized = normalizeText(text);
+			if (normalized.includes("planta baja")) return "planta baja";
+			if (normalized.includes("primer") && normalized.includes("piso")) return "primer piso";
+			if (normalized.includes("segundo") && normalized.includes("piso")) return "segundo piso";
+			if (normalized.includes("tercer") && normalized.includes("piso")) return "tercer piso";
+			return "";
+		};
+
+		const targetAulaCode = extractCompactAulaCode(input);
+		const floorHint = extractFloorHint(input);
+		let best = null;
+		let bestScore = 0;
+
+		flattenAreas().forEach((entry) => {
+			const areaName = normalizeText(entry.area_nombre);
+			const floorName = normalizeText(entry.piso_nombre);
+			const blockName = normalizeText(entry.bloque_nombre);
+			const fullName = `${blockName} ${floorName} ${areaName}`.trim();
+
+			let score = 0;
+			if (input === areaName || input === fullName) score += 30;
+			if (fullName.includes(input)) score += 10;
+
+			const areaCode = extractCompactAulaCode(areaName);
+			if (targetAulaCode && areaCode && targetAulaCode === areaCode) score += 35;
+
+			const areaTokens = fullName.split(/[\s/\-]+/).filter(Boolean);
+			let tokenHits = 0;
+			targetTokens.forEach((token) => {
+				if (token.length < 3) return;
+				if (areaTokens.some((candidate) => token.includes(candidate) || candidate.includes(token))) {
+					tokenHits += 1;
+				}
+			});
+			score += Math.min(tokenHits * 2, 16);
+
+			if (floorHint && floorName.includes(floorHint)) score += 8;
+
+			const blockLetterMatch = (targetAulaCode || "").match(/\d+([a-z])/);
+			if (blockLetterMatch && blockName.includes(`bloque ${blockLetterMatch[1]}`)) {
+				score += 10;
+			}
+
+			if (score > bestScore) {
+				bestScore = score;
+				best = entry;
+			}
+		});
+
+		return bestScore >= 10 ? best : null;
+	}
+
+	function offerOpenSettingsForMissingAreas(missingAreas) {
+		const unique = Array.from(new Set((missingAreas || []).map((x) => String(x || "").trim()).filter(Boolean)));
+		if (!unique.length) return;
+		const preview = unique.slice(0, 5).join(", ");
+		const suffix = unique.length > 5 ? "..." : "";
+		const goToSettings = window.confirm(
+			`No se encontraron estas ubicaciones/areas: ${preview}${suffix}. ¿Desea ir a Configuración para registrarlas ahora?`
+		);
+		if (goToSettings) {
+			window.open("/ajustes", "_blank", "noopener,noreferrer");
+		}
+	}
+
 	function toInputDate(value) {
 		const raw = String(value || "").trim();
 		if (!raw) return "";
@@ -706,6 +796,12 @@ async function initInventoryPage() {
 
 			if (match) {
 				input.value = match.value;
+			} else if (field === "usuario_final") {
+				const dynamicOption = document.createElement("option");
+				dynamicOption.value = value;
+				dynamicOption.textContent = value;
+				input.appendChild(dynamicOption);
+				input.value = value;
 			}
 			return;
 		}
@@ -1492,6 +1588,9 @@ async function initInventoryPage() {
 			await loadItems();
 			notify("Pegado desde Excel aplicado correctamente.");
 		} catch (error) {
+			if (error?.payload?.code === "area_not_found") {
+				offerOpenSettingsForMissingAreas(error?.payload?.missing_areas || []);
+			}
 			notify(error.message, true);
 		}
 	});
@@ -1535,6 +1634,20 @@ if (nodes.excelSingleRow) {
 						assignPastedValue(input, first[idx]);
 					}
 				});
+
+				const pastedLocation = String(first[9] ?? "").trim();
+				if (pastedLocation) {
+					const resolvedArea = resolveAreaFromPastedText(pastedLocation);
+					if (resolvedArea && nodes.modalAreaSelect) {
+						nodes.modalAreaSelect.value = String(resolvedArea.id);
+						if (nodes.modalUbicacion) {
+							nodes.modalUbicacion.value = resolvedArea.nombre;
+						}
+					} else {
+						offerOpenSettingsForMissingAreas([pastedLocation]);
+					}
+				}
+
 				if (nodes.modalUbicacion && !nodes.modalUbicacion.value.trim()) {
 					syncModalLocationFromSelection();
 				}
