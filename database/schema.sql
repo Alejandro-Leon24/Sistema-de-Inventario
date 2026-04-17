@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS administradores (
 CREATE TABLE IF NOT EXISTS historial_actas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tipo_acta TEXT NOT NULL,
-    numero_acta TEXT UNIQUE,
+    numero_acta TEXT,
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     datos_json TEXT,
     docx_path TEXT,
@@ -208,9 +208,26 @@ CREATE TABLE IF NOT EXISTS historial_actas (
 );
 
 CREATE INDEX IF NOT EXISTS idx_historial_actas_plantilla_snapshot_path ON historial_actas(plantilla_snapshot_path);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_tipo_numero_acta
+ON historial_actas(tipo_acta, numero_acta)
+WHERE numero_acta IS NOT NULL AND TRIM(numero_acta) != '';
 
 CREATE TABLE IF NOT EXISTS secuencia_informes_area (
     anio INTEGER PRIMARY KEY,
     ultimo_numero INTEGER NOT NULL DEFAULT 0,
     actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS secuencia_actas (
+    anio INTEGER PRIMARY KEY,
+    ultimo_numero INTEGER NOT NULL DEFAULT 0,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS secuencia_actas_tipo (
+    tipo_acta TEXT NOT NULL,
+    anio INTEGER NOT NULL,
+    ultimo_numero INTEGER NOT NULL DEFAULT 0,
+    actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tipo_acta, anio)
 );

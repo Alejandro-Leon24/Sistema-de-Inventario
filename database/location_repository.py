@@ -1,4 +1,4 @@
-from database.controller import (
+from database.services.locations_service import (
     create_area,
     create_block,
     create_floor,

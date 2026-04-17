@@ -839,66 +839,9 @@ def _seed_default_param_values():
 
 
 def get_structure(include_area_details=False):
-    db = get_db()
-    blocks = db.execute(
-        "SELECT id, nombre, descripcion, orden FROM bloques ORDER BY orden, id"
-    ).fetchall()
-    floors = db.execute(
-        "SELECT id, bloque_id, nombre, descripcion, orden FROM pisos ORDER BY orden, id"
-    ).fetchall()
-    area_select = ["id", "piso_id", "nombre", "descripcion", "orden"]
-    if include_area_details:
-        area_select.extend(AREA_DETAIL_COLUMNS)
-    areas = db.execute(
-        f"""
-        SELECT
-            {', '.join(area_select)}
-        FROM areas
-        ORDER BY orden, id
-        """
-    ).fetchall()
+    from database.services.locations_service import get_structure as _get_structure
 
-    floors_by_block = {}
-    for floor in floors:
-        floors_by_block.setdefault(floor["bloque_id"], []).append(
-            {
-                "id": floor["id"],
-                "nombre": floor["nombre"],
-                "descripcion": floor["descripcion"],
-                "orden": floor["orden"],
-                "areas": [],
-            }
-        )
-
-    floor_ref = {}
-    for floor_list in floors_by_block.values():
-        for floor in floor_list:
-            floor_ref[floor["id"]] = floor
-
-    for area in areas:
-        floor = floor_ref.get(area["piso_id"])
-        if floor:
-            area_payload = {
-                "id": area["id"],
-                "nombre": area["nombre"],
-                "descripcion": area["descripcion"],
-                "orden": area["orden"],
-            }
-            if include_area_details:
-                for column in AREA_DETAIL_COLUMNS:
-                    area_payload[column] = area[column]
-            floor["areas"].append(area_payload)
-
-    return [
-        {
-            "id": block["id"],
-            "nombre": block["nombre"],
-            "descripcion": block["descripcion"],
-            "orden": block["orden"],
-            "pisos": floors_by_block.get(block["id"], []),
-        }
-        for block in blocks
-    ]
+    return _get_structure(include_area_details=include_area_details)
 
 
 def _next_order(table_name, parent_field=None, parent_id=None):
@@ -916,321 +859,63 @@ def _next_order(table_name, parent_field=None, parent_id=None):
 
 
 def create_block(nombre, descripcion=None):
-    db = get_db()
-    orden = _next_order("bloques")
-    cursor = db.execute(
-        "INSERT INTO bloques (nombre, descripcion, orden) VALUES (?, ?, ?)",
-        (nombre.strip(), (descripcion or "").strip() or None, orden),
-    )
-    db.commit()
-    return cursor.lastrowid
+    from database.services.locations_service import create_block as _create_block
+
+    return _create_block(nombre, descripcion=descripcion)
 
 
 def update_block(block_id, nombre=None, descripcion=None):
-    updates = []
-    params = []
-    if nombre is not None:
-        updates.append("nombre = ?")
-        params.append((nombre or "").strip())
-    if descripcion is not None:
-        updates.append("descripcion = ?")
-        params.append((descripcion or "").strip() or None)
-    if not updates:
-        return False
+    from database.services.locations_service import update_block as _update_block
 
-    params.append(block_id)
-    db = get_db()
-    cursor = db.execute(
-        f"UPDATE bloques SET {', '.join(updates)} WHERE id = ?",
-        tuple(params),
-    )
-    db.commit()
-    return cursor.rowcount > 0
+    return _update_block(block_id, nombre=nombre, descripcion=descripcion)
 
 
 def create_floor(bloque_id, nombre, descripcion=None):
-    db = get_db()
-    orden = _next_order("pisos", "bloque_id", bloque_id)
-    cursor = db.execute(
-        "INSERT INTO pisos (bloque_id, nombre, descripcion, orden) VALUES (?, ?, ?, ?)",
-        (bloque_id, nombre.strip(), (descripcion or "").strip() or None, orden),
-    )
-    db.commit()
-    return cursor.lastrowid
+    from database.services.locations_service import create_floor as _create_floor
+
+    return _create_floor(bloque_id, nombre, descripcion=descripcion)
 
 
 def create_area(piso_id, nombre, descripcion=None, details=None):
-    db = get_db()
-    orden = _next_order("areas", "piso_id", piso_id)
-    details = details or {}
-    detail_columns = [
-        "identificacion_ambiente",
-        "metros_cuadrados",
-        "alto",
-        "senaletica",
-        "cod_senaletica",
-        "infraestructura_fisica",
-        "estado_piso",
-        "material_techo",
-        "puerta",
-        "material_puerta",
-        "responsable_admin_id",
-        "estado_paredes",
-        "estado_techo",
-        "estado_puerta",
-        "cerradura",
-        "nivel_seguridad",
-        "sitio_profesor_mesa",
-        "sitio_profesor_silla",
-        "pc_aula",
-        "proyector",
-        "pantalla_interactiva",
-        "pupitres_cantidad",
-        "pupitres_funcionan",
-        "pupitres_no_funcionan",
-        "pizarra",
-        "pizarra_estado",
-        "ventanas_cantidad",
-        "ventanas_funcionan",
-        "ventanas_no_funcionan",
-        "aa_cantidad",
-        "aa_funcionan",
-        "aa_no_funcionan",
-        "ventiladores_cantidad",
-        "ventiladores_funcionan",
-        "ventiladores_no_funcionan",
-        "wifi",
-        "red_lan",
-        "red_lan_funcionan",
-        "red_lan_no_funcionan",
-        "red_inalambrica_cantidad",
-        "iluminacion_funcionan",
-        "iluminacion_no_funcionan",
-        "luminarias_cantidad",
-        "puntos_electricos",
-        "puntos_electricos_funcionan",
-        "puntos_electricos_no_funcionan",
-        "puntos_electricos_cantidad",
-        "capacidad_aulica",
-        "capacidad_distanciamiento",
-        "ambiente_apto_retorno",
-        "observaciones_detalle",
-    ]
-    columns = ["piso_id", "nombre", "descripcion", "orden", *detail_columns]
-    placeholders = ", ".join(["?"] * len(columns))
-    values = [
-        piso_id,
-        nombre.strip(),
-        (descripcion or "").strip() or None,
-        orden,
-        *[details.get(column) for column in detail_columns],
-    ]
-    cursor = db.execute(
-        f"INSERT INTO areas ({', '.join(columns)}) VALUES ({placeholders})",
-        tuple(values),
-    )
-    db.commit()
-    return cursor.lastrowid
+    from database.services.locations_service import create_area as _create_area
+
+    return _create_area(piso_id, nombre, descripcion=descripcion, details=details)
 
 
 def update_floor(floor_id, nombre=None, descripcion=None):
-    updates = []
-    params = []
-    if nombre is not None:
-        updates.append("nombre = ?")
-        params.append((nombre or "").strip())
-    if descripcion is not None:
-        updates.append("descripcion = ?")
-        params.append((descripcion or "").strip() or None)
-    if not updates:
-        return False
+    from database.services.locations_service import update_floor as _update_floor
 
-    params.append(floor_id)
-    db = get_db()
-    cursor = db.execute(
-        f"UPDATE pisos SET {', '.join(updates)} WHERE id = ?",
-        tuple(params),
-    )
-    db.commit()
-    return cursor.rowcount > 0
+    return _update_floor(floor_id, nombre=nombre, descripcion=descripcion)
 
 
 def delete_floor(floor_id):
-    db = get_db()
-    cursor = db.execute("DELETE FROM pisos WHERE id = ?", (floor_id,))
-    db.commit()
-    return cursor.rowcount > 0
+    from database.services.locations_service import delete_floor as _delete_floor
+
+    return _delete_floor(floor_id)
 
 
 def update_area(area_id, nombre=None, descripcion=None, details=None):
-    updates = []
-    params = []
-    details = details or {}
-    if nombre is not None:
-        updates.append("nombre = ?")
-        params.append((nombre or "").strip())
-    if descripcion is not None:
-        updates.append("descripcion = ?")
-        params.append((descripcion or "").strip() or None)
+    from database.services.locations_service import update_area as _update_area
 
-    field_map = {
-        "identificacion_ambiente": "identificacion_ambiente",
-        "metros_cuadrados": "metros_cuadrados",
-        "alto": "alto",
-        "senaletica": "senaletica",
-        "cod_senaletica": "cod_senaletica",
-        "infraestructura_fisica": "infraestructura_fisica",
-        "estado_piso": "estado_piso",
-        "material_techo": "material_techo",
-        "puerta": "puerta",
-        "material_puerta": "material_puerta",
-        "responsable_admin_id": "responsable_admin_id",
-        "estado_paredes": "estado_paredes",
-        "estado_techo": "estado_techo",
-        "estado_puerta": "estado_puerta",
-        "cerradura": "cerradura",
-        "nivel_seguridad": "nivel_seguridad",
-        "sitio_profesor_mesa": "sitio_profesor_mesa",
-        "sitio_profesor_silla": "sitio_profesor_silla",
-        "pc_aula": "pc_aula",
-        "proyector": "proyector",
-        "pantalla_interactiva": "pantalla_interactiva",
-        "pupitres_cantidad": "pupitres_cantidad",
-        "pupitres_funcionan": "pupitres_funcionan",
-        "pupitres_no_funcionan": "pupitres_no_funcionan",
-        "pizarra": "pizarra",
-        "pizarra_estado": "pizarra_estado",
-        "ventanas_cantidad": "ventanas_cantidad",
-        "ventanas_funcionan": "ventanas_funcionan",
-        "ventanas_no_funcionan": "ventanas_no_funcionan",
-        "aa_cantidad": "aa_cantidad",
-        "aa_funcionan": "aa_funcionan",
-        "aa_no_funcionan": "aa_no_funcionan",
-        "ventiladores_cantidad": "ventiladores_cantidad",
-        "ventiladores_funcionan": "ventiladores_funcionan",
-        "ventiladores_no_funcionan": "ventiladores_no_funcionan",
-        "wifi": "wifi",
-        "red_lan": "red_lan",
-        "red_lan_funcionan": "red_lan_funcionan",
-        "red_lan_no_funcionan": "red_lan_no_funcionan",
-        "red_inalambrica_cantidad": "red_inalambrica_cantidad",
-        "iluminacion_funcionan": "iluminacion_funcionan",
-        "iluminacion_no_funcionan": "iluminacion_no_funcionan",
-        "luminarias_cantidad": "luminarias_cantidad",
-        "puntos_electricos": "puntos_electricos",
-        "puntos_electricos_funcionan": "puntos_electricos_funcionan",
-        "puntos_electricos_no_funcionan": "puntos_electricos_no_funcionan",
-        "puntos_electricos_cantidad": "puntos_electricos_cantidad",
-        "capacidad_aulica": "capacidad_aulica",
-        "capacidad_distanciamiento": "capacidad_distanciamiento",
-        "ambiente_apto_retorno": "ambiente_apto_retorno",
-        "observaciones_detalle": "observaciones_detalle",
-    }
-    for input_key, column_name in field_map.items():
-        if input_key in details:
-            updates.append(f"{column_name} = ?")
-            params.append(details.get(input_key))
-
-    if not updates:
-        return False
-
-    params.append(area_id)
-    db = get_db()
-    cursor = db.execute(
-        f"UPDATE areas SET {', '.join(updates)} WHERE id = ?",
-        tuple(params),
-    )
-    db.commit()
-    return cursor.rowcount > 0
+    return _update_area(area_id, nombre=nombre, descripcion=descripcion, details=details)
 
 
 def delete_area(area_id):
-    db = get_db()
-    cursor = db.execute("DELETE FROM areas WHERE id = ?", (area_id,))
-    db.commit()
-    return cursor.rowcount > 0
+    from database.services.locations_service import delete_area as _delete_area
+
+    return _delete_area(area_id)
 
 
 def delete_block(block_id):
-    db = get_db()
-    db.execute(
-        """
-        DELETE FROM inventario_items
-        WHERE area_id IN (
-            SELECT a.id
-            FROM areas a
-            JOIN pisos p ON p.id = a.piso_id
-            WHERE p.bloque_id = ?
-        )
-        """,
-        (block_id,),
-    )
-    cursor = db.execute("DELETE FROM bloques WHERE id = ?", (block_id,))
-    db.commit()
-    return cursor.rowcount > 0
+    from database.services.locations_service import delete_block as _delete_block
+
+    return _delete_block(block_id)
 
 
 def get_location_dependency_summary(entity_type, entity_id):
-    db = get_db()
-    entity = str(entity_type or "").strip().lower()
+    from database.services.locations_service import get_location_dependency_summary as _get_location_dependency_summary
 
-    if entity == "bloque":
-        row = db.execute(
-            """
-            SELECT
-                (SELECT COUNT(1) FROM pisos WHERE bloque_id = ?) AS pisos,
-                (
-                    SELECT COUNT(1)
-                    FROM areas a
-                    JOIN pisos p ON p.id = a.piso_id
-                    WHERE p.bloque_id = ?
-                ) AS areas,
-                (
-                    SELECT COUNT(1)
-                    FROM inventario_items i
-                    JOIN areas a ON a.id = i.area_id
-                    JOIN pisos p ON p.id = a.piso_id
-                    WHERE p.bloque_id = ?
-                ) AS items
-            """,
-            (entity_id, entity_id, entity_id),
-        ).fetchone()
-        return {
-            "pisos": row["pisos"] if row else 0,
-            "areas": row["areas"] if row else 0,
-            "items": row["items"] if row else 0,
-        }
-
-    if entity == "piso":
-        row = db.execute(
-            """
-            SELECT
-                (SELECT COUNT(1) FROM areas WHERE piso_id = ?) AS areas,
-                (
-                    SELECT COUNT(1)
-                    FROM inventario_items i
-                    JOIN areas a ON a.id = i.area_id
-                    WHERE a.piso_id = ?
-                ) AS items
-            """,
-            (entity_id, entity_id),
-        ).fetchone()
-        return {
-            "areas": row["areas"] if row else 0,
-            "items": row["items"] if row else 0,
-        }
-
-    if entity == "area":
-        row = db.execute(
-            "SELECT COUNT(1) AS items FROM inventario_items WHERE area_id = ?",
-            (entity_id,),
-        ).fetchone()
-        return {
-            "items": row["items"] if row else 0,
-        }
-
-    raise ValueError(f"Tipo de ubicación no soportado: {entity_type}")
-
+    return _get_location_dependency_summary(entity_type, entity_id)
 
 def _next_item_numero():
     db = get_db()
@@ -2514,18 +2199,12 @@ def get_all_areas_for_export():
 def get_dashboard_stats():
     db = get_db()
     total_bienes = db.execute('SELECT COUNT(1) as total FROM inventario_items').fetchone()['total']
-    total_actas = db.execute('SELECT COUNT(1) as total FROM historial_actas').fetchone()['total']
-    total_actas_recibidas = db.execute(
-        """
-        SELECT COUNT(1) as total
-        FROM historial_actas
-        WHERE LOWER(COALESCE(tipo_acta, '')) LIKE '%recib%'
-        """
-    ).fetchone()['total']
+    total_bloques = db.execute('SELECT COUNT(1) as total FROM bloques').fetchone()['total']
+    total_areas = db.execute('SELECT COUNT(1) as total FROM areas').fetchone()['total']
     return {
         'cant_bienes': total_bienes or 0,
-        'cant_actas': total_actas or 0,
-        'cant_actas_recibidas': total_actas_recibidas or 0,
+        'cant_bloques': total_bloques or 0,
+        'cant_areas': total_areas or 0,
     }
 
 # --- PERSONAL / ADMINISTRADORES ---
@@ -2658,14 +2337,9 @@ def resolve_or_create_personal_name(nombre, cargo=None, create_if_missing=True):
     return raw_name
 
 def get_or_create_personal(nombre, cargo=None):
-    canonical_name = resolve_or_create_personal_name(nombre, cargo=cargo, create_if_missing=True)
-    if not canonical_name:
-        return None
-    db = get_db()
-    row = db.execute("SELECT id FROM administradores WHERE UPPER(nombre) = UPPER(?)", (canonical_name,)).fetchone()
-    if row:
-        return row["id"]
-    return None
+    from database.services.documents_service import get_or_create_personal as _get_or_create_personal
+
+    return _get_or_create_personal(nombre, cargo=cargo)
 
 # --- HISTORIAL DE ACTAS ---
 def save_historial_acta(
@@ -2677,35 +2351,17 @@ def save_historial_acta(
     plantilla_hash=None,
     plantilla_snapshot_path=None,
 ):
-    _ensure_historial_actas_numero_unique_by_type_runtime()
-    db = get_db()
-    stored_docx_path = _to_storage_relative_path(docx_path)
-    stored_pdf_path = _to_storage_relative_path(pdf_path)
-    stored_snapshot_path = _to_storage_relative_path(plantilla_snapshot_path)
-    cursor = db.execute(
-        """
-        INSERT INTO historial_actas (
-            tipo_acta,
-            numero_acta,
-            datos_json,
-            docx_path,
-            pdf_path,
-            plantilla_hash,
-            plantilla_snapshot_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            tipo_acta,
-            numero_acta,
-            datos_json,
-            stored_docx_path,
-            stored_pdf_path,
-            plantilla_hash,
-            stored_snapshot_path,
-        ),
+    from database.services.documents_service import save_historial_acta as _save_historial_acta
+
+    return _save_historial_acta(
+        tipo_acta=tipo_acta,
+        datos_json=datos_json,
+        docx_path=docx_path,
+        pdf_path=pdf_path,
+        numero_acta=numero_acta,
+        plantilla_hash=plantilla_hash,
+        plantilla_snapshot_path=plantilla_snapshot_path,
     )
-    db.commit()
-    return cursor.lastrowid
 
 
 def update_historial_acta(
@@ -2718,38 +2374,18 @@ def update_historial_acta(
     plantilla_hash=None,
     plantilla_snapshot_path=None,
 ):
-    _ensure_historial_actas_numero_unique_by_type_runtime()
-    db = get_db()
-    stored_docx_path = _to_storage_relative_path(docx_path)
-    stored_pdf_path = _to_storage_relative_path(pdf_path)
-    stored_snapshot_path = _to_storage_relative_path(plantilla_snapshot_path)
-    cursor = db.execute(
-        """
-        UPDATE historial_actas
-        SET
-            tipo_acta = ?,
-            numero_acta = ?,
-            fecha = CURRENT_TIMESTAMP,
-            datos_json = ?,
-            docx_path = ?,
-            pdf_path = ?,
-            plantilla_hash = ?,
-            plantilla_snapshot_path = ?
-        WHERE id = ?
-        """,
-        (
-            tipo_acta,
-            numero_acta,
-            datos_json,
-            stored_docx_path,
-            stored_pdf_path,
-            plantilla_hash,
-            stored_snapshot_path,
-            int(acta_id),
-        ),
+    from database.services.documents_service import update_historial_acta as _update_historial_acta
+
+    return _update_historial_acta(
+        acta_id=acta_id,
+        tipo_acta=tipo_acta,
+        datos_json=datos_json,
+        docx_path=docx_path,
+        pdf_path=pdf_path,
+        numero_acta=numero_acta,
+        plantilla_hash=plantilla_hash,
+        plantilla_snapshot_path=plantilla_snapshot_path,
     )
-    db.commit()
-    return int(cursor.rowcount or 0)
 
 
 def _split_numero_acta(numero_acta):
@@ -2768,207 +2404,57 @@ def _normalize_tipo_acta(tipo_acta):
 
 
 def get_max_numero_acta_for_year(year, tipo_acta=None):
-    _ensure_historial_actas_numero_unique_by_type_runtime()
-    db = get_db()
-    target_year = int(year)
-    where_tipo = ""
-    params = (target_year,)
-    if tipo_acta is not None:
-        where_tipo = " AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?)"
-        params = (target_year, _normalize_tipo_acta(tipo_acta))
+    from database.services.documents_service import get_max_numero_acta_for_year as _get_max_numero_acta_for_year
 
-    row = db.execute(
-        f"""
-        SELECT COALESCE(
-            MAX(CAST(substr(numero_acta, 1, instr(numero_acta, '-') - 1) AS INTEGER)),
-            0
-        ) AS max_value
-        FROM historial_actas
-        WHERE numero_acta IS NOT NULL
-          AND TRIM(numero_acta) != ''
-          AND instr(numero_acta, '-') > 1
-          AND CAST(substr(numero_acta, instr(numero_acta, '-') + 1) AS INTEGER) = ?
-          AND substr(numero_acta, 1, instr(numero_acta, '-') - 1) GLOB '[0-9]*'
-          {where_tipo}
-        """,
-        params,
-    ).fetchone()
-    return int(row["max_value"] if row else 0)
+    return _get_max_numero_acta_for_year(year=year, tipo_acta=tipo_acta)
 
 
 def get_next_numero_acta(year, tipo_acta=None):
-    _ensure_actas_sequence_by_type_table_runtime()
-    _ensure_historial_actas_numero_unique_by_type_runtime()
-    db = get_db()
-    target_year = int(year)
-    tipo_key = _normalize_tipo_acta(tipo_acta)
-    max_historial = get_max_numero_acta_for_year(target_year, tipo_acta=tipo_key)
-    seq_row = db.execute(
-        "SELECT ultimo_numero FROM secuencia_actas_tipo WHERE tipo_acta = ? AND anio = ?",
-        (tipo_key, target_year),
-    ).fetchone()
-    max_sequence = int(seq_row["ultimo_numero"] or 0) if seq_row else 0
-    next_value = max(max_historial, max_sequence) + 1
-    return f"{next_value:03d}-{target_year}"
+    from database.services.documents_service import get_next_numero_acta as _get_next_numero_acta
+
+    return _get_next_numero_acta(year=year, tipo_acta=tipo_acta)
 
 
 def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None):
-    _ensure_actas_sequence_by_type_table_runtime()
-    _ensure_historial_actas_numero_unique_by_type_runtime()
-    db = get_db()
-    target_year = int(year)
-    tipo_key = _normalize_tipo_acta(tipo_acta)
+    from database.services.documents_service import reserve_numero_acta as _reserve_numero_acta
 
-    db.execute("BEGIN IMMEDIATE")
-    try:
-        row = db.execute(
-            "SELECT ultimo_numero FROM secuencia_actas_tipo WHERE tipo_acta = ? AND anio = ?",
-            (tipo_key, target_year),
-        ).fetchone()
-
-        if row:
-            ultimo = int(row["ultimo_numero"] or 0)
-            ultimo_historial = get_max_numero_acta_for_year(target_year, tipo_acta=tipo_key)
-            if ultimo_historial > ultimo:
-                ultimo = ultimo_historial
-                db.execute(
-                    "UPDATE secuencia_actas_tipo SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo_acta = ? AND anio = ?",
-                    (ultimo, tipo_key, target_year),
-                )
-        else:
-            ultimo = get_max_numero_acta_for_year(target_year, tipo_acta=tipo_key)
-            db.execute(
-                "INSERT INTO secuencia_actas_tipo (tipo_acta, anio, ultimo_numero) VALUES (?, ?, ?)",
-                (tipo_key, target_year, ultimo),
-            )
-
-        if preferred_numero_acta:
-            seq, year_in_num = _split_numero_acta(preferred_numero_acta)
-            if seq is None or year_in_num != target_year:
-                raise ValueError("Numero de acta invalido para reservar.")
-            existing = db.execute(
-                "SELECT 1 FROM historial_actas WHERE numero_acta = ? AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?) LIMIT 1",
-                (f"{seq:03d}-{target_year}", tipo_key),
-            ).fetchone()
-            if existing:
-                raise ValueError("El numero de acta ya existe.")
-            reserved = seq
-        else:
-            reserved = ultimo + 1
-
-        nuevo_ultimo = max(ultimo, reserved)
-        db.execute(
-            "UPDATE secuencia_actas_tipo SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE tipo_acta = ? AND anio = ?",
-            (nuevo_ultimo, tipo_key, target_year),
-        )
-        db.commit()
-        return f"{reserved:03d}-{target_year}"
-    except Exception:
-        db.rollback()
-        raise
+    return _reserve_numero_acta(
+        year=year,
+        preferred_numero_acta=preferred_numero_acta,
+        tipo_acta=tipo_acta,
+    )
 
 
 def numero_acta_exists(numero_acta, tipo_acta=None):
-    _ensure_historial_actas_numero_unique_by_type_runtime()
-    db = get_db()
-    numero = str(numero_acta or "").strip()
-    if tipo_acta is None:
-        row = db.execute(
-            "SELECT 1 FROM historial_actas WHERE numero_acta = ? LIMIT 1",
-            (numero,),
-        ).fetchone()
-    else:
-        row = db.execute(
-            "SELECT 1 FROM historial_actas WHERE numero_acta = ? AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?) LIMIT 1",
-            (numero, _normalize_tipo_acta(tipo_acta)),
-        ).fetchone()
-    return bool(row)
+    from database.services.documents_service import numero_acta_exists as _numero_acta_exists
+
+    return _numero_acta_exists(numero_acta=numero_acta, tipo_acta=tipo_acta)
 
 def get_historial_actas(tipo_acta=None):
-    db = get_db()
-    order_sql = """
-        ORDER BY
-            CASE
-                WHEN numero_acta IS NOT NULL AND instr(numero_acta, '-') > 0 THEN CAST(substr(numero_acta, instr(numero_acta, '-') + 1) AS INTEGER)
-                ELSE 0
-            END DESC,
-            CASE
-                WHEN numero_acta IS NOT NULL AND instr(numero_acta, '-') > 0 THEN CAST(substr(numero_acta, 1, instr(numero_acta, '-') - 1) AS INTEGER)
-                ELSE 0
-            END DESC,
-            id DESC
-    """
-    if tipo_acta:
-        rows = db.execute(
-            f"SELECT * FROM historial_actas WHERE tipo_acta = ? {order_sql}",
-            (tipo_acta,),
-        ).fetchall()
-    else:
-        rows = db.execute(f"SELECT * FROM historial_actas {order_sql}").fetchall()
-    return [_normalize_historial_row_paths(dict(row)) for row in rows]
+    from database.services.documents_service import get_historial_actas as _get_historial_actas
+
+    return _get_historial_actas(tipo_acta=tipo_acta)
 
 
 def count_historial_by_template_snapshot(plantilla_snapshot_path):
-    db = get_db()
-    normalized_snapshot = _to_storage_relative_path(plantilla_snapshot_path)
-    row = db.execute(
-        "SELECT COUNT(1) AS total FROM historial_actas WHERE plantilla_snapshot_path = ?",
-        (str(normalized_snapshot or "").strip(),),
-    ).fetchone()
-    return int(row["total"] or 0)
+    from database.services.documents_service import count_historial_by_template_snapshot as _count_historial_by_template_snapshot
+
+    return _count_historial_by_template_snapshot(plantilla_snapshot_path)
 
 
 def get_next_numero_informe_area(year):
-    db = get_db()
-    target_year = int(year)
-    row = db.execute(
-        "SELECT ultimo_numero FROM secuencia_informes_area WHERE anio = ?",
-        (target_year,),
-    ).fetchone()
-    next_num = (int(row["ultimo_numero"]) + 1) if row else 1
-    return f"{next_num:03d}-{target_year}"
+    from database.services.documents_service import get_next_numero_informe_area as _get_next_numero_informe_area
+
+    return _get_next_numero_informe_area(year)
 
 
 def reserve_numeros_informe_area(year, count):
-    safe_count = max(int(count or 0), 0)
-    if safe_count <= 0:
-        return []
+    from database.services.documents_service import reserve_numeros_informe_area as _reserve_numeros_informe_area
 
-    db = get_db()
-    target_year = int(year)
-
-    db.execute("BEGIN IMMEDIATE")
-    try:
-        row = db.execute(
-            "SELECT ultimo_numero FROM secuencia_informes_area WHERE anio = ?",
-            (target_year,),
-        ).fetchone()
-        last_num = int(row["ultimo_numero"]) if row else 0
-        next_last = last_num + safe_count
-
-        if row:
-            db.execute(
-                "UPDATE secuencia_informes_area SET ultimo_numero = ?, actualizado_en = CURRENT_TIMESTAMP WHERE anio = ?",
-                (next_last, target_year),
-            )
-        else:
-            db.execute(
-                "INSERT INTO secuencia_informes_area (anio, ultimo_numero) VALUES (?, ?)",
-                (target_year, next_last),
-            )
-
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-
-    return [f"{n:03d}-{target_year}" for n in range(last_num + 1, next_last + 1)]
+    return _reserve_numeros_informe_area(year, count)
 
 
 def delete_historial_acta(acta_id):
-    db = get_db()
-    row = db.execute("SELECT * FROM historial_actas WHERE id = ?", (acta_id,)).fetchone()
-    deleted = _normalize_historial_row_paths(dict(row)) if row else None
-    db.execute("DELETE FROM historial_actas WHERE id = ?", (acta_id,))
-    db.commit()
-    return deleted
+    from database.services.documents_service import delete_historial_acta as _delete_historial_acta
+
+    return _delete_historial_acta(acta_id)

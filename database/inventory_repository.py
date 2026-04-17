@@ -1,4 +1,4 @@
-from database.controller import (
+from database.services.inventory_service import (
     ALLOWED_INVENTORY_FIELDS,
     bulk_insert_inventory_dicts,
     bulk_insert_inventory_rows,

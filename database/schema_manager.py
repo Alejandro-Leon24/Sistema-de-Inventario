@@ -34,6 +34,18 @@ def init_schema(base_dir: Path):
         legacy_controller._ensure_inventory_fts,
     )
     legacy_controller._run_startup_migration_once(
+        "20260416_inventory_search_indexes_extended",
+        legacy_controller._ensure_inventory_search_indexes,
+    )
+    legacy_controller._run_startup_migration_once(
+        "20260416_inventory_fts_extended",
+        legacy_controller._ensure_inventory_fts,
+    )
+    legacy_controller._run_startup_migration_once(
+        "20260416_inventory_estado_canonical",
+        legacy_controller._ensure_inventory_estado_canonical_runtime,
+    )
+    legacy_controller._run_startup_migration_once(
         "20260409_historial_actas_numero_column",
         legacy_controller._ensure_historial_actas_numero_column,
     )
@@ -50,6 +62,17 @@ def init_schema(base_dir: Path):
         legacy_controller._ensure_actas_sequence_table,
     )
     legacy_controller._run_startup_migration_once(
+        "20260414_historial_actas_numero_unique_by_type",
+        legacy_controller._ensure_historial_actas_numero_unique_by_type,
+    )
+    legacy_controller._run_startup_migration_once(
+        "20260414_actas_sequence_by_type_table",
+        legacy_controller._ensure_actas_sequence_by_type_table,
+    )
+    legacy_controller._run_startup_migration_once(
         "20260409_seed_default_param_values",
         legacy_controller._seed_default_param_values,
     )
+
+    legacy_controller._ensure_inventory_search_indexes()
+    legacy_controller._ensure_inventory_fts()

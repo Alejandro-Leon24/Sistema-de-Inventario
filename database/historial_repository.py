@@ -1,4 +1,4 @@
-from database.controller import (
+from database.services.documents_service import (
     count_historial_by_template_snapshot,
     delete_historial_acta,
     get_historial_actas,
