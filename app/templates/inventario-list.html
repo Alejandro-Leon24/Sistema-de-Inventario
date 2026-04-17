@@ -461,6 +461,66 @@
                 <button type="button" class="btn btn-success btn-sm d-none" id="btn-import-confirm">
                     <i class="bi bi-cloud-upload me-1"></i>Guardar bloque y continuar
                 </button>
+                <button type="button" class="btn btn-outline-warning btn-sm d-none" id="btn-import-skip">
+                    <i class="bi bi-skip-forward me-1"></i>Saltar y continuar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalImportSaveConfirm" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-primary-subtle">
+            <div class="modal-header bg-primary-subtle">
+                <h5 class="modal-title">
+                    <i class="bi bi-shield-check me-2"></i>
+                    Confirmar guardado del bloque
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body small">
+                <p class="mb-2" id="import-save-confirm-text">
+                    Antes de continuar, revisa que todas las filas del bloque esten correctas y que no queden espacios vacios o datos incompletos.
+                </p>
+                <p class="mb-0 text-muted">Si cancelas, podras seguir revisando y editando las filas del bloque actual.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-import-save-confirm-cancel">
+                    Cancelar y revisar
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-import-save-confirm-continue">
+                    <i class="bi bi-check2-circle me-1"></i>Aceptar y continuar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="modalImportInvalidLocations" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-danger-subtle">
+            <div class="modal-header bg-danger-subtle">
+                <h5 class="modal-title">
+                    <i class="bi bi-geo-alt-fill me-2 text-danger"></i>
+                    Ubicaciones no encontradas
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="import-invalid-locations-summary" class="small text-muted mb-3"></p>
+                <div id="import-invalid-locations-list" class="d-grid gap-2"></div>
+                <div class="alert alert-warning small mt-3 mb-0">
+                    Revisa las ubicaciones indicadas o agrégalas en Configuración para continuar con la importación.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="btn-import-invalid-open-settings">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Ir a Configuración
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
+                    Cerrar y revisar bloque
+                </button>
             </div>
         </div>
     </div>

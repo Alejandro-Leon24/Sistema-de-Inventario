@@ -480,6 +480,25 @@ body.inventory-column-dragging * {
     outline-offset: -2px;
 }
 
+#import-review-table tbody tr.import-row-invalid-location > * {
+    background-color: #ffe5e5 !important;
+}
+
+#import-review-table tbody tr.import-row-invalid-location.import-row-selected > * {
+    outline-color: #dc3545;
+}
+
+.import-invalid-location-cell {
+    color: #8b1a1a;
+    font-weight: 600;
+    background-color: #ffdada !important;
+    border: 1px solid #f1a9a9;
+}
+
+.modal-backdrop.show.import-nested-backdrop {
+    backdrop-filter: blur(2px);
+}
+
 .import-review-cell {
     cursor: pointer;
     white-space: nowrap;

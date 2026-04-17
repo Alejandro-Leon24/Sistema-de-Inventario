@@ -25,7 +25,7 @@
 ];
 
 const INLINE_ADD_OPTION_VALUE = "__add_new_option__";
-const INLINE_SELECT_FIELDS = new Set(["estado", "cuenta", "usuario_final"]);
+const INLINE_SELECT_FIELDS = new Set(["estado", "cuenta", "usuario_final", "ubicacion"]);
 const INLINE_INPUT_CONFIG = {
 	cantidad: { type: "number", min: "1", step: "1" },
 	fecha_adquisicion: { type: "date" },
@@ -43,11 +43,14 @@ function debounce(callback, delay = 350) {
 }
 
 function parseExcelText(text) {
-	return text
-		.trim()
+	const normalizedText = String(text || "")
+		.replace(/\r\n/g, "\n")
+		.replace(/\r/g, "\n");
+
+	return normalizedText
 		.split("\n")
-		.filter((line) => line.trim().length > 0)
-		.map((line) => line.split("\t").map((cell) => cell.trim()));
+		.filter((line) => line.replace(/\t/g, "").trim().length > 0)
+		.map((line) => line.split("\t").map((cell) => String(cell || "").trim()));
 }
 
 function parseDecimalWithComma(value) {
@@ -73,6 +76,84 @@ function normalizeCodeToPlaceholder(value) {
 		return "S/C";
 	}
 	return text;
+}
+
+const MODAL_PASTE_FIELDS = [
+	"cod_inventario",
+	"cod_esbye",
+	"cuenta",
+	"cantidad",
+	"descripcion",
+	"marca",
+	"modelo",
+	"serie",
+	"estado",
+	"ubicacion",
+	"fecha_adquisicion",
+	"valor",
+	"usuario_final",
+	"observacion",
+	"descripcion_esbye",
+	"marca_esbye",
+	"modelo_esbye",
+	"serie_esbye",
+	"fecha_adquisicion_esbye",
+	"valor_esbye",
+	"ubicacion_esbye",
+	"observacion_esbye",
+];
+
+function scoreModalPastedMapping(mapped = {}) {
+	let score = 0;
+	if (String(mapped.cod_inventario || "").trim()) score += 3;
+	if (String(mapped.descripcion || "").trim()) score += 4;
+	if (String(mapped.ubicacion || "").trim()) score += 3;
+	if (String(mapped.usuario_final || "").trim()) score += 2;
+	if (String(mapped.estado || "").trim()) score += 1;
+	if (String(mapped.cantidad || "").trim().match(/^\d+$/)) score += 2;
+	if (String(mapped.fecha_adquisicion || "").trim()) score += 1;
+	if (String(mapped.valor || "").trim()) score += 1;
+	score += Object.keys(mapped).length * 0.25;
+	return score;
+}
+
+function mapPastedRowBestEffortForModal(rawRow) {
+	const cells = Array.isArray(rawRow) ? rawRow : [];
+	if (!cells.length) return {};
+
+	const candidateOrders = [
+		MODAL_PASTE_FIELDS,
+		["item_numero", ...MODAL_PASTE_FIELDS],
+	];
+
+	let bestMapped = {};
+	let bestScore = Number.NEGATIVE_INFINITY;
+	let bestOffset = 0;
+
+	candidateOrders.forEach((order) => {
+		const maxOffset = Math.min(8, Math.max(cells.length - 1, 0));
+		for (let offset = 0; offset <= maxOffset; offset += 1) {
+			const mapped = {};
+			for (let idx = 0; idx < order.length; idx += 1) {
+				const field = order[idx];
+				if (field === "item_numero") continue;
+				const srcIdx = idx + offset;
+				if (srcIdx >= cells.length) break;
+				const value = String(cells[srcIdx] ?? "").trim();
+				if (!value) continue;
+				mapped[field] = value;
+			}
+
+			const score = scoreModalPastedMapping(mapped);
+			if (score > bestScore || (score === bestScore && offset < bestOffset)) {
+				bestScore = score;
+				bestMapped = mapped;
+				bestOffset = offset;
+			}
+		}
+	});
+
+	return bestMapped;
 }
 
 const escapeHtmlText = window.appHelpers.escapeHtmlText;
@@ -386,6 +467,18 @@ async function initInventoryPage() {
 				quickLabel: "+ Agregar Personal",
 			};
 		}
+		if (field === "ubicacion") {
+			const areas = flattenAreas();
+			return {
+				placeholder: "-- Seleccionar ubicación --",
+				items: areas,
+				optionValue: (item) => item.nombre,
+				optionLabel: (item) => item.nombre,
+				strictSelection: true,
+				quickMode: null,
+				quickLabel: "",
+			};
+		}
 		return null;
 	}
 
@@ -404,10 +497,12 @@ async function initInventoryPage() {
 			option.textContent = config.optionLabel(item);
 			select.appendChild(option);
 		});
-		const addOption = document.createElement("option");
-		addOption.value = INLINE_ADD_OPTION_VALUE;
-		addOption.textContent = config.quickLabel;
-		select.appendChild(addOption);
+		if (config.quickMode && config.quickLabel) {
+			const addOption = document.createElement("option");
+			addOption.value = INLINE_ADD_OPTION_VALUE;
+			addOption.textContent = config.quickLabel;
+			select.appendChild(addOption);
+		}
 		const normalizedSelected = normalizeSelectComparable(selectedValue);
 		let resolved = "";
 		if (normalizedSelected) {
@@ -417,6 +512,10 @@ async function initInventoryPage() {
 					normalizeSelectComparable(opt.value) === normalizedSelected
 					|| normalizeSelectComparable(opt.textContent) === normalizedSelected
 			);
+			if (config.strictSelection) {
+				select.value = match ? match.value : "";
+				return;
+			}
 			if (!match) {
 				match = options.find(
 					(opt) =>
@@ -444,6 +543,22 @@ async function initInventoryPage() {
 			if (match) resolved = match.value;
 		}
 		select.value = resolved || "";
+	}
+
+	function resolveAreaEntryFromLocationValue(rawValue) {
+		const value = String(rawValue || "").trim();
+		if (!value) return null;
+
+		const normalized = normalizeText(value);
+		const areas = flattenAreas();
+
+		let exact = areas.find((entry) => normalizeText(entry.nombre) === normalized);
+		if (exact) return exact;
+
+		exact = areas.find((entry) => normalizeText(entry.area_nombre) === normalized);
+		if (exact) return exact;
+
+		return resolveAreaFromPastedText(value);
 	}
 
 	function refreshAddItemSelects() {
@@ -619,6 +734,68 @@ async function initInventoryPage() {
 			.trim();
 	}
 
+	function normalizePersonForSelectMatch(value) {
+		const normalized = normalizeText(value).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+		if (!normalized) return "";
+		const prefixes = new Set([
+			"ing", "ingeniero", "ingeniera", "dr", "dra", "doctor", "doctora",
+			"lic", "licenciado", "licenciada", "abg", "abogada", "abogado",
+			"arq", "arquitecto", "arquitecta", "tec", "tecnico", "tecnica",
+			"sr", "sra", "srta", "msc", "mg", "mgs", "mgtr", "mtr", "mts", "mtro", "mt",
+			"prof", "profa", "tlgo", "tlga", "ts", "phd",
+		]);
+		const tokens = normalized.split(" ").filter(Boolean);
+		while (tokens.length && prefixes.has(tokens[0])) {
+			tokens.shift();
+		}
+		return tokens.join(" ");
+	}
+
+	function resolveSelectOptionBestMatch(options, field, value) {
+		const rawValue = String(value || "").trim();
+		if (!rawValue) return null;
+		const normalizedValue = normalizeText(rawValue);
+		const personValue = field === "usuario_final" ? normalizePersonForSelectMatch(rawValue) : "";
+
+		let match = options.find((opt) => normalizeText(opt.value) === normalizedValue);
+		if (match) return match;
+
+		match = options.find((opt) => normalizeText(opt.textContent) === normalizedValue);
+		if (match) return match;
+
+		if (personValue) {
+			match = options.find((opt) => normalizePersonForSelectMatch(opt.textContent) === personValue);
+			if (match) return match;
+		}
+
+		match = options.find((opt) => normalizeText(opt.textContent).includes(normalizedValue));
+		if (match) return match;
+
+		match = options.find((opt) => normalizedValue.includes(normalizeText(opt.value)));
+		if (match) return match;
+
+		// Match difuso por solapamiento de tokens para capturar variantes de nombre.
+		const targetTokens = (personValue || normalizedValue).split(/\s+/).filter(Boolean);
+		let best = null;
+		let bestScore = 0;
+		options.forEach((opt) => {
+			const base = field === "usuario_final"
+				? normalizePersonForSelectMatch(opt.textContent)
+				: normalizeText(opt.textContent).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+			if (!base) return;
+			const optionTokens = base.split(/\s+/).filter(Boolean);
+			if (!targetTokens.length || !optionTokens.length) return;
+			const overlap = targetTokens.filter((token) => optionTokens.some((ot) => ot.includes(token) || token.includes(ot))).length;
+			const score = overlap / Math.max(targetTokens.length, optionTokens.length);
+			if (score > bestScore) {
+				bestScore = score;
+				best = opt;
+			}
+		});
+
+		return bestScore >= 0.5 ? best : null;
+	}
+
 	function resolveAreaFromPastedText(rawText) {
 		const input = normalizeText(rawText);
 		if (!input) return null;
@@ -782,17 +959,7 @@ async function initInventoryPage() {
 				return;
 			}
 
-			const normalizedValue = normalizeText(value);
-			let match = options.find((opt) => normalizeText(opt.value) === normalizedValue);
-			if (!match) {
-				match = options.find((opt) => normalizeText(opt.textContent) === normalizedValue);
-			}
-			if (!match) {
-				match = options.find((opt) => normalizeText(opt.textContent).includes(normalizedValue));
-			}
-			if (!match) {
-				match = options.find((opt) => normalizedValue.includes(normalizeText(opt.value)));
-			}
+			const match = resolveSelectOptionBestMatch(options, field, value);
 
 			if (match) {
 				input.value = match.value;
@@ -948,6 +1115,13 @@ async function initInventoryPage() {
 
 	async function saveCell(id, field, value, options = {}) {
 		const payload = { [field]: value };
+		if (field === "ubicacion") {
+			const areaEntry = resolveAreaEntryFromLocationValue(value);
+			if (areaEntry) {
+				payload.ubicacion = areaEntry.nombre;
+				payload.area_id = Number(areaEntry.id);
+			}
+		}
 		if (options.forceDuplicate) payload.force_duplicate = true;
 		await api.send(`/api/inventario/${id}`, "PATCH", payload);
 	}
@@ -1208,7 +1382,7 @@ async function initInventoryPage() {
 			};
 
 			select.addEventListener("change", async () => {
-				if (select.value === INLINE_ADD_OPTION_VALUE) {
+				if (selectConfig.quickMode && select.value === INLINE_ADD_OPTION_VALUE) {
 					openingQuickModal = true;
 					const createdValue = await openQuickAddModal(selectConfig.quickMode);
 					openingQuickModal = false;
@@ -1603,39 +1777,16 @@ if (nodes.excelSingleRow) {
 				await loadModalParams();
 				const rows = parseExcelText(text);
 				if (!rows.length) return;
-				const fields = [
-					"cod_inventario",
-					"cod_esbye",
-					"cuenta",
-					"cantidad",
-					"descripcion",
-					"marca",
-					"modelo",
-					"serie",
-					"estado",
-					"ubicacion",
-					"fecha_adquisicion",
-					"valor",
-					"usuario_final",
-					"observacion",
-					"descripcion_esbye",
-					"marca_esbye",
-					"modelo_esbye",
-					"serie_esbye",
-					"fecha_adquisicion_esbye",
-					"valor_esbye",
-					"ubicacion_esbye",
-					"observacion_esbye",
-				];
 				const first = rows[0];
-				fields.forEach((field, idx) => {
+				const mapped = mapPastedRowBestEffortForModal(first);
+				MODAL_PASTE_FIELDS.forEach((field) => {
 					const input = document.querySelector(`#form-agregar-item [data-field='${field}']`);
-					if (input && first[idx] !== undefined) {
-						assignPastedValue(input, first[idx]);
+					if (input && mapped[field] !== undefined) {
+						assignPastedValue(input, mapped[field]);
 					}
 				});
 
-				const pastedLocation = String(first[9] ?? "").trim();
+				const pastedLocation = String(mapped.ubicacion ?? "").trim();
 				if (pastedLocation) {
 					const resolvedArea = resolveAreaFromPastedText(pastedLocation);
 					if (resolvedArea && nodes.modalAreaSelect) {

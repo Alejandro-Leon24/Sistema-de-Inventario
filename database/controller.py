@@ -285,6 +285,26 @@ def _normalize_historial_row_paths(row_dict):
     return normalized
 
 
+def _normalize_inventory_date_for_output(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+
+    iso_match = re.match(r"^(\d{4}-\d{2}-\d{2})", text)
+    if iso_match:
+        return iso_match.group(1)
+
+    dmy_match = re.match(r"^(\d{1,2}[/-]\d{1,2}[/-]\d{4})", text)
+    if dmy_match:
+        raw = dmy_match.group(1)
+        parts = re.split(r"[/-]", raw)
+        if len(parts) == 3:
+            day, month, year = parts
+            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+
+    return text
+
+
 def _row_to_inventory_item(row):
     return {
         "id": row["id"],
@@ -301,7 +321,7 @@ def _row_to_inventory_item(row):
         "estado": row["estado"],
         "condicion": row["condicion"],
         "usuario_final": row["usuario_final"],
-        "fecha_adquisicion": row["fecha_adquisicion"],
+        "fecha_adquisicion": _normalize_inventory_date_for_output(row["fecha_adquisicion"]),
         "valor": row["valor"],
         "observacion": row["observacion"],
         "descripcion_esbye": row["descripcion_esbye"],
@@ -311,7 +331,7 @@ def _row_to_inventory_item(row):
         "valor_esbye": row["valor_esbye"],
         "ubicacion_esbye": row["ubicacion_esbye"],
         "observacion_esbye": row["observacion_esbye"],
-        "fecha_adquisicion_esbye": row["fecha_adquisicion_esbye"],
+        "fecha_adquisicion_esbye": _normalize_inventory_date_for_output(row["fecha_adquisicion_esbye"]),
         "area_id": row["area_id"],
         "area_nombre": row["area_nombre"],
         "piso_id": row["piso_id"],
@@ -1292,6 +1312,10 @@ def _resolve_area_from_location_text(raw_location, by_full_name, by_area_name, c
     target_tokens = [token for token in re.split(r"\s+|/|-", normalized_input) if token]
     target_aula_code = _extract_compact_aula_code_for_lookup(normalized_input)
     floor_hint = _extract_floor_hint_for_lookup(normalized_input)
+    explicit_block_letter = ""
+    block_token_match = re.search(r"bloque\s+([a-z])", normalized_input)
+    if block_token_match:
+        explicit_block_letter = block_token_match.group(1)
 
     best_match = None
     best_score = 0
@@ -1329,6 +1353,14 @@ def _resolve_area_from_location_text(raw_location, by_full_name, by_area_name, c
             block_letter = block_letter_match.group(1)
             if f"bloque {block_letter}" in block_name:
                 score += 10
+            else:
+                score -= 14
+
+        if explicit_block_letter:
+            if f"bloque {explicit_block_letter}" in block_name:
+                score += 12
+            else:
+                score -= 16
 
         if score > best_score:
             best_score = score

@@ -7,6 +7,7 @@ import tempfile
 import time
 import uuid
 import unicodedata
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 from database.db import get_db
@@ -98,6 +99,46 @@ _PASTE_CANONICAL_FIELDS = [
     "observacion_esbye",
 ]
 
+_EMPTY_PLACEHOLDER_NORMALIZED = {
+    "na",
+    "n a",
+    "nd",
+    "n d",
+    "sd",
+    "s d",
+    "null",
+    "none",
+    "ninguno",
+    "sin dato",
+    "sin datos",
+    "sin informacion",
+    "sindato",
+    "sindatos",
+    "sininformacion",
+    "sininfo",
+    "vacio",
+}
+
+_SIGNIFICANT_IMPORT_FIELDS = {
+    "cod_inventario",
+    "cod_esbye",
+    "cuenta",
+    "descripcion",
+    "marca",
+    "modelo",
+    "serie",
+    "estado",
+    "ubicacion",
+    "usuario_final",
+    "observacion",
+    "descripcion_esbye",
+    "marca_esbye",
+    "modelo_esbye",
+    "serie_esbye",
+    "ubicacion_esbye",
+    "observacion_esbye",
+}
+
 
 def _looks_like_person_name(value):
     text = str(value or "").strip()
@@ -173,10 +214,12 @@ def _map_paste_row_best_effort(raw_row):
 
     candidate_orders = [_PASTE_CANONICAL_FIELDS, _IMPORT_CANONICAL_FIELDS]
     best_row = {}
-    best_score = -1
+    best_score = float("-inf")
+    best_offset = 0
 
     for order in candidate_orders:
-        max_offset = min(3, max(len(cells) - 1, 0))
+        # Permite detectar filas con desplazamientos mayores (copias con columnas previas vacias).
+        max_offset = min(8, max(len(cells) - 1, 0))
         possible_offsets = list(range(0, max_offset + 1))
 
         for offset in possible_offsets:
@@ -192,10 +235,15 @@ def _map_paste_row_best_effort(raw_row):
                     continue
                 mapped[field] = value
 
-            score = _score_paste_mapping(mapped)
-            if score > best_score:
+            non_empty_count = len(mapped)
+            key_field_hits = sum(1 for field in ("cod_inventario", "descripcion", "ubicacion") if mapped.get(field))
+            score = _score_paste_mapping(mapped) + (non_empty_count * 0.35) + (key_field_hits * 1.25)
+
+            # Preferimos menor offset cuando el score es similar para conservar el mapeo base esperado.
+            if score > best_score or (score == best_score and offset < best_offset):
                 best_score = score
                 best_row = mapped
+                best_offset = offset
 
     return best_row
 
@@ -386,15 +434,99 @@ def _looks_like_secondary_header_row(row_values):
     return numeric_cells == 0
 
 
+def _build_merged_cell_value_map(worksheet):
+    merged_map = {}
+    merged_ranges = getattr(getattr(worksheet, "merged_cells", None), "ranges", [])
+    for merged_range in merged_ranges:
+        try:
+            anchor_value = worksheet.cell(row=merged_range.min_row, column=merged_range.min_col).value
+        except Exception:
+            anchor_value = None
+
+        # Si la celda ancla no tiene valor, no propagamos nada.
+        if anchor_value in (None, ""):
+            continue
+
+        for row_idx in range(merged_range.min_row, merged_range.max_row + 1):
+            for col_idx in range(merged_range.min_col, merged_range.max_col + 1):
+                merged_map[(row_idx, col_idx)] = anchor_value
+
+    return merged_map
+
+
+def _has_meaningful_cell_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(re.search(r"[0-9A-Za-zÁÉÍÓÚáéíóúÑñ]", text))
+
+
+def _is_empty_placeholder_text(value):
+    text = str(value or "").strip()
+    if not text:
+        return True
+
+    normalized = _normalize_text(text)
+    if not normalized:
+        return True
+    if normalized in _EMPTY_PLACEHOLDER_NORMALIZED:
+        return True
+
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    if compact in {"sc", "sincodigo", "sincod", "na", "nd", "sd", "vacio"}:
+        return True
+
+    return False
+
+
+def _row_has_meaningful_import_data(row_dict):
+    if not isinstance(row_dict, dict) or not row_dict:
+        return False
+
+    for field in _SIGNIFICANT_IMPORT_FIELDS:
+        if field not in row_dict:
+            continue
+        raw_value = row_dict.get(field)
+        if raw_value in (None, ""):
+            continue
+        if _is_empty_placeholder_text(raw_value):
+            continue
+
+        text = str(raw_value).strip()
+        if re.search(r"[0-9A-Za-zÁÉÍÓÚáéíóúÑñ]", text):
+            return True
+
+    return False
+
+
 def _load_excel_with_detected_headers(file_path):
     from openpyxl import load_workbook
 
-    wb = load_workbook(file_path, read_only=True, data_only=True)
+    wb = load_workbook(file_path, read_only=False, data_only=True)
     ws = wb.active
+    if ws is None:
+        wb.close()
+        return {
+            "header_row_index": 0,
+            "headers": [],
+            "data_rows": [],
+        }
+    merged_map = _build_merged_cell_value_map(ws)
     raw_rows = []
     max_cols = 0
-    for row in ws.iter_rows(values_only=True):
-        text_row = [str(cell).strip() if cell is not None else "" for cell in row]
+    for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        text_row = []
+        for col_idx, cell in enumerate(row, start=1):
+            value = cell
+            if value in (None, ""):
+                value = merged_map.get((row_idx, col_idx))
+
+            if isinstance(value, datetime):
+                value = value.date().isoformat()
+            elif isinstance(value, date):
+                value = value.isoformat()
+
+            text_row.append(str(value).strip() if value is not None else "")
         raw_rows.append(text_row)
         if len(text_row) > max_cols:
             max_cols = len(text_row)
@@ -431,7 +563,7 @@ def _load_excel_with_detected_headers(file_path):
     data_rows = []
     for idx in range(best_idx + 1, len(rows)):
         row = rows[idx]
-        if not any(str(cell or "").strip() for cell in row):
+        if not any(_has_meaningful_cell_value(cell) for cell in row):
             continue
         # Evita tomar como datos filas que parecen nuevos encabezados de otra tabla.
         if _looks_like_secondary_header_row(row):
@@ -459,6 +591,119 @@ def _normalize_compare_value(value):
     if text == "":
         return ""
     return _normalize_text(text)
+
+
+def _normalize_person_name_for_compare(value):
+    normalized = _normalize_text(value)
+    if not normalized:
+        return ""
+
+    tokens = normalized.split()
+    prefixes = {
+        "ing", "ingeniero", "ingeniera", "dr", "dra", "doctor", "doctora",
+        "lic", "licenciado", "licenciada", "abg", "abogada", "abogado",
+        "arq", "arquitecto", "arquitecta", "tec", "tecnico", "tecnica",
+        "sr", "sra", "srta", "msc", "mg", "mgs", "mgtr", "mtr", "mts", "mtro", "mt",
+        "mrt", "prof", "profa", "tlgo", "tlga", "ts", "phd",
+    }
+    while tokens and tokens[0] in prefixes:
+        tokens.pop(0)
+    return " ".join(tokens)
+
+
+def _normalize_import_date_for_compare(raw_value):
+    if raw_value in (None, ""):
+        return None
+
+    if isinstance(raw_value, datetime):
+        return raw_value.date().isoformat()
+    if isinstance(raw_value, date):
+        return raw_value.isoformat()
+
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    iso_match = re.match(r"^(\d{4}-\d{2}-\d{2})", text)
+    if iso_match:
+        return iso_match.group(1)
+
+    # Serial de Excel en texto numerico.
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
+        serial = float(text)
+        if serial > 59:
+            epoch = datetime(1899, 12, 30)
+            parsed = epoch + timedelta(days=int(serial))
+            return parsed.date().isoformat()
+
+    patterns = [
+        "%d/%m/%Y",
+        "%d/%m/%Y %H:%M:%S",
+        "%d-%m-%Y",
+        "%d-%m-%Y %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M:%S",
+    ]
+    for pattern in patterns:
+        try:
+            return datetime.strptime(text, pattern).date().isoformat()
+        except ValueError:
+            continue
+
+    return text
+
+
+def _normalize_int_like_value_for_compare(value):
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        number = float(text.replace(",", "."))
+    except (TypeError, ValueError):
+        return value
+    if number.is_integer():
+        return int(number)
+    return value
+
+
+def _normalize_money_value_for_compare(value):
+    if value in (None, ""):
+        return None
+    text = str(value).strip().replace(" ", "")
+    if not text:
+        return None
+
+    if "," in text and "." in text:
+        text = text.replace(".", "").replace(",", ".")
+    elif "," in text:
+        text = text.replace(",", ".")
+
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return value
+
+
+def _normalize_row_for_exact_compare(row_data):
+    normalized = dict(row_data or {})
+    _normalize_codes_in_row_data(normalized)
+
+    normalized["usuario_final"] = _normalize_person_name_for_compare(normalized.get("usuario_final"))
+
+    normalized["cantidad"] = _normalize_int_like_value_for_compare(normalized.get("cantidad"))
+    if normalized.get("cantidad") in (None, ""):
+        # En inserción la cantidad vacía se guarda como 1; igualamos criterio para exact match.
+        normalized["cantidad"] = 1
+
+    for money_field in ("valor", "valor_esbye"):
+        normalized[money_field] = _normalize_money_value_for_compare(normalized.get(money_field))
+
+    for date_field in ("fecha_adquisicion", "fecha_adquisicion_esbye"):
+        normalized[date_field] = _normalize_import_date_for_compare(normalized.get(date_field))
+
+    return normalized
 
 
 def _get_row_value(container, field):
@@ -542,7 +787,40 @@ def _extract_floor_hint(text):
     return ""
 
 
-def _guess_area_id_from_location_text(location_text):
+def _format_floor_hint_for_message(floor_hint, target_text):
+    base = str(floor_hint or "").strip()
+    normalized_target = _normalize_text(target_text)
+    if not base:
+        return ""
+    if "planta baja" in base:
+        return "planta baja"
+    if "segundo piso" in base and "alto" in normalized_target:
+        return "segundo piso alto"
+    if "segundo piso" in base and "bajo" in normalized_target:
+        return "segundo piso bajo"
+    if "primer piso" in base and "alto" in normalized_target:
+        return "primer piso alto"
+    if "primer piso" in base and "bajo" in normalized_target:
+        return "primer piso bajo"
+    if "tercer piso" in base and "alto" in normalized_target:
+        return "tercer piso alto"
+    if "tercer piso" in base and "bajo" in normalized_target:
+        return "tercer piso bajo"
+    return base
+
+
+def _extract_location_kind(text):
+    normalized = _normalize_text(text)
+    if not normalized:
+        return ""
+    if "pasillo" in normalized:
+        return "pasillo"
+    if "aula" in normalized or _extract_compact_aula_code(normalized):
+        return "aula"
+    return ""
+
+
+def _guess_area_match_from_location_text(location_text):
     target = _normalize_text(location_text)
     if not target:
         return None
@@ -550,6 +828,7 @@ def _guess_area_id_from_location_text(location_text):
     target_tokens = [token for token in re.split(r"\s+|/|-", target) if token]
     target_aula_code = _extract_compact_aula_code(target)
     floor_hint = _extract_floor_hint(target)
+    target_kind = _extract_location_kind(target)
 
     db = get_db()
     rows = db.execute(
@@ -561,29 +840,32 @@ def _guess_area_id_from_location_text(location_text):
         """
     ).fetchall()
 
+    candidates = []
+    pasillo_candidates = []
     best_id = None
+    best_display = ""
     best_score = 0
 
     for row in rows:
-        area_name = _normalize_text(row["area_nombre"])
-        floor_name = _normalize_text(row["piso_nombre"])
-        block_name = _normalize_text(row["bloque_nombre"])
+        area_name_raw = str(row["area_nombre"] or "").strip()
+        floor_name_raw = str(row["piso_nombre"] or "").strip()
+        block_name_raw = str(row["bloque_nombre"] or "").strip()
+
+        area_name = _normalize_text(area_name_raw)
+        floor_name = _normalize_text(floor_name_raw)
+        block_name = _normalize_text(block_name_raw)
         full_name = f"{block_name} {floor_name} {area_name}".strip()
 
         score = 0
-
         if target == area_name or target == full_name:
             score += 30
         if target in full_name:
             score += 10
 
-        # Coincidencia por codigo tipo 6c-101 o 6c101.
-        target_code = target_aula_code
         area_code = _extract_compact_aula_code(area_name)
-        if target_code and area_code and target_code == area_code:
+        if target_aula_code and area_code and target_aula_code == area_code:
             score += 35
 
-        # Coincidencia textual progresiva por tokens.
         area_tokens = [token for token in re.split(r"\s+|/|-", full_name) if token]
         token_hits = 0
         for token in target_tokens:
@@ -593,22 +875,90 @@ def _guess_area_id_from_location_text(location_text):
                 token_hits += 1
         score += min(token_hits * 2, 16)
 
-        # Pista por piso.
         if floor_hint and floor_hint in floor_name:
             score += 8
 
-        # Pista por bloque (ej: 6C-101 -> bloque C).
-        block_letter_match = re.search(r"\d+([a-z])", target_code or "")
+        if "alto" in target:
+            if "alto" in floor_name:
+                score += 4
+            elif "bajo" in floor_name:
+                score -= 3
+        if "bajo" in target:
+            if "bajo" in floor_name:
+                score += 4
+            elif "alto" in floor_name:
+                score -= 3
+
+        block_letter_match = re.search(r"\d+([a-z])", target_aula_code or "")
         if block_letter_match:
             block_letter = block_letter_match.group(1)
             if f"bloque {block_letter}" in block_name:
                 score += 10
 
+        # Si el texto fuente pide PASILLO, evitamos caer en aulas del mismo piso por similitud de tokens.
+        if target_kind == "pasillo":
+            if "pasillo" in area_name:
+                score += 22
+            else:
+                score -= 20
+        elif target_kind == "aula":
+            if "aula" in area_name or area_code:
+                score += 8
+
+        candidate = {
+            "id": int(row["id"]),
+            "display": " / ".join(part for part in [block_name_raw, floor_name_raw, area_name_raw] if part),
+            "area_name": area_name,
+            "floor_name": floor_name,
+            "score": score,
+        }
+        candidates.append(candidate)
+        if "pasillo" in area_name:
+            pasillo_candidates.append(candidate)
+
         if score > best_score:
             best_score = score
-            best_id = row["id"]
+            best_id = candidate["id"]
+            best_display = candidate["display"]
 
-    return best_id if best_score >= 10 else None
+    if target_kind == "pasillo":
+        # Para entradas tipo PASILLO nunca tomamos aulas como fallback.
+        if not pasillo_candidates:
+            return None
+
+        best_pasillo = max(
+            pasillo_candidates,
+            key=lambda c: c["score"] + (5 if floor_hint and floor_hint in c["floor_name"] else 0),
+        )
+        best_id = best_pasillo["id"]
+        best_display = best_pasillo["display"]
+        best_score = best_pasillo["score"]
+
+    if best_id is None or best_score < 10:
+        return None
+
+    warning = ""
+    if target_kind == "pasillo":
+        floor_candidates = [c for c in candidates if floor_hint and floor_hint in c["floor_name"]]
+        floor_has_pasillo = any("pasillo" in c["area_name"] for c in floor_candidates)
+        floor_exists = bool(floor_candidates)
+
+        if floor_exists and not floor_has_pasillo:
+            floor_label = _format_floor_hint_for_message(floor_hint, target)
+            warning = f"La ubicación original indica {floor_label}, pero no hay un pasillo registrado en ese piso."
+
+    return {
+        "area_id": best_id,
+        "display": best_display,
+        "warning": warning,
+    }
+
+
+def _guess_area_id_from_location_text(location_text):
+    match = _guess_area_match_from_location_text(location_text)
+    if not match:
+        return None
+    return match.get("area_id")
 
 
 def _analyze_chunk_against_inventory(chunk_rows):
@@ -641,34 +991,35 @@ def _analyze_chunk_against_inventory(chunk_rows):
     esbye_code_index = {}
     for row in db_rows:
         summary = _inventory_summary_item(row)
-        row_key = _build_row_key(row)
+        normalized_db_row = _normalize_row_for_exact_compare(dict(row))
+        row_key = _build_row_key(normalized_db_row)
         if not _is_empty_row_key(row_key):
             exact_index.setdefault(row_key, []).append(summary)
 
-        inv_code = _normalize_code_compare_value(row["cod_inventario"])
+        inv_code = _normalize_code_compare_value(normalized_db_row.get("cod_inventario"))
         if inv_code:
             inv_code_index.setdefault(inv_code, []).append(summary)
 
-        esbye_code = _normalize_code_compare_value(row["cod_esbye"])
+        esbye_code = _normalize_code_compare_value(normalized_db_row.get("cod_esbye"))
         if esbye_code:
             esbye_code_index.setdefault(esbye_code, []).append(summary)
 
     analyzed = []
     for row in chunk_rows:
         row_data = dict(row.get("data") or {})
-        _normalize_codes_in_row_data(row_data)
+        compare_row_data = _normalize_row_for_exact_compare(row_data)
         exact_matches = []
         similar_matches = []
 
-        row_key = _build_row_key(row_data)
+        row_key = _build_row_key(compare_row_data)
         if not _is_empty_row_key(row_key):
             exact_matches = exact_index.get(row_key, [])
 
-        inv_code = _normalize_code_compare_value(row_data.get("cod_inventario"))
+        inv_code = _normalize_code_compare_value(compare_row_data.get("cod_inventario"))
         if inv_code:
             similar_matches.extend(inv_code_index.get(inv_code, []))
 
-        esbye_code = _normalize_code_compare_value(row_data.get("cod_esbye"))
+        esbye_code = _normalize_code_compare_value(compare_row_data.get("cod_esbye"))
         if esbye_code:
             similar_matches.extend(esbye_code_index.get(esbye_code, []))
 
@@ -692,19 +1043,19 @@ def _analyze_chunk_against_inventory(chunk_rows):
         exact_with_fields = []
         for item in exact_matches:
             enriched = dict(item)
-            enriched["match_fields"] = _build_match_fields(row_data, item)
+            enriched["match_fields"] = _build_match_fields(compare_row_data, item)
             exact_with_fields.append(enriched)
 
         similar_with_fields = []
         for item in similar_matches:
             enriched = dict(item)
-            enriched["match_fields"] = _build_match_fields(row_data, item)
+            enriched["match_fields"] = _build_match_fields(compare_row_data, item)
             similar_with_fields.append(enriched)
 
         analyzed.append(
             {
                 "row_index": row.get("row_index"),
-                "data": row_data,
+                "data": compare_row_data,
                 "status": status,
                 "exact_matches": exact_with_fields,
                 "similar_matches": similar_with_fields,
@@ -726,6 +1077,8 @@ def _build_mapped_chunk(data_rows, mapping, start_index, chunk_size, rows_overri
                 if canonical in ALLOWED_INVENTORY_FIELDS and canonical != "item_numero":
                     clean_data[canonical] = value
             _normalize_codes_in_row_data(clean_data)
+            if not _row_has_meaningful_import_data(clean_data):
+                continue
             normalized_rows.append(
                 {
                     "row_index": start_index + idx,
@@ -744,6 +1097,14 @@ def _build_mapped_chunk(data_rows, mapping, start_index, chunk_size, rows_overri
             if not canonical or canonical not in ALLOWED_INVENTORY_FIELDS or canonical == "item_numero":
                 continue
             value = str(cell).strip() if cell is not None else None
+            if value in (None, ""):
+                continue
+
+            if canonical in ("fecha_adquisicion", "fecha_adquisicion_esbye"):
+                date_time_match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?", value)
+                if date_time_match:
+                    value = date_time_match.group(1)
+
             existing_value = row_dict.get(canonical)
 
             # Si varias columnas se mapean al mismo campo, no pisar un valor util con vacio.
@@ -757,7 +1118,8 @@ def _build_mapped_chunk(data_rows, mapping, start_index, chunk_size, rows_overri
             row_dict[canonical] = value
         if row_dict:
             _normalize_codes_in_row_data(row_dict)
-            chunk.append({"row_index": idx, "data": row_dict})
+            if _row_has_meaningful_import_data(row_dict):
+                chunk.append({"row_index": idx, "data": row_dict})
     return chunk
 
 
@@ -938,6 +1300,7 @@ def api_paste_inventario():
 
     rows_as_dicts = []
     missing_areas = set()
+    location_warnings = []
     for raw_row in rows:
         if not isinstance(raw_row, list):
             continue
@@ -948,9 +1311,18 @@ def api_paste_inventario():
             continue
 
         if not row_data.get("area_id"):
-            guessed_area_id = _guess_area_id_from_location_text(row_data.get("ubicacion"))
-            if guessed_area_id is not None:
-                row_data["area_id"] = guessed_area_id
+            guessed = _guess_area_match_from_location_text(row_data.get("ubicacion"))
+            if guessed and guessed.get("area_id") is not None:
+                row_data["area_id"] = guessed.get("area_id")
+                if guessed.get("warning"):
+                    location_warnings.append(
+                        {
+                            "row_index": len(rows_as_dicts),
+                            "ubicacion": str(row_data.get("ubicacion") or "").strip(),
+                            "warning": guessed.get("warning"),
+                            "suggested_area": guessed.get("display"),
+                        }
+                    )
         if area_id is not None and not row_data.get("area_id"):
             row_data["area_id"] = area_id
 
@@ -985,6 +1357,7 @@ def api_paste_inventario():
         {
             "inserted": int(result.get("inserted") or 0),
             "skipped": int(result.get("skipped") or 0),
+            "location_warnings": location_warnings,
         }
     ), 201
 
@@ -1172,12 +1545,47 @@ def api_confirmar_importacion():
         ), 409
 
     rows_as_dicts = []
+    invalid_locations = []
+    location_warnings = []
     for row in analyzed_chunk:
         row_data = dict(row.get("data") or {})
-        if not row_data.get("area_id"):
-            guessed_area_id = _guess_area_id_from_location_text(row_data.get("ubicacion"))
-            if guessed_area_id is not None:
-                row_data["area_id"] = guessed_area_id
+        if not _row_has_meaningful_import_data(row_data):
+            continue
+
+        raw_area_id = row_data.get("area_id")
+        has_explicit_area = False
+        if raw_area_id not in (None, "", "null"):
+            try:
+                row_data["area_id"] = int(raw_area_id)
+                has_explicit_area = bool(row_data["area_id"])
+            except (TypeError, ValueError):
+                row_data["area_id"] = None
+
+        raw_location = str(row_data.get("ubicacion") or "").strip()
+        if raw_location and not has_explicit_area:
+            guessed = _guess_area_match_from_location_text(raw_location)
+            if guessed and guessed.get("area_id") is not None:
+                row_data["area_id"] = guessed.get("area_id")
+                if guessed.get("warning"):
+                    location_warnings.append(
+                        {
+                            "row_index": row.get("row_index"),
+                            "ubicacion": raw_location,
+                            "warning": guessed.get("warning"),
+                            "suggested_area": guessed.get("display"),
+                        }
+                    )
+            else:
+                invalid_locations.append(
+                    {
+                        "row_index": row.get("row_index"),
+                        "ubicacion": raw_location,
+                        "descripcion": row_data.get("descripcion"),
+                        "cod_inventario": row_data.get("cod_inventario"),
+                        "cod_esbye": row_data.get("cod_esbye"),
+                    }
+                )
+
         if area_id is not None and not row_data.get("area_id"):
             row_data["area_id"] = area_id
 
@@ -1189,6 +1597,15 @@ def api_confirmar_importacion():
             )
 
         rows_as_dicts.append(row_data)
+
+    if invalid_locations:
+        return jsonify(
+            {
+                "error": "Se encontraron ubicaciones que no existen en la configuración.",
+                "error_code": "invalid_locations",
+                "invalid_locations": invalid_locations,
+            }
+        ), 422
 
     try:
         result = bulk_insert_inventory_dicts(rows_as_dicts, area_id=area_id)
@@ -1209,6 +1626,7 @@ def api_confirmar_importacion():
             "success": True,
             "inserted": result["inserted"],
             "skipped": result["skipped"],
+            "location_warnings": location_warnings,
             "has_more": has_more,
             "next_start_index": start_index + chunk_size,
             "total_rows": total_rows,
