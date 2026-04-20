@@ -1549,79 +1549,91 @@ def list_inventory_items(filters=None, sort_direction="asc", limit=5000):
     return [_row_to_inventory_item(row) for row in rows]
 
 
-def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, per_page=50):
+def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, per_page=50, include_traspaso_acta_id=None):
     where_sql, params = _build_inventory_where_clause(filters)
     direction = "DESC" if str(sort_direction).lower() == "desc" else "ASC"
-
     safe_per_page = max(int(per_page or 50), 1)
-
     db = get_db()
-    total_row = db.execute(
-        f"""
-        SELECT COUNT(1) AS total
-        FROM inventario_items i
-        LEFT JOIN areas a ON a.id = i.area_id
-        LEFT JOIN pisos p ON p.id = a.piso_id
-        LEFT JOIN bloques b ON b.id = p.bloque_id
-        {where_sql}
-        """,
-        params,
-    ).fetchone()
+
+    traspaso_where = ""
+    traspaso_params = []
+    if include_traspaso_acta_id:
+        traspaso_where = "WHERE acta_traspaso_id = ?"
+        traspaso_params = [include_traspaso_acta_id]
+
+    count_query = f"""
+        SELECT 
+            (SELECT COUNT(1) FROM inventario_items i {where_sql}) +
+            (SELECT COUNT(1) FROM inventario_traspasos {traspaso_where}) AS total
+    """
+    total_row = db.execute(count_query, [*params, *traspaso_params]).fetchone()
     total = total_row["total"] if total_row else 0
     total_pages = (total + safe_per_page - 1) // safe_per_page if total else 0
     safe_page = min(max(int(page or 1), 1), max(total_pages, 1))
     offset = (safe_page - 1) * safe_per_page
 
-    rows = db.execute(
-        f"""
-        SELECT
-            i.id,
-            i.item_numero,
-            i.cod_inventario,
-            i.cod_esbye,
-            i.cuenta,
-            i.cantidad,
-            i.descripcion,
-            i.ubicacion,
-            i.marca,
-            i.modelo,
-            i.serie,
-            i.estado,
-            i.condicion,
-            i.usuario_final,
-            i.fecha_adquisicion,
-            i.valor,
-            i.observacion,
-            i.justificacion,
-            i.procedencia,
-            i.descripcion_esbye,
-            i.marca_esbye,
-            i.modelo_esbye,
-            i.serie_esbye,
-            i.valor_esbye,
-            i.ubicacion_esbye,
-            i.observacion_esbye,
-            i.fecha_adquisicion_esbye,
-            i.area_id,
-            i.actualizado_en,
-            a.nombre AS area_nombre,
-            a.piso_id AS piso_id,
-            p.nombre AS piso_nombre,
-            p.bloque_id AS bloque_id,
-            b.nombre AS bloque_nombre
-        FROM inventario_items i
-        LEFT JOIN areas a ON a.id = i.area_id
-        LEFT JOIN pisos p ON p.id = a.piso_id
-        LEFT JOIN bloques b ON b.id = p.bloque_id
-        {where_sql}
-        ORDER BY i.item_numero {direction}, i.id {direction}
-        LIMIT ? OFFSET ?
-        """,
-        [*params, safe_per_page, offset],
-    ).fetchall()
+    # Query completa con JOINs para obtener nombres de áreas, pisos y bloques
+    if include_traspaso_acta_id:
+        main_query = f"""
+            SELECT * FROM (
+                SELECT
+                    i.*, a.nombre AS area_nombre, a.piso_id, p.nombre AS piso_nombre, 
+                    p.bloque_id, b.nombre AS bloque_nombre, 0 AS esta_fuera, 1 AS prioridad
+                FROM inventario_items i
+                LEFT JOIN areas a ON a.id = i.area_id
+                LEFT JOIN pisos p ON p.id = a.piso_id
+                LEFT JOIN bloques b ON b.id = p.bloque_id
+                {where_sql}
+                
+                UNION ALL
+                
+                SELECT
+                    t.id, t.item_numero, t.cod_inventario, t.cod_esbye, t.cuenta, t.cantidad, t.descripcion,
+                    t.ubicacion, t.marca, t.modelo, t.serie, t.estado, t.condicion, t.usuario_final,
+                    t.fecha_adquisicion, t.valor, t.observacion, t.justificacion, t.procedencia,
+                    t.area_id, t.fecha_traspaso AS actualizado_en,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, -- Placeholders para campos esbye faltantes en t
+                    a.nombre AS area_nombre, a.piso_id, p.nombre AS piso_nombre, 
+                    p.bloque_id, b.nombre AS bloque_nombre, 1 AS esta_fuera, 0 AS prioridad
+                FROM inventario_traspasos t
+                LEFT JOIN areas a ON a.id = t.area_id
+                LEFT JOIN pisos p ON p.id = a.piso_id
+                LEFT JOIN bloques b ON b.id = p.bloque_id
+                WHERE t.acta_traspaso_id = ?
+            )
+            ORDER BY prioridad ASC, item_numero {direction}, id {direction}
+            LIMIT ? OFFSET ?
+        """
+        query_params = [*params, include_traspaso_acta_id, safe_per_page, offset]
+    else:
+        main_query = f"""
+            SELECT
+                i.*, a.nombre AS area_nombre, a.piso_id, p.nombre AS piso_nombre, 
+                p.bloque_id, b.nombre AS bloque_nombre, 0 AS esta_fuera, 1 AS prioridad
+            FROM inventario_items i
+            LEFT JOIN areas a ON a.id = i.area_id
+            LEFT JOIN pisos p ON p.id = a.piso_id
+            LEFT JOIN bloques b ON b.id = p.bloque_id
+            {where_sql}
+            ORDER BY i.item_numero {direction}, i.id {direction}
+            LIMIT ? OFFSET ?
+        """
+        query_params = [*params, safe_per_page, offset]
+
+    rows = db.execute(main_query, query_params).fetchall()
+
+    items = []
+    for row in rows:
+        try:
+            item = _row_to_inventory_item(row)
+            item["esta_fuera"] = bool(row.get("esta_fuera", 0))
+            items.append(item)
+        except Exception as e:
+            logger.error(f"Error procesando fila de inventario: {e}")
+            continue
 
     return {
-        "items": [_row_to_inventory_item(row) for row in rows],
+        "items": items,
         "total": total,
         "page": safe_page,
         "per_page": safe_per_page,

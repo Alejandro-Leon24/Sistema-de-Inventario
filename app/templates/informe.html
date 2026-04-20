@@ -375,6 +375,79 @@
                         </div>
                     </div>
 
+                    <!-- sección de acta de bienes de traspaso -->
+                    <div id="sec-traspaso" class="tab-section d-none">
+                        <form class="row g-3 compact-form" id="form-traspaso">
+                            <div class="col-md-4">
+                                <label class="form-label">Número de acta</label>
+                                <input type="text" class="form-control" name="numero_acta" id="traspaso-numero_acta"
+                                    placeholder="Ej: 012-2026" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha de Corte</label>
+                                <input type="date" class="form-control" name="fecha_corte" id="traspaso-fecha_corte">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha de Emisión</label>
+                                <input type="date" class="form-control" name="fecha_emision" id="traspaso-fecha_emision">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Entregado por</label>
+                                <input type="text" class="form-control" name="entregado_por" id="traspaso-entregado_por"
+                                    placeholder="Ej: Econ. Jenny Ortega">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Rol de quien entrega</label>
+                                <input type="text" class="form-control" name="rol_entrega" id="traspaso-rol_entrega"
+                                    placeholder="Ej: Guardalmacén">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Recibido por</label>
+                                <input type="text" class="form-control" name="recibido_por" id="traspaso-recibido_por"
+                                    placeholder="Ej: Abg. Candy Mendoza">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Rol del que recibe</label>
+                                <input type="text" class="form-control" name="rol_recibe" id="traspaso-rol_recibe"
+                                    placeholder="Ej: Decano">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Facultad Entrega</label>
+                                <input type="text" class="form-control" name="facultad_entrega" id="traspaso-facultad_entrega"
+                                    placeholder="Ej: Facultad de Ciencias Médicas">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Facultad Recibe</label>
+                                <input type="text" class="form-control" name="facultad_recibe" id="traspaso-facultad_recibe"
+                                    placeholder="Ej: Facultad de Filosofía">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Descripción de bienes</label>
+                                <textarea class="form-control" name="descripcion_de_bienes" id="traspaso-descripcion_de_bienes" 
+                                    rows="2" placeholder="Ej: Equipos informáticos y mobiliario de oficina..."></textarea>
+                            </div>
+                            <!-- Contenedor dinámico para variables extra -->
+                            <div id="dinamico-traspaso-container" class="col-12 row g-4 m-0 p-0"></div>
+                        </form>
+                        <div class="col-12 mt-3 text-center resultado-tabla-container d-none" style="min-height: 2.5rem;">
+                            <!-- Aquí va a inyectarse el resultado -->
+                        </div>
+
+                        <!-- Botonera Inferior -->
+                        <div class="d-flex flex-wrap justify-content-center gap-3 mt-3">
+                            <button type="button" class="btn btn-outline-secondary shadow-sm" id="btn-vaciar-traspaso">
+                                <i class="bi bi-eraser me-1"></i>Vaciar formulario
+                            </button>
+                            <button type="button" class="btn btn-outline-dark shadow-sm btn-traspaso-exportar">
+                                <i class="bi bi-file-earmark-excel me-1"></i>Bienes Fuera
+                            </button>
+                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
+                            <button class="btn btn-outline-primary shadow-sm btn-historial"><i
+                                    class="bi bi-clock-history me-1"></i>Historial</button>
+                            <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
+                        </div>
+                    </div>
+
                     <!-- sección de actas anuladas -->
                     <div id="sec-anuladas" class="tab-section d-none text-center py-5">
                         <i class="bi bi-x-circle text-muted" style="font-size: 4rem;"></i>
@@ -656,41 +729,41 @@
                 </div>
 
                 <div id="bajas-step-1">
-                    <div class="row g-2 mb-3">
-                        <div class="col-md-4">
-                            <input type="text" class="form-control form-control-sm" id="bajas-buscar"
-                                placeholder="Buscar por código, descripción, marca, modelo...">
+                    <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+                        <div style="min-width: 120px;">
+                            <select class="form-select form-select-sm" id="bajas-filtro-bloque">
+                                <option value="">Bloque</option>
+                            </select>
                         </div>
-                        <div class="col-md-2">
-                            <button type="button" class="btn btn-primary btn-sm w-100" id="btn-bajas-buscar">
-                                <i class="bi bi-search me-1"></i>Buscar
-                            </button>
+                        <div style="min-width: 120px;">
+                            <select class="form-select form-select-sm" id="bajas-filtro-piso">
+                                <option value="">Piso</option>
+                            </select>
                         </div>
-                        <div class="col-md-2 d-flex align-items-center justify-content-end">
-                            <button type="button" class="btn btn-outline-primary btn-sm" id="btn-bajas-columnas">
-                                <i class="bi bi-columns-gap me-1"></i>Columnas
-                            </button>
+                        <div style="min-width: 120px;">
+                            <select class="form-select form-select-sm" id="bajas-filtro-area">
+                                <option value="">Área</option>
+                            </select>
                         </div>
-                        <div class="col-md-4 text-end small text-muted d-flex align-items-center justify-content-end">
-                            <span id="bajas-seleccionados-info">0 seleccionados</span>
+                        <div style="min-width: 220px;">
+                            <input type="text" class="form-control form-control-sm" id="bajas-buscar" placeholder="Buscar por código, descripción, marca, modelo...">
                         </div>
+                        <button type="button" class="btn btn-primary btn-sm" id="btn-bajas-buscar">
+                            <i class="bi bi-search me-1"></i>Buscar
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="btn-bajas-columnas">
+                            <i class="bi bi-columns-gap me-1"></i>Columnas
+                        </button>
+                        <span id="bajas-seleccionados-info" class="small text-muted ms-auto">0 seleccionados</span>
                     </div>
                     <div class="table-responsive border rounded" style="max-height: 58vh; overflow: auto;">
                         <table class="table table-sm table-hover align-middle mb-0">
-                            <thead class="table-light sticky-top">
-                                <tr>
-                                    <th style="width: 48px;"><input class="form-check-input" type="checkbox" id="bajas-check-all"></th>
-                                    <th>ITEM</th>
-                                    <th>COD INV.</th>
-                                    <th>COD. ESBYE</th>
-                                    <th>Descripción</th>
-                                    <th>Estado actual</th>
-                                    <th>Ubicación</th>
-                                </tr>
+                            <thead class="table-light sticky-top" id="thead-bajas-seleccion">
+                                <!-- Renderizado dinámicamente por JS -->
                             </thead>
                             <tbody id="tbody-bajas-seleccion">
                                 <tr>
-                                    <td colspan="7" class="text-center text-muted">Cargando bienes...</td>
+                                    <td colspan="99" class="text-center text-muted">Cargando bienes...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -714,7 +787,18 @@
                 </div>
             </div>
             <div class="modal-footer bg-light justify-content-between">
-                <span class="small text-muted" id="bajas-modal-footer-info">Paso 1 de 2</span>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="small text-muted" id="bajas-modal-footer-info">Paso 1 de 2</span>
+                    <select id="bajas-page-size" class="form-select form-select-sm ms-2" style="width: 70px;">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                    <button id="bajas-page-prev" class="btn btn-outline-secondary btn-sm ms-2" type="button"><i class="bi bi-chevron-left"></i></button>
+                    <span id="bajas-page-info" class="small text-muted">Página 1 de 1</span>
+                    <button id="bajas-page-next" class="btn btn-outline-secondary btn-sm" type="button"><i class="bi bi-chevron-right"></i></button>
+                </div>
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-bajas-atras" disabled>Anterior</button>
                     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
@@ -763,8 +847,8 @@
                 <h5 class="modal-title">Columnas de la tabla de baja</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
-            <div class="modal-body">
-                <div id="bajas-column-selector" class="list-group"></div>
+            <div class="modal-body" style="backdrop-filter:none !important;">
+                <div id="bajas-column-selector" class="list-group" style="height: 60vh; overflow-y: auto;"></div>
                 <p class="small text-muted mt-2 mb-0">
                     Las columnas <strong>Estado</strong> y <strong>Justificación</strong> son obligatorias.
                 </p>

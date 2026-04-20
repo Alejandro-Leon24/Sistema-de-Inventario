@@ -95,8 +95,6 @@ const MODAL_PASTE_FIELDS = [
 	"valor",
 	"usuario_final",
 	"observacion",
-	"justificacion",
-	"procedencia",
 	"descripcion_esbye",
 	"marca_esbye",
 	"modelo_esbye",
@@ -233,6 +231,7 @@ async function initInventoryPage() {
 	};
 
 	const nodes = {
+		btnAbrirModalAgregar: document.getElementById("btn-abrir-modal-agregar"),
 		filtroBloque: document.getElementById("filtro-bloque"),
 		filtroPiso: document.getElementById("filtro-piso"),
 		filtroArea: document.getElementById("filtro-area"),
@@ -1936,12 +1935,13 @@ if (nodes.excelSingleRow) {
 				if (!rows.length) return;
 				const first = rows[0];
 				const mapped = mapPastedRowBestEffortForModal(first);
-				MODAL_PASTE_FIELDS.forEach((field) => {
-					const input = document.querySelector(`#form-agregar-item [data-field='${field}']`);
-					if (input && mapped[field] !== undefined) {
-						assignPastedValue(input, mapped[field]);
-					}
-				});
+				   MODAL_PASTE_FIELDS.forEach((field) => {
+					   const input = document.querySelector(`#form-agregar-item [data-field='${field}']`);
+					   // Solo asignar si el input está visible
+					   if (input && mapped[field] !== undefined && input.offsetParent !== null) {
+						   assignPastedValue(input, mapped[field]);
+					   }
+				   });
 
 				const pastedLocation = String(mapped.ubicacion ?? "").trim();
 				if (pastedLocation) {

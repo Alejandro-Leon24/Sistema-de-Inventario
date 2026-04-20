@@ -359,6 +359,19 @@ const ACTA_TEMPLATE_REQUIRED_VARS = {
         "fecha_emision",
         "tabla_dinamica",
     ],
+    traspaso: [
+        "numero_acta",
+        "fecha_emision",
+        "fecha_corte",
+        "entregado_por",
+        "rol_entrega",
+        "facultad_entrega",
+        "recibido_por",
+        "rol_recibe",
+        "facultad_recibe",
+        "descripcion_de_bienes",
+        "tabla_dinamica",
+    ],
     aula: ["tabla_dinamica"],
 };
 
@@ -1271,6 +1284,14 @@ function populateLocationSelects() {
             });
             if (pre === "aula") updateAulaBatchPreviewCard();
             if (pre === "entrega" || pre === "recepcion") _updateUbicacionFromSelects(pre);
+            // Forzar actualización en el formulario de registrar bien
+            if (pre === "recepcion") {
+                const areaTrabajo = document.getElementById("recepcion-bien-ubicacion");
+                const areaIdHidden = document.getElementById("recepcion-ubicacion-area-id");
+                const areaTrabajoSrc = document.getElementById("recepcion-area-trabajo");
+                if (areaTrabajo && areaTrabajoSrc) areaTrabajo.value = areaTrabajoSrc.value;
+                if (areaIdHidden) areaIdHidden.value = selArea.value;
+            }
         });
 
         selPiso.addEventListener("change", () => {
@@ -1289,6 +1310,14 @@ function populateLocationSelects() {
             });
             if (pre === "aula") updateAulaBatchPreviewCard();
             if (pre === "entrega" || pre === "recepcion") _updateUbicacionFromSelects(pre);
+            // Forzar actualización en el formulario de registrar bien
+            if (pre === "recepcion") {
+                const areaTrabajo = document.getElementById("recepcion-bien-ubicacion");
+                const areaTrabajoSrc = document.getElementById("recepcion-area-trabajo");
+                const areaIdHidden = document.getElementById("recepcion-ubicacion-area-id");
+                if (areaTrabajo && areaTrabajoSrc) areaTrabajo.value = areaTrabajoSrc.value;
+                if (areaIdHidden) areaIdHidden.value = selArea.value;
+            }
         });
 
         if (pre === "aula") {
@@ -1300,6 +1329,12 @@ function populateLocationSelects() {
         if (pre === "recepcion") {
             selArea.addEventListener("change", () => {
                 _updateUbicacionFromSelects(pre);
+                // Forzar actualización en el formulario de registrar bien
+                const areaTrabajo = document.getElementById("recepcion-bien-ubicacion");
+                const areaTrabajoSrc = document.getElementById("recepcion-area-trabajo");
+                const areaIdHidden = document.getElementById("recepcion-ubicacion-area-id");
+                if (areaTrabajo && areaTrabajoSrc) areaTrabajo.value = areaTrabajoSrc.value;
+                if (areaIdHidden) areaIdHidden.value = selArea.value;
             });
         }
 
@@ -1655,6 +1690,16 @@ function updateBajasSummary() {
 function getRecepcionBienFormValues() {
     const cantidadRaw = String(document.getElementById("recepcion-bien-cantidad")?.value || "1").trim();
     const cantidad = Number(cantidadRaw);
+    // Validación de ubicación obligatoria
+    const bloque = String(document.getElementById("recepcion-bloque")?.value || "").trim();
+    const piso = String(document.getElementById("recepcion-piso")?.value || "").trim();
+    const area = String(document.getElementById("recepcion-area")?.value || "").trim();
+    if (!bloque && !piso && !area) {
+        notify("Debe seleccionar al menos un bloque, piso o área antes de registrar un bien.", true);
+        throw new Error("Ubicación obligatoria");
+    }
+    // Siempre tomar la ubicación actual del área de trabajo
+    const ubicacion = String(document.getElementById("recepcion-area-trabajo")?.value || "").trim();
     return {
         cod_inventario: normalizeCodeToPlaceholder(document.getElementById("recepcion-bien-cod-inventario")?.value),
         cod_esbye: normalizeCodeToPlaceholder(document.getElementById("recepcion-bien-cod-esbye")?.value),
@@ -1665,7 +1710,7 @@ function getRecepcionBienFormValues() {
         modelo: String(document.getElementById("recepcion-bien-modelo")?.value || "").trim(),
         serie: String(document.getElementById("recepcion-bien-serie")?.value || "").trim(),
         estado: String(document.getElementById("recepcion-bien-estado")?.value || "").trim(),
-        ubicacion: String(document.getElementById("recepcion-bien-ubicacion")?.value || document.getElementById("recepcion-area-trabajo")?.value || "").trim(),
+        ubicacion: ubicacion,
         fecha_adquisicion: String(document.getElementById("recepcion-bien-fecha-adquisicion")?.value || "").trim(),
         valor: String(document.getElementById("recepcion-bien-valor")?.value || "").trim(),
         usuario_final: String(document.getElementById("recepcion-bien-usuario-final")?.value || "").trim(),
@@ -1811,6 +1856,10 @@ function loadRecepcionBienIntoForm(index) {
     assign("recepcion-bien-valor-esbye", item.valor_esbye);
     assign("recepcion-bien-ubicacion-esbye", item.ubicacion_esbye || "");
     assign("recepcion-bien-observacion-esbye", item.observacion_esbye);
+    // Forzar que la ubicación (acta) sea la seleccionada actualmente en el formulario principal
+    const areaTrabajoSrc = document.getElementById("recepcion-area-trabajo");
+    const ubicacionActa = areaTrabajoSrc ? areaTrabajoSrc.value : (item.ubicacion || "");
+    assign("recepcion-bien-ubicacion", ubicacionActa);
     setRecepcionEditMode(index);
 }
 
@@ -1916,7 +1965,8 @@ function renderRecepcionBienesTable() {
             const confirmed = window.confirm("¿Deseas eliminar este bien de la lista temporal?");
             if (!confirmed) return;
             recepcionBienesTemp.splice(idx, 1);
-            if (recepcionEditIndex === idx) {
+            // Si el bien eliminado es el que se está editando o si ya no existe, limpiar edición
+            if (recepcionEditIndex === idx || recepcionEditIndex >= recepcionBienesTemp.length) {
                 clearRecepcionBienForm();
                 setRecepcionEditMode(-1);
             } else if (recepcionEditIndex > idx) {
@@ -1988,6 +2038,36 @@ function setupRecepcionBienesModal() {
     const estadoSelect = document.getElementById("recepcion-bien-estado");
     const usuarioFinalSelect = document.getElementById("recepcion-bien-usuario-final");
     if (!modalEl || !btnOpen || !btnSave || !btnConfirm) return;
+
+    // Validar antes de guardar bien
+    btnSave.addEventListener("click", (e) => {
+        try {
+            getRecepcionBienFormValues();
+        } catch (err) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }, true);
+
+    // Validar antes de confirmar registro de todos los bienes
+    btnConfirm.addEventListener("click", (e) => {
+        try {
+            // Si hay algún bien sin ubicación válida, bloquear
+            for (const bien of recepcionBienesTemp) {
+                if (!bien.ubicacion) {
+                    notify("Todos los bienes deben tener una ubicación válida.", true);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+            }
+        } catch (err) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }, true);
 
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     const duplicateNodes = {
@@ -2864,6 +2944,17 @@ function setupRecepcionBienesModal() {
 
     btnOpen.addEventListener("click", (event) => {
         event.preventDefault();
+
+        // Validar directamente los filtros del formulario de acta de recepción
+        const b = document.getElementById("recepcion-bloque")?.value || "";
+        const p = document.getElementById("recepcion-piso")?.value || "";
+        const a = document.getElementById("recepcion-area")?.value || "";
+
+        if (!b || !p || !a) {
+            notify("Debe seleccionar Bloque, Piso y Área en el formulario del acta antes de registrar bienes.", true);
+            return;
+        }
+
         syncRecepcionUbicacionReadonly();
         loadRecepcionSelectOptions();
         recepcionTablePage = 1;
@@ -2903,7 +2994,7 @@ function setupRecepcionBienesModal() {
         const forcedLocation = String(ubicacionReadonly?.value || "").trim();
         const forcedAreaId = String(document.getElementById("recepcion-ubicacion-area-id")?.value || "").trim();
         if (!forcedLocation || !forcedAreaId) {
-            notify("Seleccione Bloque, Piso y Área en el acta antes de importar bienes.", true);
+            notify("Debe seleccionar Bloque, Piso y Área en el formulario del acta antes de importar bienes.", true);
             return;
         }
         resetImportState();
@@ -3024,12 +3115,23 @@ function setupRecepcionBienesModal() {
 
     btnSave.addEventListener("click", async () => {
         const payload = getRecepcionBienFormValues();
+        // Forzar que la ubicación y área_id sean las seleccionadas en el formulario principal
+        const areaTrabajoSrc = document.getElementById("recepcion-area-trabajo");
+        const areaIdHidden = document.getElementById("recepcion-ubicacion-area-id");
+        if (areaTrabajoSrc) payload.ubicacion = areaTrabajoSrc.value;
+        if (areaIdHidden) payload.area_id = areaIdHidden.value;
+
         if (!payload.descripcion) {
             notify("La descripción del bien es obligatoria.", true);
             return;
         }
         if (!payload.cantidad || payload.cantidad <= 0) {
             notify("La cantidad debe ser un entero mayor que 0.", true);
+            return;
+        }
+        // Validar que haya ubicación seleccionada
+        if (!isRecepcionAreaTrabajoValida()) {
+            notify("Debe seleccionar bloque, piso y área antes de registrar un bien.", true);
             return;
         }
 
@@ -3039,10 +3141,14 @@ function setupRecepcionBienesModal() {
             if (!confirmed) return;
         }
 
-        if (recepcionEditIndex >= 0 && recepcionBienesTemp[recepcionEditIndex]) {
+        // Si se está editando y se borró la descripción o ubicación, eliminar el bien de la lista
+        if ((recepcionEditIndex >= 0 && recepcionBienesTemp[recepcionEditIndex]) && (!payload.descripcion || !payload.ubicacion)) {
+            recepcionBienesTemp.splice(recepcionEditIndex, 1);
+            notify("Bien eliminado de la lista temporal por datos incompletos.");
+        } else if (recepcionEditIndex >= 0 && recepcionBienesTemp[recepcionEditIndex]) {
             recepcionBienesTemp[recepcionEditIndex] = payload;
             notify("Bien actualizado en la lista temporal.");
-        } else {
+        } else if (payload.descripcion && payload.ubicacion) {
             recepcionBienesTemp.push(payload);
             notify("Bien agregado a la lista temporal.");
         }
@@ -3124,10 +3230,9 @@ function setBajasStep(step) {
 
 function applyBajasSelectionFilter() {
     const needle = String(document.getElementById("bajas-buscar")?.value || "").trim().toLowerCase();
-    if (!needle) {
-        bajasFilteredItems = Array.isArray(inventoryDataCache) ? [...inventoryDataCache] : [];
-        return;
-    }
+    const bloque = String(document.getElementById("bajas-filtro-bloque")?.value || "").trim().toLowerCase();
+    const piso = String(document.getElementById("bajas-filtro-piso")?.value || "").trim().toLowerCase();
+    const area = String(document.getElementById("bajas-filtro-area")?.value || "").trim().toLowerCase();
 
     bajasFilteredItems = (Array.isArray(inventoryDataCache) ? inventoryDataCache : []).filter((item) => {
         const bag = [
@@ -3143,52 +3248,102 @@ function applyBajasSelectionFilter() {
         ]
             .map((value) => String(value || "").toLowerCase())
             .join(" ");
-        return bag.includes(needle);
+        const matchText = !needle || bag.includes(needle);
+        const matchBloque = !bloque || (item?.ubicacion || "").toLowerCase().includes(bloque);
+        const matchPiso = !piso || (item?.ubicacion || "").toLowerCase().includes(piso);
+        const matchArea = !area || (item?.ubicacion || "").toLowerCase().includes(area);
+        return matchText && matchBloque && matchPiso && matchArea;
     });
 }
 
 function renderBajasSelectionTable() {
     const tbody = document.getElementById("tbody-bajas-seleccion");
+    const thead = document.getElementById("thead-bajas-seleccion");
     const selectedInfo = document.getElementById("bajas-seleccionados-info");
     const checkAll = document.getElementById("bajas-check-all");
-    if (!tbody) return;
+    if (!tbody || !thead) return;
 
+    // Columnas seleccionadas
+    const selectedIds = normalizeBajasColumnIds(bajasSelectedColumnIds);
+    const selectedCols = selectedIds
+        .map((id) => BAJAS_BIENES_COLUMNS.find((col) => col.id === id))
+        .filter(Boolean);
+
+    // Renderizar encabezado dinámico
+    thead.innerHTML = "";
+    const trHead = document.createElement("tr");
+    // Checkbox de selección global
+    const thCheck = document.createElement("th");
+    thCheck.style.width = "48px";
+    thCheck.innerHTML = '<input class="form-check-input" type="checkbox" id="bajas-check-all">';
+    trHead.appendChild(thCheck);
+    selectedCols.forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col.label === "ESTADO" ? "Estado actual" : col.label;
+        trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+
+    const page = bajasPage || 1;
+    const perPage = bajasPerPage || 25;
     const rows = Array.isArray(bajasFilteredItems) ? bajasFilteredItems : [];
-    if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No hay bienes para mostrar.</td></tr>';
+    const total = rows.length;
+    const totalPages = Math.max(1, Math.ceil(total / perPage));
+    const start = (page - 1) * perPage;
+    const pageRows = rows.slice(start, start + perPage);
+    if (!pageRows.length) {
+        tbody.innerHTML = `<tr><td colspan="${selectedCols.length + 1}" class="text-center text-muted">No hay bienes para mostrar.</td></tr>`;
         if (selectedInfo) selectedInfo.textContent = `${bajasSelectedItemIds.size} seleccionados`;
         if (checkAll) checkAll.checked = false;
         return;
     }
 
     tbody.innerHTML = "";
-    rows.forEach((item) => {
+    pageRows.forEach((item) => {
         const itemId = Number(item?.id || 0);
         const tr = document.createElement("tr");
-        tr.innerHTML = `
-            <td><input type="checkbox" class="form-check-input bajas-item-check" data-id="${itemId}" ${bajasSelectedItemIds.has(itemId) ? "checked" : ""}></td>
-            <td>${String(item?.item_numero || "-")}</td>
-            <td>${String(item?.cod_inventario || "")}</td>
-            <td>${String(item?.cod_esbye || "")}</td>
-            <td>${String(item?.descripcion || "")}</td>
-            <td>${String(item?.estado || "")}</td>
-            <td>${String(item?.ubicacion || "")}</td>
-        `;
+        let tds = `<td><input type="checkbox" class="form-check-input bajas-item-check" data-id="${itemId}" ${bajasSelectedItemIds.has(itemId) ? "checked" : ""}></td>`;
+        selectedCols.forEach((col) => {
+            let value = "";
+            if (col.id === "estado") {
+                value = String(item?.estado || "");
+            } else if (col.id === "item_numero") {
+                value = String(item?.item_numero || "-");
+            } else {
+                value = String(item?.[col.id] || "");
+            }
+            tds += `<td>${value}</td>`;
+        });
+        tr.innerHTML = tds;
+        // Mantener la selección global aunque se cambie de página
+        const checkbox = tr.querySelector(".bajas-item-check");
+        if (checkbox) {
+            checkbox.checked = bajasSelectedItemIds.has(itemId);
+            checkbox.addEventListener("change", (event) => {
+                if (event.target.checked) {
+                    bajasSelectedItemIds.add(itemId);
+                } else {
+                    bajasSelectedItemIds.delete(itemId);
+                }
+                if (selectedInfo) selectedInfo.textContent = `${bajasSelectedItemIds.size} seleccionados`;
+                // Mantener el estado del checkAll
+                if (checkAll) {
+                    checkAll.checked = rows.every((row) => bajasSelectedItemIds.has(Number(row?.id || 0)));
+                }
+            });
+        }
         tbody.appendChild(tr);
     });
 
-    tbody.querySelectorAll(".bajas-item-check").forEach((chk) => {
-        chk.addEventListener("change", (event) => {
-            const itemId = Number(event.target?.dataset?.id || 0);
-            if (!itemId) return;
-            if (event.target.checked) {
-                bajasSelectedItemIds.add(itemId);
-            } else {
-                bajasSelectedItemIds.delete(itemId);
-            }
-            if (selectedInfo) selectedInfo.textContent = `${bajasSelectedItemIds.size} seleccionados`;
-        });
-    });
+    // Actualizar paginación
+    const pageInfo = document.getElementById("bajas-page-info");
+    if (pageInfo) pageInfo.textContent = `Página ${page} de ${totalPages}`;
+    const prevBtn = document.getElementById("bajas-page-prev");
+    const nextBtn = document.getElementById("bajas-page-next");
+    if (prevBtn) prevBtn.disabled = page <= 1;
+    if (nextBtn) nextBtn.disabled = page >= totalPages;
+    const sizeSel = document.getElementById("bajas-page-size");
+    if (sizeSel) sizeSel.value = String(perPage);
 
     if (selectedInfo) selectedInfo.textContent = `${bajasSelectedItemIds.size} seleccionados`;
     if (checkAll) {
@@ -3294,6 +3449,76 @@ function renderBajasColumnSelector() {
 }
 
 function setupBajasBienesModal() {
+        // Inicializar selects de filtro (bloque, piso, área)
+        const filtroBloque = document.getElementById("bajas-filtro-bloque");
+        const filtroPiso = document.getElementById("bajas-filtro-piso");
+        const filtroArea = document.getElementById("bajas-filtro-area");
+        if (filtroBloque && filtroPiso && filtroArea && Array.isArray(structureData)) {
+            // Llenar bloques
+            filtroBloque.innerHTML = '<option value="">Bloque</option>';
+            const bloques = [...new Set(structureData.map(a => a.bloque).filter(Boolean))];
+            bloques.forEach(b => {
+                const opt = document.createElement("option");
+                opt.value = b;
+                opt.textContent = b;
+                filtroBloque.appendChild(opt);
+            });
+            // Llenar pisos y áreas según bloque seleccionado
+            const updatePisosYAreas = () => {
+                const bloqueSel = filtroBloque.value;
+                filtroPiso.innerHTML = '<option value="">Piso</option>';
+                filtroArea.innerHTML = '<option value="">Área</option>';
+                if (!bloqueSel) return;
+                const pisos = [...new Set(structureData.filter(a => a.bloque === bloqueSel).map(a => a.piso).filter(Boolean))];
+                pisos.forEach(p => {
+                    const opt = document.createElement("option");
+                    opt.value = p;
+                    opt.textContent = p;
+                    filtroPiso.appendChild(opt);
+                });
+                filtroPiso.disabled = !pisos.length;
+                filtroArea.disabled = true;
+            };
+            filtroBloque.addEventListener("change", () => {
+                updatePisosYAreas();
+                applyBajasSelectionFilter();
+            });
+            filtroPiso.addEventListener("change", () => {
+                const bloqueSel = filtroBloque.value;
+                const pisoSel = filtroPiso.value;
+                filtroArea.innerHTML = '<option value="">Área</option>';
+                if (!bloqueSel || !pisoSel) return;
+                const areas = [...new Set(structureData.filter(a => a.bloque === bloqueSel && a.piso === pisoSel).map(a => a.area).filter(Boolean))];
+                areas.forEach(a => {
+                    const opt = document.createElement("option");
+                    opt.value = a;
+                    opt.textContent = a;
+                    filtroArea.appendChild(opt);
+                });
+                filtroArea.disabled = !areas.length;
+                applyBajasSelectionFilter();
+            });
+            filtroArea.addEventListener("change", applyBajasSelectionFilter);
+            updatePisosYAreas();
+        }
+
+        // Paginación
+        document.getElementById("bajas-page-prev")?.addEventListener("click", () => {
+            if (bajasPage > 1) bajasPage--;
+            renderBajasSelectionTable();
+        });
+        document.getElementById("bajas-page-next")?.addEventListener("click", () => {
+            const total = bajasFilteredItems.length;
+            const totalPages = Math.max(1, Math.ceil(total / bajasPerPage));
+            if (bajasPage < totalPages) bajasPage++;
+            renderBajasSelectionTable();
+        });
+        document.getElementById("bajas-page-size")?.addEventListener("change", (e) => {
+            const val = Number(e.target.value) || 25;
+            bajasPerPage = val;
+            bajasPage = 1;
+            renderBajasSelectionTable();
+        });
     const modalEl = document.getElementById("modalBajasBienes");
     if (!modalEl) return;
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
@@ -3361,7 +3586,7 @@ function setupBajasBienesModal() {
                 cod_inventario: String(item?.cod_inventario || ""),
                 cod_esbye: String(item?.cod_esbye || ""),
                 descripcion: String(item?.descripcion || ""),
-                estado: "MALO",
+                estado: String(item?.estado || "MALO"), // Estado real de BD
                 justificacion: String(item?.justificacion || ""),
                 procedencia: String(item?.procedencia || ""),
             }));
@@ -3386,7 +3611,8 @@ function setupBajasBienesModal() {
         const selected = checks.map((node) => String(node.value || "").trim()).filter(Boolean);
         bajasSelectedColumnIds = normalizeBajasColumnIds(selected);
         await saveBajasColumnPreferences();
-        renderBajasEditionTable();
+        renderBajasSelectionTable(); // Renderiza tabla del paso 1
+        renderBajasEditionTable();   // Renderiza tabla del paso 2
         modalColumnas?.hide();
     });
 
@@ -3452,6 +3678,38 @@ function fillActaFormFromData(tipo, formularioData) {
             idFallback.value = normalizedValue;
         }
     });
+
+    // --- Lógica especial para selects de ubicación en recepción ---
+    if (normalizeTipoActa(tipo) === "recepcion") {
+        // Espera a que los selects estén poblados (structureData debe estar cargado)
+        setTimeout(() => {
+            const pre = "recepcion";
+            const selBloque = document.getElementById(`${pre}-bloque`);
+            const selPiso = document.getElementById(`${pre}-piso`);
+            const selArea = document.getElementById(`${pre}-area`);
+            // Buscar los valores guardados en el formularioData
+            const bloqueId = formularioData.bloque_id || formularioData.bloque || "";
+            const pisoId = formularioData.piso_id || formularioData.piso || "";
+            const areaId = formularioData.area_id || formularioData.area || "";
+
+            if (selBloque && bloqueId) {
+                selBloque.value = String(bloqueId);
+                selBloque.dispatchEvent(new Event("change"));
+            }
+            setTimeout(() => {
+                if (selPiso && pisoId) {
+                    selPiso.value = String(pisoId);
+                    selPiso.dispatchEvent(new Event("change"));
+                }
+                setTimeout(() => {
+                    if (selArea && areaId) {
+                        selArea.value = String(areaId);
+                        selArea.dispatchEvent(new Event("change"));
+                    }
+                }, 60);
+            }, 60);
+        }, 120);
+    }
 }
 
 function applyHistorialPayloadToEditor(record) {
@@ -3869,15 +4127,37 @@ function renderExtraccionTable(items) {
     items.forEach((item) => {
         const tr = document.createElement("tr");
         const itemId = Number(item.id);
+        const isFuera = item.esta_fuera || false;
+        
+        // Auto-seleccionar si está fuera (significa que pertenece a esta acta que estamos editando)
+        if (isFuera && !selectedItemIds.has(itemId)) {
+            selectedItemIds.add(itemId);
+            window._globalSelectedTableRows.push(item);
+        }
+
+        if (isFuera) {
+            tr.classList.add("table-danger-light");
+            tr.style.color = "#842029";
+        }
+
         const checked = selectedItemIds.has(itemId) ? "checked" : "";
-        let html = `<td class="text-center"><input class="form-check-input item-extract-chk" type="checkbox" value="${itemId}" ${checked}></td>`;
+        let html = `<td class="text-center">
+            <input class="form-check-input item-extract-chk" type="checkbox" value="${itemId}" ${checked}>
+        </td>`;
+        
         selectedColumns.forEach((id) => {
-            const value = id === "cod_inventario" || id === "cod_esbye"
+            let value = id === "cod_inventario" || id === "cod_esbye"
                 ? normalizeCodeToPlaceholder(item[id])
                 : (item[id] || "-");
+            
             const cellClass = (id === "cod_inventario" || id === "cod_esbye") && isNoCodeValue(value)
                 ? ' class="code-sc-cell"'
                 : "";
+            
+            if (id === "descripcion" && isFuera) {
+                value = `<span class="badge bg-danger me-2">FUERA</span> ${value}`;
+            }
+            
             html += `<td${cellClass}>${value}</td>`;
         });
         tr.innerHTML = html;
@@ -3971,14 +4251,19 @@ function applyExtraccionesFilter() {
     renderExtraccionCurrentPage();
 }
 
-async function loadExtraccionData() {
-    if (inventoryDataCache.length) return;
+async function loadExtraccionData(actaId = null) {
+    // Si hay un actaId (edición), forzamos la recarga ignorando el caché
+    if (inventoryDataCache.length && !actaId) return;
+    
     const tbody = document.getElementById("tbody-extraccion");
     if (tbody) {
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-primary"><div class="spinner-border spinner-border-sm" role="status"></div> Cargando inventario...</td></tr>';
     }
     try {
-        const response = await api.get("/api/inventario?per_page=500");
+        let url = "/api/inventario?per_page=500";
+        if (actaId) url += `&include_traspaso_acta_id=${actaId}`;
+        
+        const response = await api.get(url);
         inventoryDataCache = response.data || [];
         extraccionFilteredItems = [...inventoryDataCache];
         renderExtraccionCurrentPage();
@@ -4047,7 +4332,13 @@ function setupExtraccionModal() {
             selectedItemIds = new Set(window._globalSelectedTableRows.map((it) => Number(it.id)));
         }
         extraccionPage = 1;
-        await loadExtraccionData();
+        
+        // Detectar si estamos editando un acta de TRASPASO
+        const activeTipo = document.querySelector(".settings-menu-btn.active")?.id?.replace("tab-", "");
+        const isTraspaso = activeTipo === "traspaso";
+        const actaId = isTraspaso ? activeEditingActaId : null;
+        
+        await loadExtraccionData(actaId);
         onExtraccionFilterChanged();
     });
 
@@ -4159,6 +4450,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         clearInformeFormByType("bajas");
     });
 
+    document.getElementById("btn-vaciar-traspaso")?.addEventListener("click", () => {
+        clearInformeFormByType("traspaso");
+    });
+
+    document.querySelector(".btn-traspaso-exportar")?.addEventListener("click", () => {
+        window.location.href = "/api/informes/traspaso/exportar";
+    });
+
     document.getElementById("btn-vaciar-aula")?.addEventListener("click", () => {
         clearAulaForm();
     });
@@ -4214,6 +4513,25 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
 
         const datosFormulario = Object.fromEntries(new FormData(form).entries());
+        // Guardar siempre los IDs de bloque, piso y área en el formulario de TODAS las actas
+        const tipoNorm = normalizeTipoActa(tipo);
+        let bloqueId = "", pisoId = "", areaId = "";
+        if (tipoNorm === "entrega" || tipoNorm === "recepcion") {
+            bloqueId = document.getElementById(`${tipoNorm}-bloque`)?.value || "";
+            pisoId = document.getElementById(`${tipoNorm}-piso`)?.value || "";
+            areaId = document.getElementById(`${tipoNorm}-area`)?.value || "";
+        } else if (tipoNorm === "bajas") {
+            bloqueId = document.getElementById("bajas-bloque")?.value || "";
+            pisoId = document.getElementById("bajas-piso")?.value || "";
+            areaId = document.getElementById("bajas-area")?.value || "";
+        } else if (tipoNorm === "aula") {
+            bloqueId = document.getElementById("aula-bloque")?.value || "";
+            pisoId = document.getElementById("aula-piso")?.value || "";
+            areaId = document.getElementById("aula-area")?.value || "";
+        }
+        datosFormulario.bloque_id = bloqueId;
+        datosFormulario.piso_id = pisoId;
+        datosFormulario.area_id = areaId;
 
         if (tipo === "entrega" && !isEntregaAreaTrabajoValida(datosFormulario.area_trabajo)) {
             notify("Debe seleccionar Bloque, Piso y Área para el Acta de Entrega.", true);

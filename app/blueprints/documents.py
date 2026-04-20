@@ -193,7 +193,7 @@ def _revert_acta_inventory_mutations(db, acta_id):
     safe_acta_id = int(acta_id)
     rows = db.execute(
         """
-        SELECT id, item_id, mutation_kind, before_data_json
+        SELECT id, item_id, mutation_kind, before_data_json, after_data_json
         FROM acta_inventory_mutaciones
         WHERE acta_id = ?
         ORDER BY id DESC
@@ -207,7 +207,42 @@ def _revert_acta_inventory_mutations(db, acta_id):
 
         if kind == "insert":
             if item_id:
+                # Si es una inserción (como en recepción), revertir significa eliminar el ítem
                 db.execute("DELETE FROM inventario_items WHERE id = ?", (item_id,))
+            continue
+
+        if kind == "transfer_out":
+            # REVERSIÓN DE TRASPASO: Mover de inventario_traspasos de vuelta a inventario_items
+            traspaso_row = db.execute(
+                "SELECT * FROM inventario_traspasos WHERE id = ?", (item_id,)
+            ).fetchone()
+            if traspaso_row:
+                data = dict(traspaso_row)
+                # Recuperar datos originales si existen
+                original_data = {}
+                if data.get("datos_originales_json"):
+                    try:
+                        original_data = json.loads(data["datos_originales_json"])
+                    except: pass
+                
+                db.execute(
+                    """
+                    INSERT INTO inventario_items (
+                        id, item_numero, cod_inventario, cod_esbye, cuenta, cantidad, descripcion,
+                        ubicacion, marca, modelo, serie, estado, condicion, usuario_final,
+                        fecha_adquisicion, valor, observacion, justificacion, procedencia, area_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        data["id"], data["item_numero"], data["cod_inventario"], data["cod_esbye"],
+                        data["cuenta"], data["cantidad"], data["descripcion"], data["ubicacion"],
+                        data["marca"], data["modelo"], data["serie"], data["estado"],
+                        data["condicion"], data["usuario_final"], data["fecha_adquisicion"],
+                        data["valor"], data["observacion"], data["justificacion"],
+                        data["procedencia"], data["area_id"]
+                    )
+                )
+                db.execute("DELETE FROM inventario_traspasos WHERE id = ?", (item_id,))
             continue
 
         if kind != "update" or not item_id:
@@ -1072,6 +1107,25 @@ def api_generar_informe():
                 "error": "No se identificaron bienes válidos para dar de baja.",
             }), 400
 
+    if not vista_previa and tipo_norm == "traspaso":
+        required_traspaso = [
+            "fecha_corte",
+            "fecha_emision",
+            "entregado_por",
+            "rol_entrega",
+            "recibido_por",
+            "rol_recibe",
+            "facultad_entrega",
+            "facultad_recibe",
+            "descripcion_de_bienes"
+        ]
+        missing = [k for k in required_traspaso if not str(context_data.get(k) or "").strip()]
+        if missing:
+            return jsonify({"success": False, "error": f"Faltan campos obligatorios en traspaso: {', '.join(missing)}."}), 400
+
+        if not isinstance(tabla_data, list) or not tabla_data:
+            return jsonify({"success": False, "error": "Debe extraer al menos un bien para el traspaso."}), 400
+
     nombres_campos_personal = [
         "entregado_por",
         "recibido_por",
@@ -1254,28 +1308,29 @@ def api_generar_informe():
                         )
 
                 if tipo_norm == "recepcion":
-                    db.execute("BEGIN IMMEDIATE")
-                    next_item_numero_row = db.execute(
-                        "SELECT COALESCE(MAX(item_numero), 0) + 1 AS next_item FROM inventario_items"
-                    ).fetchone()
-                    next_item_numero = int(next_item_numero_row["next_item"]) if next_item_numero_row else 1
+                    # Usar el contexto de la base de datos para manejar la transacción automáticamente
+                    with db:
+                        next_item_numero_row = db.execute(
+                            "SELECT COALESCE(MAX(item_numero), 0) + 1 AS next_item FROM inventario_items"
+                        ).fetchone()
+                        next_item_numero = int(next_item_numero_row["next_item"]) if next_item_numero_row else 1
 
-                    for idx, row in enumerate(tabla_data or []):
-                        item = row or {}
-                        cantidad_raw = item.get("cantidad")
-                        valor_raw = item.get("valor")
-                        cantidad_text = str(cantidad_raw or "").strip()
-                        valor_text = str(valor_raw or "").strip()
-                        try:
-                            cantidad = int(cantidad_text) if cantidad_text else 1
-                        except (TypeError, ValueError):
-                            cantidad = 1
-                        try:
-                            valor = float(valor_text) if valor_text else None
-                        except (TypeError, ValueError):
-                            valor = None
+                        for idx, row in enumerate(tabla_data or []):
+                            item = row or {}
+                            cantidad_raw = item.get("cantidad")
+                            valor_raw = item.get("valor")
+                            cantidad_text = str(cantidad_raw or "").strip()
+                            valor_text = str(valor_raw or "").strip()
+                            try:
+                                cantidad = int(cantidad_text) if cantidad_text else 1
+                            except (TypeError, ValueError):
+                                cantidad = 1
+                            try:
+                                valor = float(valor_text) if valor_text else None
+                            except (TypeError, ValueError):
+                                valor = None
 
-                        db.execute(
+                            db.execute(
                             """
                             INSERT INTO inventario_items (
                                 item_numero,
@@ -1329,6 +1384,51 @@ def api_generar_informe():
                                     "after": inserted_state,
                                 }
                             )
+
+                if tipo_norm == "traspaso":
+                    facultad_recibe = str(context_data.get("facultad_recibe") or "OTRA FACULTAD").strip()
+                    for row in tabla_data or []:
+                        item_id = _parse_positive_int(row.get("id"))
+                        if not item_id:
+                            continue
+                        
+                        # Obtener datos completos antes de mover
+                        full_item = db.execute("SELECT * FROM inventario_items WHERE id = ?", (item_id,)).fetchone()
+                        if not full_item:
+                            continue
+                        
+                        data = dict(full_item)
+                        fecha_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        # Mover a tabla de traspasos
+                        db.execute(
+                            """
+                            INSERT INTO inventario_traspasos (
+                                id, item_numero, cod_inventario, cod_esbye, cuenta, cantidad, descripcion,
+                                ubicacion, marca, modelo, serie, estado, condicion, usuario_final,
+                                fecha_adquisicion, valor, observacion, justificacion, procedencia, area_id,
+                                facultad_destino, acta_traspaso_id, fecha_traspaso, datos_originales_json
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                data["id"], data["item_numero"], data["cod_inventario"], data["cod_esbye"],
+                                data["cuenta"], data["cantidad"], data["descripcion"], data["ubicacion"],
+                                data["marca"], data["modelo"], data["serie"], data["estado"],
+                                data["condicion"], data["usuario_final"], data["fecha_adquisicion"],
+                                data["valor"], data["observacion"], data["justificacion"],
+                                data["procedencia"], data["area_id"],
+                                facultad_recibe, None, fecha_local,
+                                json.dumps(data)
+                            )
+                        )
+                        # Borrar del inventario general
+                        db.execute("DELETE FROM inventario_items WHERE id = ?", (item_id,))
+                        
+                        pending_inventory_mutations.append({
+                            "kind": "transfer_out",
+                            "item_id": item_id,
+                            "before": data,
+                            "after": {"status": "transferred", "destination": facultad_recibe}
+                        })
 
                 if tipo_norm in {"baja", "bajas"}:
                     procedencia_text = _build_acta_procedencia_text("bajas", numero_acta)
@@ -1411,6 +1511,14 @@ def api_generar_informe():
 
             if target_acta_id and pending_inventory_mutations:
                 _persist_acta_inventory_mutations(db, target_acta_id, tipo_norm, pending_inventory_mutations)
+                
+                if tipo_norm == "traspaso":
+                    # Vincular los bienes en la tabla de traspasos con esta acta
+                    db.execute(
+                        "UPDATE inventario_traspasos SET acta_traspaso_id = ? WHERE acta_traspaso_id IS NULL",
+                        (target_acta_id,)
+                    )
+                
                 db.commit()
 
             publish_event("actas_changed", {"tipo": tipo})
@@ -1772,6 +1880,61 @@ def api_control_area_report_job(job_id):
     publish_event("areas_reports_cancelled", {"job_id": job_id, "message": "Cancelación solicitada..."})
     return jsonify({"success": True, "job_id": job_id, "status": "cancelling"})
 
+
+@documents_bp.route("/api/informes/traspaso/exportar", methods=["GET"])
+def api_exportar_bienes_traspaso():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT 
+            t.cod_inventario, t.cod_esbye, t.descripcion, t.ubicacion AS ubicacion_original,
+            t.marca, t.modelo, t.serie, t.estado, t.usuario_final,
+            t.facultad_destino, t.fecha_traspaso, h.numero_acta
+        FROM inventario_traspasos t
+        LEFT JOIN historial_actas h ON t.acta_traspaso_id = h.id
+        ORDER BY t.fecha_traspaso DESC
+        """
+    ).fetchall()
+
+    if not rows:
+        return jsonify({"success": False, "error": "No hay bienes registrados fuera de la facultad."}), 404
+
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Bienes Fuera"
+    
+    # Encabezados
+    headers = [
+        "CÓDIGO INV.", "CÓD. ESBYE", "DESCRIPCIÓN", "UBICACIÓN ORIG.",
+        "MARCA", "MODELO", "SERIE", "ESTADO", "USUARIO FINAL",
+        "FACULTAD DESTINO", "FECHA TRASPASO", "NRO. ACTA"
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    # Datos
+    for row in rows:
+        ws.append([
+            row["cod_inventario"], row["cod_esbye"], row["descripcion"], row["ubicacion_original"],
+            row["marca"], row["modelo"], row["serie"], row["estado"], row["usuario_final"],
+            row["facultad_destino"], row["fecha_traspaso"], row["numero_acta"]
+        ])
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"bienes_fuera_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 @documents_bp.route("/api/historial/<int:acta_id>", methods=["DELETE"])
 def api_delete_historial(acta_id):

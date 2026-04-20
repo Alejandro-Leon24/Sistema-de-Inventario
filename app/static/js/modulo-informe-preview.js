@@ -35,7 +35,19 @@ const REQUIRED_VARS_INFORME = {
         "fecha_emision",
         "tabla_dinamica",
     ],
-    traspaso: ["numero_acta"],
+    traspaso: [
+        "numero_acta",
+        "fecha_emision",
+        "fecha_corte",
+        "entregado_por",
+        "rol_entrega",
+        "facultad_entrega",
+        "recibido_por",
+        "rol_recibe",
+        "facultad_recibe",
+        "descripcion_de_bienes",
+        "tabla_dinamica",
+    ],
     "fin-gestion": ["numero_acta"],
     aula: ["tabla_dinamica"],
 };
@@ -287,8 +299,11 @@ async function cargarCamposDinamicosActa(tipo) {
         const variables = (payload.variables || []).filter(
             (v) => typeof v === "string" && !isInternalTemplateVar(v)
         );
-        const required = REQUIRED_VARS_INFORME[tipo] || [];
-        const extras = variables.filter((v) => !required.includes(v));
+        const required = (REQUIRED_VARS_INFORME[tipo] || []).map(v => normalizeTemplateVarName(v));
+        const extras = variables.filter((v) => {
+            const normalized = normalizeTemplateVarName(v);
+            return !required.includes(normalized);
+        });
         if (!extras.length) return;
 
         const title = document.createElement("div");

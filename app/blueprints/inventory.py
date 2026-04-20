@@ -1216,12 +1216,14 @@ def api_list_inventario():
     page = request.args.get("page", default=1, type=int)
     per_page = request.args.get("per_page", default=50, type=int)
     per_page = max(1, min(per_page, 500))
+    include_traspaso_acta_id = request.args.get("include_traspaso_acta_id", type=int)
 
     result = list_inventory_items_paginated(
         filters=filters,
         sort_direction=sort_direction,
         page=page,
         per_page=per_page,
+        include_traspaso_acta_id=include_traspaso_acta_id
     )
     return jsonify(
         {

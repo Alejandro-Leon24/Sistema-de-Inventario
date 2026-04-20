@@ -13,12 +13,13 @@ def list_inventory_items(filters=None, sort_direction="asc", limit=5000):
     return legacy_controller.list_inventory_items(filters=filters, sort_direction=sort_direction, limit=limit)
 
 
-def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, per_page=50):
+def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, per_page=50, include_traspaso_acta_id=None):
     return legacy_controller.list_inventory_items_paginated(
         filters=filters,
         sort_direction=sort_direction,
         page=page,
         per_page=per_page,
+        include_traspaso_acta_id=include_traspaso_acta_id,
     )
 
 
