@@ -1,4 +1,7 @@
 import sys
+print('SYS.EXECUTABLE:', sys.executable)
+print('SYS.PATH:', sys.path)
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -60,3 +63,4 @@ app = create_app()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)
+

@@ -79,6 +79,8 @@ ALLOWED_INVENTORY_FIELDS = {
     "fecha_adquisicion",
     "valor",
     "observacion",
+    "justificacion",
+    "procedencia",
     "descripcion_esbye",
     "marca_esbye",
     "modelo_esbye",
@@ -105,6 +107,8 @@ CANONICAL_COLUMN_ORDER = [
     "fecha_adquisicion",
     "valor",
     "observacion",
+    "justificacion",
+    "procedencia",
     "descripcion_esbye",
     "marca_esbye",
     "modelo_esbye",
@@ -141,6 +145,12 @@ def _normalize_inventory_code_fields(payload):
 
 def _is_placeholder_no_code(value):
     return _normalize_inventory_code_value(value).upper() == _PLACEHOLDER_NO_CODE
+
+
+def _build_default_import_procedencia_text(base_date=None):
+    dt = base_date or datetime.now()
+    date_text = dt.strftime("%d/%m/%Y %H:%M:%S")
+    return f"Exportación Masiva de Excel - {date_text} / Bienes propios de la facultad"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -324,6 +334,8 @@ def _row_to_inventory_item(row):
         "fecha_adquisicion": _normalize_inventory_date_for_output(row["fecha_adquisicion"]),
         "valor": row["valor"],
         "observacion": row["observacion"],
+        "justificacion": row["justificacion"],
+        "procedencia": row["procedencia"],
         "descripcion_esbye": row["descripcion_esbye"],
         "marca_esbye": row["marca_esbye"],
         "modelo_esbye": row["modelo_esbye"],
@@ -350,6 +362,7 @@ def init_schema(base_dir: Path):
     _run_startup_migration_once("20260409_university_unique_constraint", _ensure_university_unique_constraint)
     _run_startup_migration_once("20260409_area_extended_columns", _ensure_area_extended_columns)
     _run_startup_migration_once("20260409_inventory_extended_columns", _ensure_inventory_extended_columns)
+    _run_startup_migration_once("20260419_inventory_baja_columns_and_default_procedencia", _ensure_inventory_baja_columns_and_default_procedencia)
     _run_startup_migration_once("20260409_inventory_codes_allow_duplicates", _ensure_inventory_codes_allow_duplicates)
     _run_startup_migration_once("20260409_inventory_search_indexes", _ensure_inventory_search_indexes)
     _run_startup_migration_once("20260409_inventory_fts", _ensure_inventory_fts)
@@ -358,6 +371,7 @@ def init_schema(base_dir: Path):
     _run_startup_migration_once("20260416_inventory_estado_canonical", _ensure_inventory_estado_canonical_runtime)
     _run_startup_migration_once("20260409_historial_actas_numero_column", _ensure_historial_actas_numero_column)
     _run_startup_migration_once("20260409_historial_actas_template_columns", _ensure_historial_actas_template_columns)
+    _run_startup_migration_once("20260419_acta_inventory_mutaciones_table", _ensure_acta_inventory_mutaciones_table)
     _run_startup_migration_once("20260409_informes_area_sequence_table", _ensure_informes_area_sequence_table)
     _run_startup_migration_once("20260409_actas_sequence_table", _ensure_actas_sequence_table)
     _run_startup_migration_once("20260414_historial_actas_numero_unique_by_type", _ensure_historial_actas_numero_unique_by_type)
@@ -428,6 +442,32 @@ def _ensure_historial_actas_template_columns():
 
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_historial_actas_plantilla_snapshot_path ON historial_actas(plantilla_snapshot_path)"
+    )
+    db.commit()
+
+
+def _ensure_acta_inventory_mutaciones_table():
+    db = get_db()
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS acta_inventory_mutaciones (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            acta_id INTEGER NOT NULL,
+            tipo_acta TEXT NOT NULL,
+            item_id INTEGER,
+            mutation_kind TEXT NOT NULL,
+            before_data_json TEXT,
+            after_data_json TEXT,
+            creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (acta_id) REFERENCES historial_actas(id) ON DELETE CASCADE
+        )
+        """
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_acta_inventory_mutaciones_acta_id ON acta_inventory_mutaciones(acta_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_acta_inventory_mutaciones_item_id ON acta_inventory_mutaciones(item_id)"
     )
     db.commit()
 
@@ -705,11 +745,33 @@ def _ensure_inventory_extended_columns():
         "ubicacion_esbye": "TEXT",
         "observacion_esbye": "TEXT",
         "fecha_adquisicion_esbye": "TEXT",
+        "justificacion": "TEXT",
+        "procedencia": "TEXT",
     }
 
     for column_name, column_type in required_columns.items():
         if column_name not in existing_columns:
             db.execute(f"ALTER TABLE inventario_items ADD COLUMN {column_name} {column_type}")
+    db.commit()
+
+
+def _ensure_inventory_baja_columns_and_default_procedencia():
+    db = get_db()
+    existing_columns = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(inventario_items)").fetchall()
+    }
+
+    if "justificacion" not in existing_columns:
+        db.execute("ALTER TABLE inventario_items ADD COLUMN justificacion TEXT")
+    if "procedencia" not in existing_columns:
+        db.execute("ALTER TABLE inventario_items ADD COLUMN procedencia TEXT")
+
+    default_procedencia = _build_default_import_procedencia_text()
+    db.execute(
+        "UPDATE inventario_items SET procedencia = ?",
+        (default_procedencia,),
+    )
     db.commit()
 
 
@@ -749,6 +811,8 @@ def _ensure_inventory_codes_allow_duplicates():
                 fecha_adquisicion TEXT,
                 valor REAL,
                 observacion TEXT,
+                justificacion TEXT,
+                procedencia TEXT,
                 descripcion_esbye TEXT,
                 marca_esbye TEXT,
                 modelo_esbye TEXT,
@@ -769,14 +833,14 @@ def _ensure_inventory_codes_allow_duplicates():
             INSERT INTO inventario_items_new (
                 id, item_numero, cod_inventario, cod_esbye, cuenta, cantidad, descripcion,
                 ubicacion, marca, modelo, serie, estado, condicion, usuario_final,
-                fecha_adquisicion, valor, observacion, descripcion_esbye, marca_esbye,
+                fecha_adquisicion, valor, observacion, justificacion, procedencia, descripcion_esbye, marca_esbye,
                 modelo_esbye, serie_esbye, valor_esbye, ubicacion_esbye, observacion_esbye,
                 fecha_adquisicion_esbye, area_id, creado_en, actualizado_en
             )
             SELECT
                 id, item_numero, cod_inventario, cod_esbye, cuenta, cantidad, descripcion,
                 ubicacion, marca, modelo, serie, estado, condicion, usuario_final,
-                fecha_adquisicion, valor, observacion, descripcion_esbye, marca_esbye,
+                fecha_adquisicion, valor, observacion, justificacion, procedencia, descripcion_esbye, marca_esbye,
                 modelo_esbye, serie_esbye, valor_esbye, ubicacion_esbye, observacion_esbye,
                 fecha_adquisicion_esbye, area_id, creado_en, actualizado_en
             FROM inventario_items
@@ -983,6 +1047,8 @@ def _ensure_inventory_search_indexes():
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_serie ON inventario_items(serie)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_usuario_final ON inventario_items(usuario_final)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_observacion ON inventario_items(observacion)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_justificacion ON inventario_items(justificacion)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_procedencia ON inventario_items(procedencia)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_desc_esbye ON inventario_items(descripcion_esbye)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_marca_esbye ON inventario_items(marca_esbye)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_inventario_modelo_esbye ON inventario_items(modelo_esbye)")
@@ -1014,6 +1080,8 @@ def _ensure_inventory_fts():
                 usuario_final,
                 ubicacion,
                 observacion,
+                justificacion,
+                procedencia,
                 descripcion_esbye,
                 marca_esbye,
                 modelo_esbye,
@@ -1033,12 +1101,14 @@ def _ensure_inventory_fts():
                 INSERT INTO inventario_items_fts(
                     rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
                     marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    justificacion, procedencia,
                     descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
                     ubicacion_esbye, observacion_esbye
                 )
                 VALUES (
                     new.id, new.descripcion, new.cod_inventario, new.cod_esbye, new.cuenta, new.estado,
                     new.marca, new.modelo, new.serie, new.usuario_final, new.ubicacion, new.observacion,
+                    new.justificacion, new.procedencia,
                     new.descripcion_esbye, new.marca_esbye, new.modelo_esbye, new.serie_esbye,
                     new.ubicacion_esbye, new.observacion_esbye
                 );
@@ -1053,12 +1123,14 @@ def _ensure_inventory_fts():
                 INSERT INTO inventario_items_fts(
                     inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
                     marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    justificacion, procedencia,
                     descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
                     ubicacion_esbye, observacion_esbye
                 )
                 VALUES (
                     'delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye, old.cuenta, old.estado,
                     old.marca, old.modelo, old.serie, old.usuario_final, old.ubicacion, old.observacion,
+                    old.justificacion, old.procedencia,
                     old.descripcion_esbye, old.marca_esbye, old.modelo_esbye, old.serie_esbye,
                     old.ubicacion_esbye, old.observacion_esbye
                 );
@@ -1073,24 +1145,28 @@ def _ensure_inventory_fts():
                 INSERT INTO inventario_items_fts(
                     inventario_items_fts, rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
                     marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    justificacion, procedencia,
                     descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
                     ubicacion_esbye, observacion_esbye
                 )
                 VALUES (
                     'delete', old.id, old.descripcion, old.cod_inventario, old.cod_esbye, old.cuenta, old.estado,
                     old.marca, old.modelo, old.serie, old.usuario_final, old.ubicacion, old.observacion,
+                    old.justificacion, old.procedencia,
                     old.descripcion_esbye, old.marca_esbye, old.modelo_esbye, old.serie_esbye,
                     old.ubicacion_esbye, old.observacion_esbye
                 );
                 INSERT INTO inventario_items_fts(
                     rowid, descripcion, cod_inventario, cod_esbye, cuenta, estado,
                     marca, modelo, serie, usuario_final, ubicacion, observacion,
+                    justificacion, procedencia,
                     descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
                     ubicacion_esbye, observacion_esbye
                 )
                 VALUES (
                     new.id, new.descripcion, new.cod_inventario, new.cod_esbye, new.cuenta, new.estado,
                     new.marca, new.modelo, new.serie, new.usuario_final, new.ubicacion, new.observacion,
+                    new.justificacion, new.procedencia,
                     new.descripcion_esbye, new.marca_esbye, new.modelo_esbye, new.serie_esbye,
                     new.ubicacion_esbye, new.observacion_esbye
                 );
@@ -1161,6 +1237,8 @@ def _build_inventory_where_clause(filters=None):
             "usuario_final",
             "ubicacion",
             "observacion",
+            "justificacion",
+            "procedencia",
             "descripcion_esbye",
             "marca_esbye",
             "modelo_esbye",
@@ -1179,9 +1257,11 @@ def _build_inventory_where_clause(filters=None):
         else:
             token = f"%{raw_search}%"
             where_clauses.append(
-                "(i.descripcion LIKE ? OR i.cod_inventario LIKE ? OR i.cod_esbye LIKE ? OR i.cuenta LIKE ? OR i.estado LIKE ? OR i.condicion LIKE ? OR i.ubicacion LIKE ? OR i.marca LIKE ? OR i.modelo LIKE ? OR i.serie LIKE ? OR i.usuario_final LIKE ? OR i.observacion LIKE ? OR i.descripcion_esbye LIKE ? OR i.marca_esbye LIKE ? OR i.modelo_esbye LIKE ? OR i.serie_esbye LIKE ? OR i.ubicacion_esbye LIKE ? OR i.observacion_esbye LIKE ? OR i.fecha_adquisicion LIKE ? OR i.fecha_adquisicion_esbye LIKE ?)"
+                "(i.descripcion LIKE ? OR i.cod_inventario LIKE ? OR i.cod_esbye LIKE ? OR i.cuenta LIKE ? OR i.estado LIKE ? OR i.condicion LIKE ? OR i.ubicacion LIKE ? OR i.marca LIKE ? OR i.modelo LIKE ? OR i.serie LIKE ? OR i.usuario_final LIKE ? OR i.observacion LIKE ? OR i.justificacion LIKE ? OR i.procedencia LIKE ? OR i.descripcion_esbye LIKE ? OR i.marca_esbye LIKE ? OR i.modelo_esbye LIKE ? OR i.serie_esbye LIKE ? OR i.ubicacion_esbye LIKE ? OR i.observacion_esbye LIKE ? OR i.fecha_adquisicion LIKE ? OR i.fecha_adquisicion_esbye LIKE ?)"
             )
             params.extend([
+                token,
+                token,
                 token,
                 token,
                 token,
@@ -1439,6 +1519,8 @@ def list_inventory_items(filters=None, sort_direction="asc", limit=5000):
             i.fecha_adquisicion,
             i.valor,
             i.observacion,
+            i.justificacion,
+            i.procedencia,
             i.descripcion_esbye,
             i.marca_esbye,
             i.modelo_esbye,
@@ -1510,6 +1592,8 @@ def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, p
             i.fecha_adquisicion,
             i.valor,
             i.observacion,
+            i.justificacion,
+            i.procedencia,
             i.descripcion_esbye,
             i.marca_esbye,
             i.modelo_esbye,
@@ -1567,6 +1651,8 @@ def get_inventory_item(item_id):
             i.fecha_adquisicion,
             i.valor,
             i.observacion,
+            i.justificacion,
+            i.procedencia,
             i.descripcion_esbye,
             i.marca_esbye,
             i.modelo_esbye,
@@ -1847,7 +1933,7 @@ def find_inventory_code_duplicates(cod_inventario=None, cod_esbye=None, limit=50
     return duplicates
 
 
-def bulk_insert_inventory_rows(rows, area_id=None):
+def bulk_insert_inventory_rows(rows, area_id=None, procedencia_default=None):
     db = get_db()
     normalized_values = []
     insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
@@ -1890,6 +1976,8 @@ def bulk_insert_inventory_rows(rows, area_id=None):
                 )
             if payload.get("estado") not in (None, ""):
                 payload["estado"] = _canonicalize_estado_value(payload.get("estado"), estado_options)
+            if procedencia_default and not str(payload.get("procedencia") or "").strip():
+                payload["procedencia"] = str(procedencia_default).strip()
 
             try:
                 payload["cantidad"] = int(payload.get("cantidad") or 1)
@@ -1939,7 +2027,7 @@ def bulk_insert_inventory_rows(rows, area_id=None):
     }
 
 
-def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
+def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None, procedencia_default=None):
     db = get_db()
     insert_columns = ["item_numero", *CANONICAL_COLUMN_ORDER, "area_id"]
     normalized_values = []
@@ -2059,6 +2147,8 @@ def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
 
             if payload.get("estado") not in (None, ""):
                 payload["estado"] = _canonicalize_estado_value(payload.get("estado"), estado_options)
+            if procedencia_default and not str(payload.get("procedencia") or "").strip():
+                payload["procedencia"] = str(procedencia_default).strip()
 
             normalized_values.append(tuple(payload.get(column) for column in insert_columns))
 
@@ -2108,6 +2198,8 @@ def iter_inventory_items(filters=None, sort_direction="asc", batch_size=2000):
                 i.fecha_adquisicion,
                 i.valor,
                 i.observacion,
+                i.justificacion,
+                i.procedencia,
                 i.descripcion_esbye,
                 i.marca_esbye,
                 i.modelo_esbye,

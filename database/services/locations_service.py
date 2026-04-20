@@ -134,6 +134,26 @@ def _next_order(table_name, parent_field=None, parent_id=None):
     return row["next_order"]
 
 
+def _sync_inventory_location_display(db, area_filter_sql="", area_filter_params=()):
+    where_clause = f"WHERE {area_filter_sql}" if area_filter_sql else ""
+    db.execute(
+        f"""
+        UPDATE inventario_items
+        SET
+            ubicacion = (
+                SELECT b.nombre || ' / ' || p.nombre || ' / ' || a.nombre
+                FROM areas a
+                JOIN pisos p ON p.id = a.piso_id
+                JOIN bloques b ON b.id = p.bloque_id
+                WHERE a.id = inventario_items.area_id
+            ),
+            actualizado_en = CURRENT_TIMESTAMP
+        {where_clause}
+        """,
+        tuple(area_filter_params or ()),
+    )
+
+
 def create_block(nombre, descripcion=None):
     db = get_db()
     orden = _next_order("bloques")
@@ -163,6 +183,12 @@ def update_block(block_id, nombre=None, descripcion=None):
         f"UPDATE bloques SET {', '.join(updates)} WHERE id = ?",
         tuple(params),
     )
+    if cursor.rowcount > 0:
+        _sync_inventory_location_display(
+            db,
+            "area_id IN (SELECT a.id FROM areas a JOIN pisos p ON p.id = a.piso_id WHERE p.bloque_id = ?)",
+            (block_id,),
+        )
     db.commit()
     return cursor.rowcount > 0
 
@@ -217,6 +243,12 @@ def update_floor(floor_id, nombre=None, descripcion=None):
         f"UPDATE pisos SET {', '.join(updates)} WHERE id = ?",
         tuple(params),
     )
+    if cursor.rowcount > 0:
+        _sync_inventory_location_display(
+            db,
+            "area_id IN (SELECT id FROM areas WHERE piso_id = ?)",
+            (floor_id,),
+        )
     db.commit()
     return cursor.rowcount > 0
 
@@ -253,6 +285,8 @@ def update_area(area_id, nombre=None, descripcion=None, details=None):
         f"UPDATE areas SET {', '.join(updates)} WHERE id = ?",
         tuple(params),
     )
+    if cursor.rowcount > 0:
+        _sync_inventory_location_display(db, "area_id = ?", (area_id,))
     db.commit()
     return cursor.rowcount > 0
 

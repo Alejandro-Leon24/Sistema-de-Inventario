@@ -586,6 +586,12 @@ def _coerce_int(value, default=0):
         return default
 
 
+def _build_bulk_excel_procedencia_text(base_date=None):
+    dt = base_date or datetime.now()
+    date_text = dt.strftime("%d/%m/%Y %H:%M:%S")
+    return f"Exportación Masiva de Excel - {date_text} / Bienes propios de la facultad"
+
+
 def _normalize_compare_value(value):
     text = str(value if value is not None else "").strip()
     if text == "":
@@ -842,9 +848,10 @@ def _guess_area_match_from_location_text(location_text):
 
     candidates = []
     pasillo_candidates = []
-    best_id = None
-    best_display = ""
-    best_score = 0
+    explicit_block_letter = ""
+    explicit_block_match = re.search(r"\bbloque\s+([a-z])\b", target)
+    if explicit_block_match:
+        explicit_block_letter = explicit_block_match.group(1)
 
     for row in rows:
         area_name_raw = str(row["area_nombre"] or "").strip()
@@ -895,6 +902,12 @@ def _guess_area_match_from_location_text(location_text):
             if f"bloque {block_letter}" in block_name:
                 score += 10
 
+        if explicit_block_letter:
+            if f"bloque {explicit_block_letter}" in block_name:
+                score += 12
+            else:
+                score -= 16
+
         # Si el texto fuente pide PASILLO, evitamos caer en aulas del mismo piso por similitud de tokens.
         if target_kind == "pasillo":
             if "pasillo" in area_name:
@@ -916,10 +929,23 @@ def _guess_area_match_from_location_text(location_text):
         if "pasillo" in area_name:
             pasillo_candidates.append(candidate)
 
-        if score > best_score:
-            best_score = score
-            best_id = candidate["id"]
-            best_display = candidate["display"]
+    if not candidates:
+        return None
+
+    ranked_candidates = sorted(candidates, key=lambda c: c["score"], reverse=True)
+    best_candidate = ranked_candidates[0]
+    best_score = best_candidate["score"]
+    best_id = best_candidate["id"]
+    best_display = best_candidate["display"]
+
+    # Si la diferencia con el segundo mejor es muy baja y no hay codigo de aula exacto,
+    # evitamos asignar una ubicacion equivocada por similitud ambigua.
+    second_best_score = ranked_candidates[1]["score"] if len(ranked_candidates) > 1 else -999
+    margin = best_score - second_best_score
+    has_exact_aula_code = False
+    if target_aula_code:
+        best_area_code = _extract_compact_aula_code(best_candidate.get("area_name"))
+        has_exact_aula_code = bool(best_area_code and best_area_code == target_aula_code)
 
     if target_kind == "pasillo":
         # Para entradas tipo PASILLO nunca tomamos aulas como fallback.
@@ -935,6 +961,9 @@ def _guess_area_match_from_location_text(location_text):
         best_score = best_pasillo["score"]
 
     if best_id is None or best_score < 10:
+        return None
+
+    if not has_exact_aula_code and margin <= 1:
         return None
 
     warning = ""
@@ -955,10 +984,32 @@ def _guess_area_match_from_location_text(location_text):
 
 
 def _guess_area_id_from_location_text(location_text):
-    match = _guess_area_match_from_location_text(location_text)
+    match = _resolve_area_match_with_inventory_method(location_text)
     if not match:
         return None
     return match.get("area_id")
+
+
+def _resolve_area_match_with_inventory_method(location_text):
+    raw = str(location_text or "").strip()
+    if not raw:
+        return None
+
+    # Resolver unico y mas conservador para evitar aproximaciones incorrectas.
+    guessed = _guess_area_match_from_location_text(raw)
+    if not guessed or guessed.get("area_id") is None:
+        return None
+
+    target_norm = _normalize_text(raw)
+    floor_hint = _extract_floor_hint(target_norm)
+    target_kind = _extract_location_kind(target_norm)
+    display_norm = _normalize_text(guessed.get("display") or "")
+
+    # Si se indica piso explicitamente para PASILLO/AULA, exige que el match respete ese piso.
+    if floor_hint and target_kind in {"pasillo", "aula"} and floor_hint not in display_norm:
+        return None
+
+    return guessed
 
 
 def _analyze_chunk_against_inventory(chunk_rows):
@@ -1185,6 +1236,21 @@ def api_list_inventario():
     )
 
 
+@inventory_bp.get("/api/inventario/bajas")
+def api_list_inventario_bajas():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT i.*
+        FROM inventario_items i
+        WHERE LOWER(COALESCE(i.procedencia, '')) LIKE 'acta de baja %'
+        ORDER BY i.item_numero ASC, i.id ASC
+        """
+    ).fetchall()
+    data = [dict(row) for row in rows]
+    return jsonify({"data": data, "total": len(data)})
+
+
 @inventory_bp.get("/api/inventario/<int:item_id>")
 def api_get_inventario(item_id):
     item = get_inventory_item(item_id)
@@ -1311,7 +1377,7 @@ def api_paste_inventario():
             continue
 
         if not row_data.get("area_id"):
-            guessed = _guess_area_match_from_location_text(row_data.get("ubicacion"))
+            guessed = _resolve_area_match_with_inventory_method(row_data.get("ubicacion"))
             if guessed and guessed.get("area_id") is not None:
                 row_data["area_id"] = guessed.get("area_id")
                 if guessed.get("warning"):
@@ -1350,7 +1416,11 @@ def api_paste_inventario():
         ), 409
 
     try:
-        result = bulk_insert_inventory_dicts(rows_as_dicts, area_id=area_id)
+        result = bulk_insert_inventory_dicts(
+            rows_as_dicts,
+            area_id=area_id,
+            procedencia_default=_build_bulk_excel_procedencia_text(),
+        )
     except sqlite3.IntegrityError as error:
         return jsonify({"error": f"Error al pegar datos por duplicado: {error}"}), 409
     return jsonify(
@@ -1379,6 +1449,29 @@ def api_inventory_duplicates():
         limit=50,
     )
     return jsonify({"success": True, "duplicates": duplicates})
+
+
+@inventory_bp.get("/api/inventario/resolver-ubicacion")
+def api_inventory_resolve_location():
+    raw_text = request.args.get("texto", default="", type=str)
+    text = str(raw_text or "").strip()
+    if not text:
+        return jsonify({"success": False, "error": "Parámetro 'texto' es obligatorio."}), 400
+
+    guessed = _resolve_area_match_with_inventory_method(text)
+    if not guessed or guessed.get("area_id") is None:
+        return jsonify({"success": True, "match": None})
+
+    return jsonify(
+        {
+            "success": True,
+            "match": {
+                "area_id": int(guessed.get("area_id")),
+                "display": str(guessed.get("display") or "").strip(),
+                "warning": str(guessed.get("warning") or "").strip(),
+            },
+        }
+    )
 
 
 @inventory_bp.get("/api/preferencias")
@@ -1563,7 +1656,7 @@ def api_confirmar_importacion():
 
         raw_location = str(row_data.get("ubicacion") or "").strip()
         if raw_location and not has_explicit_area:
-            guessed = _guess_area_match_from_location_text(raw_location)
+            guessed = _resolve_area_match_with_inventory_method(raw_location)
             if guessed and guessed.get("area_id") is not None:
                 row_data["area_id"] = guessed.get("area_id")
                 if guessed.get("warning"):

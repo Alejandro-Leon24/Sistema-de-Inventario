@@ -27,6 +27,8 @@ INVENTORY_EXPORT_COLUMNS = [
     ("valor", "VALOR"),
     ("usuario_final", "USUARIO FINAL"),
     ("observacion", "OBSERVACIÓN"),
+    ("justificacion", "JUSTIFICACIÓN"),
+    ("procedencia", "PROCEDENCIA"),
     ("descripcion_esbye", "DESCRIPCIÓN"),
     ("marca_esbye", "MARCA"),
     ("modelo_esbye", "MODELO"),

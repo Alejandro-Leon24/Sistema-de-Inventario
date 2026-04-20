@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS inventario_items (
     fecha_adquisicion TEXT,
     valor REAL,
     observacion TEXT,
+    justificacion TEXT,
+    procedencia TEXT,
     descripcion_esbye TEXT,
     marca_esbye TEXT,
     modelo_esbye TEXT,
@@ -207,7 +209,21 @@ CREATE TABLE IF NOT EXISTS historial_actas (
     plantilla_snapshot_path TEXT
 );
 
+CREATE TABLE IF NOT EXISTS acta_inventory_mutaciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    acta_id INTEGER NOT NULL,
+    tipo_acta TEXT NOT NULL,
+    item_id INTEGER,
+    mutation_kind TEXT NOT NULL,
+    before_data_json TEXT,
+    after_data_json TEXT,
+    creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (acta_id) REFERENCES historial_actas(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_historial_actas_plantilla_snapshot_path ON historial_actas(plantilla_snapshot_path);
+CREATE INDEX IF NOT EXISTS idx_acta_inventory_mutaciones_acta_id ON acta_inventory_mutaciones(acta_id);
+CREATE INDEX IF NOT EXISTS idx_acta_inventory_mutaciones_item_id ON acta_inventory_mutaciones(item_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_historial_actas_tipo_numero_acta
 ON historial_actas(tipo_acta, numero_acta)
 WHERE numero_acta IS NOT NULL AND TRIM(numero_acta) != '';

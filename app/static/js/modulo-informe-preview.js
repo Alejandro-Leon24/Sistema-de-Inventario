@@ -26,7 +26,15 @@ const REQUIRED_VARS_INFORME = {
         "area_trabajo",
     ],
     movimiento: ["numero_acta"],
-    bajas: ["numero_acta"],
+    bajas: [
+        "numero_acta",
+        "nombre_delegado",
+        "recibido_por",
+        "entregado_por",
+        "rol_entrega",
+        "fecha_emision",
+        "tabla_dinamica",
+    ],
     traspaso: ["numero_acta"],
     "fin-gestion": ["numero_acta"],
     aula: ["tabla_dinamica"],
@@ -39,6 +47,8 @@ let previewInFlight = false;
 let previewQueuedWhileBusy = false;
 const PREVIEW_DELAY_MS = 1400;
 const MAX_PREVIEW_NO_RENDER_RETRIES = 3;
+const PREVIEW_DOC_WIDTH_PX = 794;
+const PREVIEW_DOC_PADDING_PX = 32;
 
 const INTERNAL_TEMPLATE_VARS = new Set([
     "tabla_items",
@@ -150,8 +160,118 @@ function updatePreviewHtml(htmlContent) {
     placeholder.classList.add("d-none");
     iframe.classList.remove("d-none");
     iframe.removeAttribute("src");
-    iframe.srcdoc = String(htmlContent);
+        iframe.srcdoc = buildScaledPreviewHtmlDocument(htmlContent);
 }
+
+function normalizePreviewHtmlFragment(htmlContent) {
+        return String(htmlContent || "")
+                .replace(/<!doctype[^>]*>/gi, "")
+                .replace(/<\/?html[^>]*>/gi, "")
+                .replace(/<\/?head[^>]*>/gi, "")
+                .replace(/<\/?body[^>]*>/gi, "")
+                .trim();
+}
+
+function buildScaledPreviewHtmlDocument(htmlContent) {
+        const fragment = normalizePreviewHtmlFragment(htmlContent);
+        return `<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --doc-width: ${PREVIEW_DOC_WIDTH_PX}px;
+            --doc-padding: ${PREVIEW_DOC_PADDING_PX}px;
+        }
+        * { box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #eef2f7;
+            font-family: Calibri, Arial, sans-serif;
+        }
+        #preview-stage {
+            height: 100vh;
+            padding: 12px 14px;
+            overflow: auto;
+            scrollbar-gutter: stable both-edges;
+        }
+        #preview-scale {
+            transform-origin: top left;
+            width: calc(var(--doc-width) + (var(--doc-padding) * 2));
+            margin: 0 auto;
+            will-change: transform;
+        }
+        #preview-sheet {
+            width: var(--doc-width);
+            background: #fff;
+            margin: 0 auto;
+            padding: var(--doc-padding);
+            box-shadow: 0 6px 22px rgba(15, 23, 42, 0.16);
+            color: #111827;
+            font-size: 11pt;
+            line-height: 1.28;
+            overflow-wrap: anywhere;
+        }
+        #preview-sheet > *:first-child {
+            margin-left: 0 !important;
+        }
+        #preview-sheet > *:last-child {
+            margin-bottom: 0 !important;
+        }
+        #preview-sheet p { margin: 0 0 0.55em; }
+        #preview-sheet table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        #preview-sheet td, #preview-sheet th {
+            vertical-align: top;
+            word-break: break-word;
+        }
+        #preview-sheet img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="preview-stage">
+        <div id="preview-scale">
+            <div id="preview-sheet">${fragment}</div>
+        </div>
+    </div>
+    <script>
+        (function () {
+            var stage = document.getElementById("preview-stage");
+            var scaleEl = document.getElementById("preview-scale");
+            if (!stage || !scaleEl) return;
+
+            var baseWidth = ${PREVIEW_DOC_WIDTH_PX + PREVIEW_DOC_PADDING_PX * 2};
+            function fit() {
+                var available = Math.max(stage.clientWidth - 28, 320);
+                var scale = Math.min(1, available / baseWidth);
+                scale = Math.max(0.62, scale);
+                scaleEl.style.transform = "scale(" + scale + ")";
+            }
+
+            if (typeof ResizeObserver !== "undefined") {
+                new ResizeObserver(fit).observe(document.body);
+            }
+            window.addEventListener("load", fit);
+            window.addEventListener("resize", fit);
+            fit();
+        })();
+    </script>
+</body>
+</html>`;
+}
+
+window.buildInformePreviewDoc = buildScaledPreviewHtmlDocument;
 
 async function cargarCamposDinamicosActa(tipo) {
     const container = document.getElementById(`dinamico-${tipo}-container`);
@@ -205,7 +325,6 @@ function buildPreviewPayload(tipo) {
     const columnasSeleccionadas = Array.isArray(tablePayload.datosColumnas) ? tablePayload.datosColumnas : [];
     const hasAnyFormValues = Object.values(datosFormulario).some((v) => String(v || "").trim() !== "");
     const hasTableValues = tablaSeleccionada.length > 0 && columnasSeleccionadas.length > 0;
-    if (tipo === "recepcion" && !hasTableValues) return null;
     // Evita llamadas pesadas mientras el usuario apenas empieza a escribir.
     if (!hasAnyFormValues && !hasTableValues) return null;
 

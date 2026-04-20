@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, send_file, send_from_directory
 
 from database.controller import get_all_areas_for_export, iter_inventory_items
+from database.db import get_db
 
 try:
     from app.utils.constants import AREA_EXPORT_COLUMNS, INVENTORY_EXPORT_COLUMNS
@@ -91,6 +92,60 @@ def api_export_inventario():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"inventario_{timestamp}.xlsx"
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@files_bp.get("/api/inventario/bajas/export")
+def api_export_inventario_bajas():
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT
+            item_numero,
+            cod_inventario,
+            cod_esbye,
+            cuenta,
+            cantidad,
+            descripcion,
+            marca,
+            modelo,
+            serie,
+            estado,
+            ubicacion,
+            fecha_adquisicion,
+            valor,
+            usuario_final,
+            observacion,
+            justificacion,
+            procedencia,
+            descripcion_esbye,
+            marca_esbye,
+            modelo_esbye,
+            serie_esbye,
+            fecha_adquisicion_esbye,
+            valor_esbye,
+            ubicacion_esbye,
+            observacion_esbye
+        FROM inventario_items
+        WHERE LOWER(COALESCE(procedencia, '')) LIKE 'acta de baja %'
+        ORDER BY item_numero ASC, id ASC
+        """
+    ).fetchall()
+
+    items = [dict(row) for row in rows]
+
+    try:
+        output = generar_excel(items, INVENTORY_EXPORT_COLUMNS, "Bienes de Baja")
+    except ImportError:
+        return jsonify({"error": "Para exportar a Excel se requiere openpyxl instalado."}), 500
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"bienes_baja_{timestamp}.xlsx"
     return send_file(
         output,
         as_attachment=True,

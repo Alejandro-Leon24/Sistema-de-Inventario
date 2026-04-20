@@ -51,12 +51,20 @@ def find_inventory_code_duplicates(cod_inventario=None, cod_esbye=None, limit=50
     )
 
 
-def bulk_insert_inventory_rows(rows, area_id=None):
-    return legacy_controller.bulk_insert_inventory_rows(rows, area_id=area_id)
+def bulk_insert_inventory_rows(rows, area_id=None, procedencia_default=None):
+    return legacy_controller.bulk_insert_inventory_rows(
+        rows,
+        area_id=area_id,
+        procedencia_default=procedencia_default,
+    )
 
 
-def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None):
-    return legacy_controller.bulk_insert_inventory_dicts(rows_as_dicts, area_id=area_id)
+def bulk_insert_inventory_dicts(rows_as_dicts, area_id=None, procedencia_default=None):
+    return legacy_controller.bulk_insert_inventory_dicts(
+        rows_as_dicts,
+        area_id=area_id,
+        procedencia_default=procedencia_default,
+    )
 
 
 def iter_inventory_items(filters=None, sort_direction="asc", batch_size=2000):

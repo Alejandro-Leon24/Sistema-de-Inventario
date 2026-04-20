@@ -274,6 +274,112 @@ async function initSettingsPage() {
 				.trim();
 		}
 
+		function sortByNaturalName(items = []) {
+			return [...items].sort((a, b) =>
+				String(a?.nombre || "").localeCompare(String(b?.nombre || ""), undefined, {
+					numeric: true,
+					sensitivity: "base",
+				})
+			);
+		}
+
+		function extractBlockCode(name) {
+			const raw = String(name || "").trim();
+			if (!raw) return "";
+			const quotedMatch = raw.match(/bloque\s*"\s*([a-z0-9]+)\s*"/i);
+			if (quotedMatch) return String(quotedMatch[1] || "").toUpperCase();
+			const plainMatch = raw.match(/bloque\s+([a-z0-9]+)/i);
+			if (plainMatch) return String(plainMatch[1] || "").toUpperCase();
+			return "";
+		}
+
+		function sortBlocksByName(items = []) {
+			return [...items].sort((a, b) => {
+				const codeA = extractBlockCode(a?.nombre);
+				const codeB = extractBlockCode(b?.nombre);
+
+				if (codeA && codeB) {
+					const codeANumber = Number.parseInt(codeA, 10);
+					const codeBNumber = Number.parseInt(codeB, 10);
+					const isANumber = Number.isFinite(codeANumber) && String(codeANumber) === codeA;
+					const isBNumber = Number.isFinite(codeBNumber) && String(codeBNumber) === codeB;
+
+					if (isANumber && isBNumber && codeANumber !== codeBNumber) {
+						return codeANumber - codeBNumber;
+					}
+
+					if (codeA !== codeB) {
+						return codeA.localeCompare(codeB, undefined, { numeric: true, sensitivity: "base" });
+					}
+				}
+
+				if (codeA && !codeB) return -1;
+				if (!codeA && codeB) return 1;
+
+				return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), undefined, {
+					numeric: true,
+					sensitivity: "base",
+				});
+			});
+		}
+
+		function getFloorOrder(name) {
+			const text = normalizeKey(name);
+			if (!text) return Number.POSITIVE_INFINITY;
+
+			if (text.includes("subsuelo") || text.includes("sub suelo")) return -2;
+			if (text.includes("sotano") || text.includes("sotano")) return -1;
+			if (text.includes("planta baja") || /^pb\b/.test(text)) return 0;
+
+			const numericMatch = text.match(/(\d+)\s*(?:er|ro|do|to|mo)?\s*piso/);
+			if (numericMatch) {
+				return Number.parseInt(numericMatch[1], 10);
+			}
+
+			const ordinalRules = [
+				[/\bprimer(?:o|a)?\b|\b1er\b|\b1ro\b/, 1],
+				[/\bsegund(?:o|a)?\b|\b2do\b/, 2],
+				[/\btercer(?:o|a)?\b|\b3er\b/, 3],
+				[/\bcuart(?:o|a)?\b|\b4to\b/, 4],
+				[/\bquint(?:o|a)?\b|\b5to\b/, 5],
+				[/\bsext(?:o|a)?\b|\b6to\b/, 6],
+				[/\bseptim(?:o|a)?\b|\b7mo\b/, 7],
+				[/\boctav(?:o|a)?\b|\b8vo\b/, 8],
+				[/\bnoven(?:o|a)?\b|\b9no\b/, 9],
+				[/\bdecim(?:o|a)?\b|\b10mo\b/, 10],
+			];
+
+			for (const [rule, value] of ordinalRules) {
+				if (rule.test(text)) return value;
+			}
+
+			return Number.POSITIVE_INFINITY;
+		}
+
+		function getFloorSecondaryOrder(name) {
+			const text = normalizeKey(name);
+			if (text.includes("bajo")) return 0;
+			if (text.includes("alto")) return 1;
+			return 2;
+		}
+
+		function sortFloorsByName(items = []) {
+			return [...items].sort((a, b) => {
+				const floorA = getFloorOrder(a?.nombre);
+				const floorB = getFloorOrder(b?.nombre);
+				if (floorA !== floorB) return floorA - floorB;
+
+				const secondaryA = getFloorSecondaryOrder(a?.nombre);
+				const secondaryB = getFloorSecondaryOrder(b?.nombre);
+				if (secondaryA !== secondaryB) return secondaryA - secondaryB;
+
+				return String(a?.nombre || "").localeCompare(String(b?.nombre || ""), undefined, {
+					numeric: true,
+					sensitivity: "base",
+				});
+			});
+		}
+
 		function parseLocationLine(rawLine) {
 			const line = String(rawLine || "").trim();
 			if (!line) return null;
@@ -390,10 +496,26 @@ async function initSettingsPage() {
 			locationDetailContext = { type, id, name };
 		}
 
+		function getLocationTypeLabel(type) {
+			const map = {
+				bloque: "bloque",
+				piso: "piso",
+				area: "área",
+			};
+			return map[String(type || "").toLowerCase()] || String(type || "");
+		}
+
+		function capitalizeFirst(text) {
+			const raw = String(text || "");
+			if (!raw) return raw;
+			return raw.charAt(0).toUpperCase() + raw.slice(1);
+		}
+
 		async function askDeleteLocationWithImpact(context) {
 			if (!context || !modalDeleteConfirm || !modalDeleteBody || !btnConfirmDeleteLocation) {
 				return false;
 			}
+			const contextTypeLabel = getLocationTypeLabel(context.type);
 
 			const response = await api.get(`/api/ubicaciones/impacto?entity=${encodeURIComponent(context.type)}&id=${context.id}`);
 			const impact = response.data || {};
@@ -404,7 +526,7 @@ async function initSettingsPage() {
 
 			modalDeleteTitle.textContent = hasRelations
 				? `Advertencia de eliminación en cascada (${context.type})`
-				: `Confirmar eliminación de ${context.type}`;
+				: `Confirmar eliminación de ${contextTypeLabel}`;
 
 			modalDeleteBody.innerHTML = hasRelations
 				? `
@@ -458,7 +580,8 @@ async function initSettingsPage() {
 			if (!route) return;
 			await api.send(route, "DELETE", {});
 			await loadStructure();
-			notify(`${context.type.charAt(0).toUpperCase() + context.type.slice(1)} eliminado correctamente.`);
+			const contextTypeLabel = getLocationTypeLabel(context.type);
+			notify(`${capitalizeFirst(contextTypeLabel)} eliminado correctamente.`);
 		}
 
 		function setDetailButtonsMode(mode = "view", enableEdit = false) {
@@ -1001,7 +1124,8 @@ async function initSettingsPage() {
 
 		function renderBlocks() {
 			bloquesTabs.innerHTML = "";
-			state.structure.forEach((block) => {
+			const sortedBlocks = sortBlocksByName(state.structure || []);
+			sortedBlocks.forEach((block) => {
 				const wrapper = document.createElement("div");
 				wrapper.className = "btn-group";
 				wrapper.setAttribute("role", "group");
@@ -1013,8 +1137,9 @@ async function initSettingsPage() {
 				if (block.descripcion) btnTab.title = block.descripcion;
 				
 				btnTab.addEventListener("click", () => {
+					const sortedPisos = sortFloorsByName(block.pisos || []);
 					state.activeBlockId = block.id;
-					state.activeFloorId = block.pisos[0]?.id || null;
+					state.activeFloorId = sortedPisos[0]?.id || null;
 					renderAll();
 				});
 
@@ -1046,26 +1171,28 @@ async function initSettingsPage() {
 				areasSection.classList.add("d-none");
 				return;
 			}
-			if (!block.pisos.length) {
+			const sortedPisos = sortFloorsByName(block.pisos || []);
+			if (!sortedPisos.length) {
 				pisosContainer.innerHTML = '<p class="text-muted mb-0">Este bloque aún no tiene pisos.</p>';
 				areasSection.classList.add("d-none");
 				return;
 			}
 			areasSection.classList.add("d-none");
 			
-			block.pisos.forEach((piso) => {
+			sortedPisos.forEach((piso) => {
 				const floorCard = document.createElement("div");
 				// Determinar si este piso debe estar expandido (basado en el estado)
 				const isExpanded = state.expandedFloorId === piso.id;
 				
 				floorCard.className = "floor-compact-card";
-				const areaNames = (piso.areas || []).map((entry) => entry.nombre).join(", ");
+				const sortedAreas = sortByNaturalName(piso.areas || []);
+				const areaNames = sortedAreas.map((entry) => entry.nombre).join(", ");
 				const summaryText = areaNames
-					? `Total áreas: ${piso.areas.length}. Registradas: ${areaNames}`
+					? `Total áreas: ${sortedAreas.length}. Registradas: ${areaNames}`
 					: "Total áreas: 0. No hay áreas registradas en este piso.";
 
-				const areaButtonsHtml = (piso.areas || []).length
-					? piso.areas
+				const areaButtonsHtml = sortedAreas.length
+					? sortedAreas
 							.map(
 								(area) => `
 									<button type="button" class="area-pill-btn" data-area-id="${area.id}" title="${escapeHtml(area.descripcion || area.nombre)}">
@@ -1215,19 +1342,23 @@ async function initSettingsPage() {
 
 		async function loadStructure() {
 			state.structure = await window.appHelpers.loadStructure(api, { sortNatural: true, includeAreaDetails: true });
+			const sortedBlocks = sortBlocksByName(state.structure || []);
 
-			if (!state.activeBlockId && state.structure.length) {
-				state.activeBlockId = state.structure[0].id;
-				state.activeFloorId = state.structure[0].pisos[0]?.id || null;
+			if (!state.activeBlockId && sortedBlocks.length) {
+				const firstBlockSortedPisos = sortFloorsByName(sortedBlocks[0].pisos || []);
+				state.activeBlockId = sortedBlocks[0].id;
+				state.activeFloorId = firstBlockSortedPisos[0]?.id || null;
 			}
 			const activeBlockExists = state.structure.some((block) => block.id === state.activeBlockId);
 			if (!activeBlockExists) {
-				state.activeBlockId = state.structure[0]?.id || null;
-				state.activeFloorId = state.structure[0]?.pisos[0]?.id || null;
+				const firstBlockSortedPisos = sortFloorsByName(sortedBlocks[0]?.pisos || []);
+				state.activeBlockId = sortedBlocks[0]?.id || null;
+				state.activeFloorId = firstBlockSortedPisos[0]?.id || null;
 			}
 			const activeBlock = getActiveBlock();
 			if (activeBlock && !activeBlock.pisos.some((piso) => piso.id === state.activeFloorId)) {
-				state.activeFloorId = activeBlock.pisos[0]?.id || null;
+				const activeBlockSortedPisos = sortFloorsByName(activeBlock.pisos || []);
+				state.activeFloorId = activeBlockSortedPisos[0]?.id || null;
 			}
 			renderAll();
 		}

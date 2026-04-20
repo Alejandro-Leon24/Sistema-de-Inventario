@@ -22,6 +22,10 @@ def init_schema(base_dir: Path):
         legacy_controller._ensure_inventory_extended_columns,
     )
     legacy_controller._run_startup_migration_once(
+        "20260419_inventory_baja_columns_and_default_procedencia",
+        legacy_controller._ensure_inventory_baja_columns_and_default_procedencia,
+    )
+    legacy_controller._run_startup_migration_once(
         "20260409_inventory_codes_allow_duplicates",
         legacy_controller._ensure_inventory_codes_allow_duplicates,
     )
@@ -52,6 +56,10 @@ def init_schema(base_dir: Path):
     legacy_controller._run_startup_migration_once(
         "20260409_historial_actas_template_columns",
         legacy_controller._ensure_historial_actas_template_columns,
+    )
+    legacy_controller._run_startup_migration_once(
+        "20260419_acta_inventory_mutaciones_table",
+        legacy_controller._ensure_acta_inventory_mutaciones_table,
     )
     legacy_controller._run_startup_migration_once(
         "20260409_informes_area_sequence_table",

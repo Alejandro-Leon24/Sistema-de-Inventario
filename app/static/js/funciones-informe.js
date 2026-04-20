@@ -1,6 +1,16 @@
 const api = window.api;
 
-let selectedColumns = ["cod_inventario", "descripcion", "marca", "modelo", "serie", "estado"];
+const DEFAULT_ENTREGA_COLUMN_IDS = ["cod_inventario", "descripcion", "marca", "modelo", "serie", "estado"];
+const DEFAULT_RECEPCION_COLUMN_IDS = ["cod_inventario", "descripcion", "marca", "modelo", "cantidad", "estado"];
+const DEFAULT_BAJAS_COLUMN_IDS = ["item_numero", "cod_inventario", "cod_esbye", "descripcion", "estado", "justificacion"];
+const BAJAS_REQUIRED_COLUMN_IDS = ["estado", "justificacion"];
+const INFORME_PREFS_ENTREGA_COLUMNS_KEY = "informe_entrega_columnas_acta";
+const INFORME_PREFS_RECEPCION_COLUMNS_KEY = "informe_recepcion_columnas_acta";
+const INFORME_PREFS_BAJAS_COLUMNS_KEY = "informe_bajas_columnas_acta";
+const INFORME_LEGACY_ENTREGA_COLUMNS_KEY = "informe.prefs.entrega.columns.v1";
+const INFORME_LEGACY_RECEPCION_COLUMNS_KEY = "informe.prefs.recepcion.columns.v1";
+
+let selectedColumns = [...DEFAULT_ENTREGA_COLUMN_IDS];
 const availableColumns = [
     { id: "cod_inventario", label: "COD INV." },
     { id: "cod_esbye", label: "COD. ESBYE" },
@@ -16,11 +26,24 @@ const availableColumns = [
     { id: "valor", label: "VALOR" },
     { id: "usuario_final", label: "USUARIO FINAL" },
     { id: "observacion", label: "OBSERVACION" },
+    { id: "descripcion_esbye", label: "DESCRIPCION ESBYE" },
+    { id: "marca_esbye", label: "MARCA ESBYE" },
+    { id: "modelo_esbye", label: "MODELO ESBYE" },
+    { id: "serie_esbye", label: "SERIE ESBYE" },
+    { id: "fecha_adquisicion_esbye", label: "FECHA ESBYE" },
+    { id: "valor_esbye", label: "VALOR ESBYE" },
+    { id: "ubicacion_esbye", label: "UBICACION ESBYE" },
+    { id: "observacion_esbye", label: "OBSERVACION ESBYE" },
 ];
 
 let structureData = [];
 let inventoryDataCache = [];
 let selectedItemIds = new Set();
+let extraccionFilteredItems = [];
+let extraccionPage = 1;
+let extraccionPerPage = 25;
+let recepcionTablePage = 1;
+let recepcionTablePerPage = 10;
 window._globalSelectedTableRows = [];
 window._globalSelectedColumns = [];
 
@@ -37,7 +60,16 @@ let activeAulaBatchModal = null;
 let activeAulaBatchPaused = false;
 let recepcionBienesTemp = [];
 let recepcionEditIndex = -1;
-let recepcionSelectedColumnIds = ["cod_inventario", "descripcion", "marca", "modelo", "cantidad", "estado"];
+let recepcionSelectedColumnIds = [...DEFAULT_RECEPCION_COLUMN_IDS];
+let bajasBienesTemp = [];
+let bajasSelectedItemIds = new Set();
+let bajasDraftBienes = [];
+let bajasFilteredItems = [];
+let bajasPage = 1;
+let bajasPerPage = 25;
+let bajasStep = 1;
+let bajasEstadoOptions = [];
+let bajasSelectedColumnIds = [...DEFAULT_BAJAS_COLUMN_IDS];
 
 const RECEPCION_BIENES_COLUMNS = [
     { id: "cod_inventario", label: "COD INV." },
@@ -64,6 +96,62 @@ const RECEPCION_BIENES_COLUMNS = [
     { id: "observacion_esbye", label: "OBSERVACION ESBYE" },
 ];
 
+const BAJAS_BIENES_COLUMNS = [
+    { id: "item_numero", label: "ITEM" },
+    { id: "cod_inventario", label: "COD INV." },
+    { id: "cod_esbye", label: "COD. ESBYE" },
+    { id: "cuenta", label: "CUENTA" },
+    { id: "cantidad", label: "CANT" },
+    { id: "descripcion", label: "DESCRIPCION" },
+    { id: "marca", label: "MARCA" },
+    { id: "modelo", label: "MODELO" },
+    { id: "serie", label: "SERIE" },
+    { id: "estado", label: "ESTADO" },
+    { id: "ubicacion", label: "UBICACION" },
+    { id: "fecha_adquisicion", label: "FECHA ADQUISICION" },
+    { id: "valor", label: "VALOR" },
+    { id: "usuario_final", label: "USUARIO FINAL" },
+    { id: "observacion", label: "OBSERVACION" },
+    { id: "justificacion", label: "JUSTIFICACION" },
+    { id: "procedencia", label: "PROCEDENCIA" },
+    { id: "descripcion_esbye", label: "DESCRIPCION ESBYE" },
+    { id: "marca_esbye", label: "MARCA ESBYE" },
+    { id: "modelo_esbye", label: "MODELO ESBYE" },
+    { id: "serie_esbye", label: "SERIE ESBYE" },
+    { id: "fecha_adquisicion_esbye", label: "FECHA ESBYE" },
+    { id: "valor_esbye", label: "VALOR ESBYE" },
+    { id: "ubicacion_esbye", label: "UBICACION ESBYE" },
+    { id: "observacion_esbye", label: "OBSERVACION ESBYE" },
+];
+
+const BAJAS_REGISTRADOS_COLUMNS = [
+    { id: "item_numero", label: "ITEM" },
+    { id: "cod_inventario", label: "COD INV." },
+    { id: "cod_esbye", label: "COD. ESBYE" },
+    { id: "cuenta", label: "CUENTA" },
+    { id: "cantidad", label: "CANT" },
+    { id: "descripcion", label: "DESCRIPCION" },
+    { id: "marca", label: "MARCA" },
+    { id: "modelo", label: "MODELO" },
+    { id: "serie", label: "SERIE" },
+    { id: "estado", label: "ESTADO" },
+    { id: "ubicacion", label: "UBICACION" },
+    { id: "fecha_adquisicion", label: "FECHA ADQUISICION" },
+    { id: "valor", label: "VALOR" },
+    { id: "usuario_final", label: "USUARIO FINAL" },
+    { id: "observacion", label: "OBSERVACION" },
+    { id: "justificacion", label: "JUSTIFICACION" },
+    { id: "procedencia", label: "PROCEDENCIA" },
+    { id: "descripcion_esbye", label: "DESCRIPCION ESBYE" },
+    { id: "marca_esbye", label: "MARCA ESBYE" },
+    { id: "modelo_esbye", label: "MODELO ESBYE" },
+    { id: "serie_esbye", label: "SERIE ESBYE" },
+    { id: "fecha_adquisicion_esbye", label: "FECHA ESBYE" },
+    { id: "valor_esbye", label: "VALOR ESBYE" },
+    { id: "ubicacion_esbye", label: "UBICACION ESBYE" },
+    { id: "observacion_esbye", label: "OBSERVACION ESBYE" },
+];
+
 function normalizeRecepcionColumnIds(rawColumns) {
     const allIds = new Set(RECEPCION_BIENES_COLUMNS.map((c) => c.id));
     const ids = (rawColumns || [])
@@ -76,7 +164,161 @@ function normalizeRecepcionColumnIds(rawColumns) {
         if (!unique.includes(id)) unique.push(id);
     });
 
-    return unique.length ? unique : ["cod_inventario", "descripcion", "marca", "modelo", "cantidad", "estado"];
+    return unique.length ? unique : [...DEFAULT_RECEPCION_COLUMN_IDS];
+}
+
+function normalizeEntregaColumnIds(rawColumns) {
+    const allIds = new Set(availableColumns.map((c) => c.id));
+    const ids = (rawColumns || [])
+        .map((entry) => (typeof entry === "string" ? entry : entry?.id))
+        .map((id) => String(id || "").trim())
+        .filter((id) => allIds.has(id));
+
+    const unique = [];
+    ids.forEach((id) => {
+        if (!unique.includes(id)) unique.push(id);
+    });
+
+    return unique.length ? unique : [...DEFAULT_ENTREGA_COLUMN_IDS];
+}
+
+function normalizeBajasColumnIds(rawColumns) {
+    const allIds = new Set(BAJAS_BIENES_COLUMNS.map((c) => c.id));
+    const ids = (rawColumns || [])
+        .map((entry) => (typeof entry === "string" ? entry : entry?.id))
+        .map((id) => String(id || "").trim())
+        .filter((id) => allIds.has(id));
+
+    const unique = [];
+    ids.forEach((id) => {
+        if (!unique.includes(id)) unique.push(id);
+    });
+
+    BAJAS_REQUIRED_COLUMN_IDS.forEach((id) => {
+        if (!unique.includes(id)) unique.push(id);
+    });
+
+    return unique.length ? unique : [...DEFAULT_BAJAS_COLUMN_IDS];
+}
+
+function getLegacyColumnsFromLocalStorage(storageKey, normalizer) {
+    try {
+        const raw = localStorage.getItem(storageKey);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        const normalized = normalizer(parsed);
+        return Array.isArray(normalized) && normalized.length ? normalized : null;
+    } catch (_err) {
+        return null;
+    }
+}
+
+function clearLegacyColumnPreferenceKeys() {
+    try {
+        localStorage.removeItem(INFORME_LEGACY_ENTREGA_COLUMNS_KEY);
+        localStorage.removeItem(INFORME_LEGACY_RECEPCION_COLUMNS_KEY);
+    } catch (_err) {
+        // noop
+    }
+}
+
+async function loadColumnPreferences() {
+    try {
+        const preferences = await window.appHelpers.loadPreferences(api);
+        const hasEntregaInDb = Object.prototype.hasOwnProperty.call(preferences || {}, INFORME_PREFS_ENTREGA_COLUMNS_KEY);
+        const hasRecepcionInDb = Object.prototype.hasOwnProperty.call(preferences || {}, INFORME_PREFS_RECEPCION_COLUMNS_KEY);
+        const hasBajasInDb = Object.prototype.hasOwnProperty.call(preferences || {}, INFORME_PREFS_BAJAS_COLUMNS_KEY);
+
+        let entregaColumns = hasEntregaInDb
+            ? normalizeEntregaColumnIds(preferences?.[INFORME_PREFS_ENTREGA_COLUMNS_KEY])
+            : null;
+        let recepcionColumns = hasRecepcionInDb
+            ? normalizeRecepcionColumnIds(preferences?.[INFORME_PREFS_RECEPCION_COLUMNS_KEY])
+            : null;
+        let bajasColumns = hasBajasInDb
+            ? normalizeBajasColumnIds(preferences?.[INFORME_PREFS_BAJAS_COLUMNS_KEY])
+            : null;
+
+        if (!hasEntregaInDb) {
+            const legacyEntrega = getLegacyColumnsFromLocalStorage(
+                INFORME_LEGACY_ENTREGA_COLUMNS_KEY,
+                normalizeEntregaColumnIds
+            );
+            if (legacyEntrega) {
+                entregaColumns = legacyEntrega;
+                await api.send("/api/preferencias", "PATCH", {
+                    pref_key: INFORME_PREFS_ENTREGA_COLUMNS_KEY,
+                    pref_value: legacyEntrega,
+                });
+            }
+        }
+
+        if (!hasRecepcionInDb) {
+            const legacyRecepcion = getLegacyColumnsFromLocalStorage(
+                INFORME_LEGACY_RECEPCION_COLUMNS_KEY,
+                normalizeRecepcionColumnIds
+            );
+            if (legacyRecepcion) {
+                recepcionColumns = legacyRecepcion;
+                await api.send("/api/preferencias", "PATCH", {
+                    pref_key: INFORME_PREFS_RECEPCION_COLUMNS_KEY,
+                    pref_value: legacyRecepcion,
+                });
+            }
+        }
+
+        selectedColumns = entregaColumns || [...DEFAULT_ENTREGA_COLUMN_IDS];
+        recepcionSelectedColumnIds = recepcionColumns || [...DEFAULT_RECEPCION_COLUMN_IDS];
+        bajasSelectedColumnIds = bajasColumns || [...DEFAULT_BAJAS_COLUMN_IDS];
+        clearLegacyColumnPreferenceKeys();
+    } catch (_err) {
+        selectedColumns = [...DEFAULT_ENTREGA_COLUMN_IDS];
+        recepcionSelectedColumnIds = [...DEFAULT_RECEPCION_COLUMN_IDS];
+        bajasSelectedColumnIds = [...DEFAULT_BAJAS_COLUMN_IDS];
+    }
+}
+
+async function saveEntregaColumnPreferences() {
+    try {
+        await api.send("/api/preferencias", "PATCH", {
+            pref_key: INFORME_PREFS_ENTREGA_COLUMNS_KEY,
+            pref_value: normalizeEntregaColumnIds(selectedColumns),
+        });
+    } catch (_err) {
+        // noop
+    }
+}
+
+async function saveRecepcionColumnPreferences() {
+    try {
+        await api.send("/api/preferencias", "PATCH", {
+            pref_key: INFORME_PREFS_RECEPCION_COLUMNS_KEY,
+            pref_value: normalizeRecepcionColumnIds(recepcionSelectedColumnIds),
+        });
+    } catch (_err) {
+        // noop
+    }
+}
+
+async function saveBajasColumnPreferences() {
+    try {
+        await api.send("/api/preferencias", "PATCH", {
+            pref_key: INFORME_PREFS_BAJAS_COLUMNS_KEY,
+            pref_value: normalizeBajasColumnIds(bajasSelectedColumnIds),
+        });
+    } catch (_err) {
+        // noop
+    }
+}
+
+function validarNumerosComasInput(input) {
+    if (!input) return;
+    let value = String(input.value || "").replace(/[^0-9,]/g, "");
+    const firstComma = value.indexOf(",");
+    if (firstComma !== -1) {
+        value = value.slice(0, firstComma + 1) + value.slice(firstComma + 1).replace(/,/g, "");
+    }
+    input.value = value;
 }
 
 const ACTA_TEMPLATE_REQUIRED_VARS = {
@@ -106,6 +348,15 @@ const ACTA_TEMPLATE_REQUIRED_VARS = {
         "entregado_por_segunda_delegada",
         "rol_entrega_segunda_delegada",
         "area_trabajo",
+        "tabla_dinamica",
+    ],
+    bajas: [
+        "numero_acta",
+        "nombre_delegado",
+        "recibido_por",
+        "entregado_por",
+        "rol_entrega",
+        "fecha_emision",
         "tabla_dinamica",
     ],
     aula: ["tabla_dinamica"],
@@ -192,6 +443,186 @@ function normalizeCodeToPlaceholder(value) {
 
 function isNoCodeValue(value) {
     return normalizeCodeToPlaceholder(value) === "S/C";
+}
+
+const RECEPCION_MODAL_PASTE_FIELDS = [
+    "cod_inventario",
+    "cod_esbye",
+    "cuenta",
+    "cantidad",
+    "descripcion",
+    "marca",
+    "modelo",
+    "serie",
+    "estado",
+    "ubicacion",
+    "fecha_adquisicion",
+    "valor",
+    "usuario_final",
+    "observacion",
+    "descripcion_esbye",
+    "marca_esbye",
+    "modelo_esbye",
+    "serie_esbye",
+    "fecha_adquisicion_esbye",
+    "valor_esbye",
+    "ubicacion_esbye",
+    "observacion_esbye",
+];
+
+const RECEPCION_MODAL_FIELD_TO_INPUT_ID = {
+    cod_inventario: "recepcion-bien-cod-inventario",
+    cod_esbye: "recepcion-bien-cod-esbye",
+    cuenta: "recepcion-bien-cuenta",
+    cantidad: "recepcion-bien-cantidad",
+    descripcion: "recepcion-bien-descripcion",
+    marca: "recepcion-bien-marca",
+    modelo: "recepcion-bien-modelo",
+    serie: "recepcion-bien-serie",
+    estado: "recepcion-bien-estado",
+    fecha_adquisicion: "recepcion-bien-fecha-adquisicion",
+    valor: "recepcion-bien-valor",
+    usuario_final: "recepcion-bien-usuario-final",
+    observacion: "recepcion-bien-observacion",
+    descripcion_esbye: "recepcion-bien-descripcion-esbye",
+    marca_esbye: "recepcion-bien-marca-esbye",
+    modelo_esbye: "recepcion-bien-modelo-esbye",
+    serie_esbye: "recepcion-bien-serie-esbye",
+    fecha_adquisicion_esbye: "recepcion-bien-fecha-esbye",
+    valor_esbye: "recepcion-bien-valor-esbye",
+    ubicacion_esbye: "recepcion-bien-ubicacion-esbye",
+    observacion_esbye: "recepcion-bien-observacion-esbye",
+};
+
+function parseExcelText(text) {
+    const normalizedText = String(text || "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n");
+
+    return normalizedText
+        .split("\n")
+        .filter((line) => line.replace(/\t/g, "").trim().length > 0)
+        .map((line) => line.split("\t").map((cell) => String(cell || "").trim()));
+}
+
+function scoreRecepcionPastedMapping(mapped = {}) {
+    let score = 0;
+    if (String(mapped.cod_inventario || "").trim()) score += 3;
+    if (String(mapped.descripcion || "").trim()) score += 4;
+    if (String(mapped.ubicacion || "").trim()) score += 3;
+    if (String(mapped.usuario_final || "").trim()) score += 2;
+    if (String(mapped.estado || "").trim()) score += 1;
+    if (String(mapped.cantidad || "").trim().match(/^\d+$/)) score += 2;
+    if (String(mapped.fecha_adquisicion || "").trim()) score += 1;
+    if (String(mapped.valor || "").trim()) score += 1;
+    score += Object.keys(mapped).length * 0.25;
+    return score;
+}
+
+function mapPastedRowBestEffortForRecepcion(rawRow) {
+    const cells = Array.isArray(rawRow) ? rawRow : [];
+    if (!cells.length) return {};
+
+    const candidateOrders = [
+        RECEPCION_MODAL_PASTE_FIELDS,
+        ["item_numero", ...RECEPCION_MODAL_PASTE_FIELDS],
+    ];
+
+    let bestMapped = {};
+    let bestScore = Number.NEGATIVE_INFINITY;
+    let bestOffset = 0;
+
+    candidateOrders.forEach((order) => {
+        const maxOffset = Math.min(8, Math.max(cells.length - 1, 0));
+        for (let offset = 0; offset <= maxOffset; offset += 1) {
+            const mapped = {};
+            for (let idx = 0; idx < order.length; idx += 1) {
+                const field = order[idx];
+                if (field === "item_numero") continue;
+                const srcIdx = idx + offset;
+                if (srcIdx >= cells.length) break;
+                const value = String(cells[srcIdx] ?? "").trim();
+                if (!value) continue;
+                mapped[field] = value;
+            }
+
+            const score = scoreRecepcionPastedMapping(mapped);
+            if (score > bestScore || (score === bestScore && offset < bestOffset)) {
+                bestScore = score;
+                bestMapped = mapped;
+                bestOffset = offset;
+            }
+        }
+    });
+
+    return bestMapped;
+}
+
+function normalizeSelectSearchText(value) {
+    return String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+}
+
+function normalizePersonForSelectMatch(value) {
+    const normalized = normalizeSelectSearchText(value).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+    if (!normalized) return "";
+    const prefixes = new Set([
+        "ing", "ingeniero", "ingeniera", "dr", "dra", "doctor", "doctora",
+        "lic", "licenciado", "licenciada", "abg", "abogada", "abogado",
+        "arq", "arquitecto", "arquitecta", "tec", "tecnico", "tecnica",
+        "sr", "sra", "srta", "msc", "mg", "mgs", "mgtr", "mtr", "mts", "mtro", "mt",
+        "prof", "profa", "tlgo", "tlga", "ts", "phd",
+    ]);
+    const tokens = normalized.split(" ").filter(Boolean);
+    while (tokens.length && prefixes.has(tokens[0])) {
+        tokens.shift();
+    }
+    return tokens.join(" ");
+}
+
+function resolveSelectOptionBestMatch(options, rawValue, field = "") {
+    const normalizedVal = normalizeSelectSearchText(rawValue);
+    if (!normalizedVal) return null;
+    const list = Array.isArray(options) ? options : [];
+    const personValue = field === "usuario_final" ? normalizePersonForSelectMatch(rawValue) : "";
+
+    let matched = list.find((opt) => normalizeSelectSearchText(opt.value) === normalizedVal);
+    if (matched) return matched;
+
+    matched = list.find((opt) => normalizeSelectSearchText(opt.textContent) === normalizedVal);
+    if (matched) return matched;
+
+    if (personValue) {
+        matched = list.find((opt) => normalizePersonForSelectMatch(opt.textContent) === personValue);
+        if (matched) return matched;
+    }
+
+    matched = list.find((opt) => normalizeSelectSearchText(opt.textContent).includes(normalizedVal));
+    if (matched) return matched;
+
+    matched = list.find((opt) => normalizedVal.includes(normalizeSelectSearchText(opt.value)));
+    if (matched) return matched;
+
+    const valTokens = (personValue || normalizedVal).split(/\s+/).filter(Boolean);
+    let best = null;
+    let bestScore = 0;
+    list.forEach((opt) => {
+        const optNorm = field === "usuario_final"
+            ? normalizePersonForSelectMatch(opt.textContent)
+            : normalizeSelectSearchText(opt.textContent).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+        if (!optNorm) return;
+        const optTokens = optNorm.split(/\s+/).filter(Boolean);
+        const overlap = valTokens.filter((token) => optTokens.some((item) => item.includes(token) || token.includes(item))).length;
+        const score = overlap / Math.max(valTokens.length || 1, optTokens.length || 1);
+        if (score > bestScore) {
+            bestScore = score;
+            best = opt;
+        }
+    });
+    return bestScore >= 0.5 ? best : null;
 }
 
 function normalizeRecepcionRowLikeInventarioImport(row, forcedLocation) {
@@ -297,8 +728,13 @@ function showActaGuardModal(issues) {
 }
 
 async function checkActaTemplatesAccessGuard() {
-    const tipos = ["entrega", "recepcion", "aula"];
-    const labels = { entrega: "Acta de Entrega", recepcion: "Acta de Recepción", aula: "Inventario por Área" };
+    const tipos = ["entrega", "recepcion", "bajas", "aula"];
+    const labels = {
+        entrega: "Acta de Entrega",
+        recepcion: "Acta de Recepción",
+        bajas: "Acta de Bienes de Baja",
+        aula: "Inventario por Área",
+    };
     const issues = [];
 
     for (const tipo of tipos) {
@@ -536,6 +972,16 @@ function resetActaDraftState(tipo) {
         window._globalSelectedColumns = [];
         const targetDiv = document.querySelector("#sec-entrega .resultado-tabla-container");
         hideResultadoTabla(targetDiv);
+        return;
+    }
+
+    if (t === "bajas" || t === "baja") {
+        bajasBienesTemp = [];
+        bajasSelectedItemIds = new Set();
+        bajasFilteredItems = [];
+        bajasPage = 1;
+        bajasStep = 1;
+        updateBajasSummary();
     }
 }
 
@@ -1042,7 +1488,10 @@ function setManualPreviewOutput(result) {
         placeholder.classList.add("d-none");
         iframe.classList.remove("d-none");
         iframe.removeAttribute("src");
-        iframe.srcdoc = String(result.html_preview);
+        const buildPreviewDoc = typeof window.buildInformePreviewDoc === "function"
+            ? window.buildInformePreviewDoc
+            : (value) => String(value || "");
+        iframe.srcdoc = buildPreviewDoc(result.html_preview);
         setPreviewStatus("Vista HTML lista");
         return;
     }
@@ -1091,6 +1540,16 @@ function getActaTablePayload(tipo) {
             datosColumnas: selected,
         };
     }
+    if (t === "bajas" || t === "baja") {
+        const rows = Array.isArray(bajasBienesTemp) ? bajasBienesTemp : [];
+        const selected = normalizeBajasColumnIds(bajasSelectedColumnIds)
+            .map((id) => BAJAS_BIENES_COLUMNS.find((col) => col.id === id))
+            .filter(Boolean);
+        return {
+            datosTabla: rows,
+            datosColumnas: selected,
+        };
+    }
     return {
         datosTabla: Array.isArray(window._globalSelectedTableRows) ? window._globalSelectedTableRows : [],
         datosColumnas: Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [],
@@ -1101,6 +1560,64 @@ window.getInformeActaTablePayload = getActaTablePayload;
 
 function getRecepcionResultContainer() {
     return document.querySelector("#sec-recepcion .resultado-tabla-container");
+}
+
+function getBajasResultContainer() {
+    return document.querySelector("#sec-bajas .resultado-tabla-container");
+}
+
+function clearInformeFormByType(tipo) {
+    const form = document.getElementById(`form-${tipo}`);
+    const numeroActaInput = form?.querySelector('input[name="numero_acta"]') || null;
+    const numeroActaValue = String(numeroActaInput?.value || "");
+    const numeroActaLastAuto = String(numeroActaInput?.dataset?.lastAutoNumeroActa || "");
+
+    if (form) form.reset();
+
+    if (numeroActaInput) {
+        numeroActaInput.value = numeroActaValue;
+        numeroActaInput.dataset.lastAutoNumeroActa = numeroActaLastAuto;
+    }
+
+    const areaTrabajo = document.getElementById(`${tipo}-area-trabajo`);
+    const areaId = document.getElementById(`${tipo}-ubicacion-area-id`);
+    if (areaTrabajo) areaTrabajo.value = "";
+    if (areaId) areaId.value = "";
+
+    const bloque = document.getElementById(`${tipo}-bloque`);
+    if (bloque) {
+        bloque.value = "";
+        bloque.dispatchEvent(new Event("change"));
+    }
+
+    const targetDiv = document.querySelector(`#sec-${tipo} .resultado-tabla-container`);
+    if (targetDiv) hideResultadoTabla(targetDiv);
+}
+
+function clearAulaForm() {
+    const numeroActaInput = document.querySelector('#form-aula input[name="numero_acta"]');
+    const numeroActaValue = String(numeroActaInput?.value || "");
+    const numeroActaLastAuto = String(numeroActaInput?.dataset?.lastAutoNumeroActa || "");
+
+    const scope = document.getElementById("aula-scope");
+    const bloque = document.getElementById("aula-bloque");
+
+    if (scope) scope.value = "area";
+    if (bloque) {
+        bloque.value = "";
+        bloque.dispatchEvent(new Event("change"));
+    }
+
+    if (typeof applyAulaScopeMode === "function") applyAulaScopeMode();
+    if (typeof updateAulaBatchPreviewCard === "function") updateAulaBatchPreviewCard();
+
+    if (numeroActaInput) {
+        numeroActaInput.value = numeroActaValue;
+        numeroActaInput.dataset.lastAutoNumeroActa = numeroActaLastAuto;
+    }
+
+    const targetDiv = document.querySelector("#sec-aula .resultado-tabla-container");
+    if (targetDiv) hideResultadoTabla(targetDiv);
 }
 
 function updateRecepcionSummary() {
@@ -1116,6 +1633,22 @@ function updateRecepcionSummary() {
     showResultadoTabla(
         targetDiv,
         `<div class="alert alert-success d-inline-block p-2 px-4 shadow-sm mb-0"><i class="bi bi-check2-circle me-2"></i>Recepción: <strong>${total}</strong> bien(es) nuevo(s) registrados temporalmente.</div>`
+    );
+}
+
+function updateBajasSummary() {
+    const targetDiv = getBajasResultContainer();
+    const total = Array.isArray(bajasBienesTemp) ? bajasBienesTemp.length : 0;
+    if (!targetDiv) return;
+
+    if (total <= 0) {
+        hideResultadoTabla(targetDiv);
+        return;
+    }
+
+    showResultadoTabla(
+        targetDiv,
+        `<div class="alert alert-warning d-inline-block p-2 px-4 shadow-sm mb-0"><i class="bi bi-trash me-2"></i>Bajas: <strong>${total}</strong> bien(es) preparado(s) para dar de baja.</div>`
     );
 }
 
@@ -1150,6 +1683,7 @@ function getRecepcionBienFormValues() {
 
 function clearRecepcionBienForm() {
     const ids = [
+        "recepcion-excel-single-row",
         "recepcion-bien-cod-inventario",
         "recepcion-bien-cod-esbye",
         "recepcion-bien-cuenta",
@@ -1284,6 +1818,10 @@ function renderRecepcionBienesTable() {
     const tbody = document.getElementById("tbody-recepcion-bienes");
     const thead = document.getElementById("thead-recepcion-bienes");
     const countBadge = document.getElementById("recepcion-bienes-count");
+    const pageInfo = document.getElementById("recepcion-bienes-page-info");
+    const pagePrev = document.getElementById("recepcion-bienes-page-prev");
+    const pageNext = document.getElementById("recepcion-bienes-page-next");
+    const pageSize = document.getElementById("recepcion-bienes-page-size");
     if (!tbody || !thead || !countBadge) return;
 
     const selectedIds = normalizeRecepcionColumnIds(recepcionSelectedColumnIds);
@@ -1313,18 +1851,36 @@ function renderRecepcionBienesTable() {
     thActions.textContent = "Acciones";
     thead.appendChild(thActions);
 
-    countBadge.textContent = String(recepcionBienesTemp.length);
-    if (!recepcionBienesTemp.length) {
+    const totalItems = recepcionBienesTemp.length;
+    countBadge.textContent = String(totalItems);
+    if (!totalItems) {
         tbody.innerHTML = `<tr><td colspan="${selectedCols.length + 2}" class="text-center text-muted">Aún no hay bienes registrados.</td></tr>`;
+        if (pageInfo) pageInfo.textContent = "0 de 0";
+        if (pagePrev) pagePrev.disabled = true;
+        if (pageNext) pageNext.disabled = true;
         return;
     }
 
+    if (pageSize) {
+        pageSize.value = String(recepcionTablePerPage);
+    }
+
+    const totalPages = Math.max(1, Math.ceil(totalItems / recepcionTablePerPage));
+    recepcionTablePage = Math.min(Math.max(recepcionTablePage, 1), totalPages);
+    const startIndex = (recepcionTablePage - 1) * recepcionTablePerPage;
+    const pagedItems = recepcionBienesTemp.slice(startIndex, startIndex + recepcionTablePerPage);
+
+    if (pageInfo) pageInfo.textContent = `Página ${recepcionTablePage} de ${totalPages}`;
+    if (pagePrev) pagePrev.disabled = recepcionTablePage <= 1;
+    if (pageNext) pageNext.disabled = recepcionTablePage >= totalPages;
+
     tbody.innerHTML = "";
-    recepcionBienesTemp.forEach((item, idx) => {
+    pagedItems.forEach((item, idx) => {
+        const globalIndex = startIndex + idx;
         const tr = document.createElement("tr");
         tr.style.cursor = "pointer";
-        tr.dataset.index = String(idx);
-        let rowHtml = `<td>${idx + 1}</td>`;
+        tr.dataset.index = String(globalIndex);
+        let rowHtml = `<td>${globalIndex + 1}</td>`;
         selectedCols.forEach((col) => {
             const raw = item?.[col.id];
             const value = raw == null || String(raw).trim() === "" ? "-" : String(raw);
@@ -1333,7 +1889,7 @@ function renderRecepcionBienesTable() {
                 : "";
             rowHtml += `<td${codeClass} title="${escapeCell(value)}">${escapeCell(value)}</td>`;
         });
-        rowHtml += `<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-recepcion-bien-eliminar" data-index="${idx}"><i class="bi bi-trash"></i></button></td>`;
+        rowHtml += `<td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-recepcion-bien-eliminar" data-index="${globalIndex}"><i class="bi bi-trash"></i></button></td>`;
         tr.innerHTML = rowHtml;
         tbody.appendChild(tr);
     });
@@ -1397,6 +1953,7 @@ function setupRecepcionBienesModal() {
     const btnOpen = document.querySelector("#sec-recepcion .btn-registrar-bienes");
     const btnSave = document.getElementById("btn-recepcion-bien-guardar");
     const btnCancel = document.getElementById("btn-recepcion-bien-cancelar");
+    const btnClear = document.getElementById("btn-recepcion-bien-vaciar");
     const btnConfirm = document.getElementById("btn-confirmar-recepcion-bienes");
     const btnImportExcel = document.getElementById("btn-recepcion-importar-excel");
     const inputImportExcel = document.getElementById("recepcion-import-file-input");
@@ -1415,12 +1972,18 @@ function setupRecepcionBienesModal() {
     const btnColumnas = document.getElementById("btn-recepcion-columnas");
     const btnColumnasGuardar = document.getElementById("btn-recepcion-columnas-guardar");
     const recepcionColumnSelector = document.getElementById("recepcion-column-selector");
+    const recepcionExcelSingleRow = document.getElementById("recepcion-excel-single-row");
+    const recepcionPagePrev = document.getElementById("recepcion-bienes-page-prev");
+    const recepcionPageNext = document.getElementById("recepcion-bienes-page-next");
+    const recepcionPageSize = document.getElementById("recepcion-bienes-page-size");
     const panel1 = document.getElementById("recepcion-import-step-file");
     const panel2 = document.getElementById("recepcion-import-step-mapping");
     const panel3 = document.getElementById("recepcion-import-step-run");
     const stepBadges = [];
     const stepLabels = [];
     const ubicacionReadonly = document.getElementById("recepcion-bien-ubicacion");
+    const valorInput = document.getElementById("recepcion-bien-valor");
+    const valorEsbyeInput = document.getElementById("recepcion-bien-valor-esbye");
     const cuentaSelect = document.getElementById("recepcion-bien-cuenta");
     const estadoSelect = document.getElementById("recepcion-bien-estado");
     const usuarioFinalSelect = document.getElementById("recepcion-bien-usuario-final");
@@ -1474,6 +2037,138 @@ function setupRecepcionBienesModal() {
     const openDuplicateModal = duplicateController?.openDuplicateModal
         ? duplicateController.openDuplicateModal
         : async () => true;
+
+    [valorInput, valorEsbyeInput].forEach((input) => {
+        if (!input) return;
+        input.addEventListener("input", () => validarNumerosComasInput(input));
+    });
+
+    const assignRecepcionPastedValue = (field, rawValue) => {
+        const inputId = RECEPCION_MODAL_FIELD_TO_INPUT_ID[field];
+        if (!inputId) return;
+        const input = document.getElementById(inputId);
+        if (!input) return;
+
+        const value = String(rawValue ?? "").trim();
+        if (!value) return;
+
+        if (field === "cod_inventario" || field === "cod_esbye") {
+            input.value = normalizeCodeToPlaceholder(value);
+            return;
+        }
+
+        if (field === "valor" || field === "valor_esbye") {
+            let normalizedMoney = value.replace(/[^\d,.-]/g, "");
+            const lastComma = normalizedMoney.lastIndexOf(",");
+            const lastDot = normalizedMoney.lastIndexOf(".");
+
+            if (lastComma >= 0 && lastDot >= 0) {
+                if (lastComma > lastDot) {
+                    normalizedMoney = normalizedMoney.replace(/\./g, "");
+                } else {
+                    normalizedMoney = normalizedMoney.replace(/,/g, "");
+                    const parts = normalizedMoney.split(".");
+                    const decimal = parts.pop();
+                    normalizedMoney = `${parts.join("")}${decimal !== undefined ? `,${decimal}` : ""}`;
+                }
+            } else if (lastDot >= 0) {
+                const parts = normalizedMoney.split(".");
+                const decimal = parts.pop();
+                normalizedMoney = `${parts.join("")}${decimal !== undefined ? `,${decimal}` : ""}`;
+            }
+
+            normalizedMoney = normalizedMoney.replace(/-/g, "");
+            const firstComma = normalizedMoney.indexOf(",");
+            if (firstComma !== -1) {
+                normalizedMoney = normalizedMoney.slice(0, firstComma + 1) + normalizedMoney.slice(firstComma + 1).replace(/,/g, "");
+            }
+            input.value = normalizedMoney;
+            return;
+        }
+
+        if (field === "cantidad") {
+            let normalized = value;
+            if (value.includes(",") && value.includes(".")) {
+                normalized = value.replace(/\./g, "").replace(",", ".");
+            } else if (value.includes(",")) {
+                normalized = value.replace(",", ".");
+            }
+            const numeric = Number(normalized);
+            if (Number.isFinite(numeric) && numeric > 0) {
+                input.value = String(Math.trunc(numeric));
+            }
+            return;
+        }
+
+        if (field === "fecha_adquisicion" || field === "fecha_adquisicion_esbye") {
+            input.value = normalizeImportDateLikeInventario(value);
+            return;
+        }
+
+        if (input.tagName === "SELECT") {
+            const options = Array.from(input.options || []);
+            const match = resolveSelectOptionBestMatch(options, value, field);
+            if (match) {
+                input.value = match.value;
+            } else if (field === "usuario_final") {
+                const dynamicOption = document.createElement("option");
+                dynamicOption.value = value;
+                dynamicOption.textContent = value;
+                input.appendChild(dynamicOption);
+                input.value = value;
+            }
+            return;
+        }
+
+        if ((input.type || "").toLowerCase() === "date") {
+            input.value = normalizeImportDateLikeInventario(value);
+            return;
+        }
+
+        if ((input.type || "").toLowerCase() === "number") {
+            let normalized = value;
+            if (value.includes(",") && value.includes(".")) {
+                normalized = value.replace(/\./g, "").replace(",", ".");
+            } else if (value.includes(",")) {
+                normalized = value.replace(",", ".");
+            }
+            input.value = normalized;
+            return;
+        }
+
+        input.value = value;
+    };
+
+    if (recepcionExcelSingleRow) {
+        recepcionExcelSingleRow.addEventListener("paste", async (event) => {
+            const text = event.clipboardData.getData("text/plain");
+            if (!text.trim()) return;
+            event.preventDefault();
+
+            await loadRecepcionSelectOptions();
+            const rows = parseExcelText(text);
+            if (!rows.length) return;
+
+            const mappedPrimary = mapPastedRowBestEffortForRecepcion(rows[0]);
+            let mapped = mappedPrimary;
+
+            if (rows.length > 1) {
+                const mergedCells = rows.flat();
+                const mappedMerged = mapPastedRowBestEffortForRecepcion(mergedCells);
+                if (scoreRecepcionPastedMapping(mappedMerged) > scoreRecepcionPastedMapping(mappedPrimary)) {
+                    mapped = mappedMerged;
+                }
+            }
+
+            RECEPCION_MODAL_PASTE_FIELDS.forEach((field) => {
+                if (field === "ubicacion") return;
+                if (mapped[field] === undefined) return;
+                assignRecepcionPastedValue(field, mapped[field]);
+            });
+
+            syncRecepcionUbicacionReadonly();
+        });
+    }
 
     const CHUNK_SIZE = 20;
     let shouldReturnToRecepcionModal = false;
@@ -2171,9 +2866,37 @@ function setupRecepcionBienesModal() {
         event.preventDefault();
         syncRecepcionUbicacionReadonly();
         loadRecepcionSelectOptions();
+        recepcionTablePage = 1;
         renderRecepcionBienesTable();
         modal.show();
     });
+
+    if (recepcionPagePrev && recepcionPagePrev.dataset.bound !== "1") {
+        recepcionPagePrev.dataset.bound = "1";
+        recepcionPagePrev.addEventListener("click", () => {
+            if (recepcionTablePage <= 1) return;
+            recepcionTablePage -= 1;
+            renderRecepcionBienesTable();
+        });
+    }
+
+    if (recepcionPageNext && recepcionPageNext.dataset.bound !== "1") {
+        recepcionPageNext.dataset.bound = "1";
+        recepcionPageNext.addEventListener("click", () => {
+            recepcionTablePage += 1;
+            renderRecepcionBienesTable();
+        });
+    }
+
+    if (recepcionPageSize && recepcionPageSize.dataset.bound !== "1") {
+        recepcionPageSize.dataset.bound = "1";
+        recepcionPageSize.addEventListener("change", () => {
+            const parsed = Number(recepcionPageSize.value || 10);
+            recepcionTablePerPage = Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+            recepcionTablePage = 1;
+            renderRecepcionBienesTable();
+        });
+    }
 
     btnImportExcel?.addEventListener("click", () => {
         syncRecepcionUbicacionReadonly();
@@ -2275,6 +2998,7 @@ function setupRecepcionBienesModal() {
             return;
         }
         recepcionSelectedColumnIds = normalizeRecepcionColumnIds(checked);
+        saveRecepcionColumnPreferences();
         renderRecepcionBienesTable();
         updateRecepcionSummary();
         columnsModal?.hide();
@@ -2290,6 +3014,12 @@ function setupRecepcionBienesModal() {
     btnCancel?.addEventListener("click", () => {
         clearRecepcionBienForm();
         setRecepcionEditMode(-1);
+    });
+
+    btnClear?.addEventListener("click", () => {
+        clearRecepcionBienForm();
+        setRecepcionEditMode(-1);
+        syncRecepcionUbicacionReadonly();
     });
 
     btnSave.addEventListener("click", async () => {
@@ -2349,6 +3079,347 @@ function setupRecepcionBienesModal() {
     document.getElementById("recepcion-bloque")?.addEventListener("change", syncRecepcionUbicacionReadonly);
 }
 
+async function loadBajasEstadoOptions() {
+    if (Array.isArray(bajasEstadoOptions) && bajasEstadoOptions.length) return;
+    try {
+        const response = await api.get("/api/parametros/estados");
+        const values = Array.isArray(response?.data)
+            ? response.data.map((entry) => String(entry?.nombre || "").trim()).filter(Boolean)
+            : [];
+        if (!values.some((value) => String(value).toLowerCase() === "malo")) {
+            values.unshift("MALO");
+        }
+        bajasEstadoOptions = values;
+    } catch (_err) {
+        bajasEstadoOptions = ["MALO"];
+    }
+}
+
+function setBajasStep(step) {
+    const normalizedStep = Number(step) === 2 ? 2 : 1;
+    bajasStep = normalizedStep;
+    const step1 = document.getElementById("bajas-step-1");
+    const step2 = document.getElementById("bajas-step-2");
+    const badge1 = document.getElementById("bajas-step-badge-1");
+    const badge2 = document.getElementById("bajas-step-badge-2");
+    const label1 = document.getElementById("bajas-step-label-1");
+    const label2 = document.getElementById("bajas-step-label-2");
+    const btnPrev = document.getElementById("btn-bajas-atras");
+    const btnNext = document.getElementById("btn-bajas-siguiente");
+    const btnConfirm = document.getElementById("btn-bajas-confirmar");
+    const footerInfo = document.getElementById("bajas-modal-footer-info");
+
+    if (step1) step1.classList.toggle("d-none", normalizedStep !== 1);
+    if (step2) step2.classList.toggle("d-none", normalizedStep !== 2);
+
+    if (badge1) badge1.className = `badge ${normalizedStep === 1 ? "bg-primary" : "bg-success"}`;
+    if (badge2) badge2.className = `badge ${normalizedStep === 2 ? "bg-primary" : "bg-secondary"}`;
+    if (label1) label1.className = normalizedStep === 1 ? "fw-semibold" : "text-success";
+    if (label2) label2.className = normalizedStep === 2 ? "fw-semibold" : "text-muted";
+    if (btnPrev) btnPrev.disabled = normalizedStep === 1;
+    if (btnNext) btnNext.classList.toggle("d-none", normalizedStep !== 1);
+    if (btnConfirm) btnConfirm.classList.toggle("d-none", normalizedStep !== 2);
+    if (footerInfo) footerInfo.textContent = `Paso ${normalizedStep} de 2`;
+}
+
+function applyBajasSelectionFilter() {
+    const needle = String(document.getElementById("bajas-buscar")?.value || "").trim().toLowerCase();
+    if (!needle) {
+        bajasFilteredItems = Array.isArray(inventoryDataCache) ? [...inventoryDataCache] : [];
+        return;
+    }
+
+    bajasFilteredItems = (Array.isArray(inventoryDataCache) ? inventoryDataCache : []).filter((item) => {
+        const bag = [
+            item?.item_numero,
+            item?.cod_inventario,
+            item?.cod_esbye,
+            item?.descripcion,
+            item?.marca,
+            item?.modelo,
+            item?.serie,
+            item?.estado,
+            item?.ubicacion,
+        ]
+            .map((value) => String(value || "").toLowerCase())
+            .join(" ");
+        return bag.includes(needle);
+    });
+}
+
+function renderBajasSelectionTable() {
+    const tbody = document.getElementById("tbody-bajas-seleccion");
+    const selectedInfo = document.getElementById("bajas-seleccionados-info");
+    const checkAll = document.getElementById("bajas-check-all");
+    if (!tbody) return;
+
+    const rows = Array.isArray(bajasFilteredItems) ? bajasFilteredItems : [];
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No hay bienes para mostrar.</td></tr>';
+        if (selectedInfo) selectedInfo.textContent = `${bajasSelectedItemIds.size} seleccionados`;
+        if (checkAll) checkAll.checked = false;
+        return;
+    }
+
+    tbody.innerHTML = "";
+    rows.forEach((item) => {
+        const itemId = Number(item?.id || 0);
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td><input type="checkbox" class="form-check-input bajas-item-check" data-id="${itemId}" ${bajasSelectedItemIds.has(itemId) ? "checked" : ""}></td>
+            <td>${String(item?.item_numero || "-")}</td>
+            <td>${String(item?.cod_inventario || "")}</td>
+            <td>${String(item?.cod_esbye || "")}</td>
+            <td>${String(item?.descripcion || "")}</td>
+            <td>${String(item?.estado || "")}</td>
+            <td>${String(item?.ubicacion || "")}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll(".bajas-item-check").forEach((chk) => {
+        chk.addEventListener("change", (event) => {
+            const itemId = Number(event.target?.dataset?.id || 0);
+            if (!itemId) return;
+            if (event.target.checked) {
+                bajasSelectedItemIds.add(itemId);
+            } else {
+                bajasSelectedItemIds.delete(itemId);
+            }
+            if (selectedInfo) selectedInfo.textContent = `${bajasSelectedItemIds.size} seleccionados`;
+        });
+    });
+
+    if (selectedInfo) selectedInfo.textContent = `${bajasSelectedItemIds.size} seleccionados`;
+    if (checkAll) {
+        checkAll.checked = rows.every((row) => bajasSelectedItemIds.has(Number(row?.id || 0)));
+    }
+}
+
+function renderBajasEditionTable() {
+    const thead = document.getElementById("thead-bajas-edicion");
+    const tbody = document.getElementById("tbody-bajas-edicion");
+    if (!tbody || !thead) return;
+
+    const selectedIds = normalizeBajasColumnIds(bajasSelectedColumnIds);
+    const selectedCols = selectedIds
+        .map((id) => BAJAS_BIENES_COLUMNS.find((col) => col.id === id))
+        .filter(Boolean);
+
+    thead.innerHTML = "";
+    const trHead = document.createElement("tr");
+    selectedCols.forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col.label === "ESTADO" ? "Estado nuevo" : col.label;
+        if (col.id === "estado") th.style.minWidth = "160px";
+        if (col.id === "justificacion") th.style.minWidth = "260px";
+        trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+
+    if (!Array.isArray(bajasDraftBienes) || !bajasDraftBienes.length) {
+        tbody.innerHTML = `<tr><td colspan="${Math.max(1, selectedCols.length)}" class="text-center text-muted">No hay bienes seleccionados.</td></tr>`;
+        return;
+    }
+
+    const estados = Array.isArray(bajasEstadoOptions) && bajasEstadoOptions.length
+        ? bajasEstadoOptions
+        : ["MALO"];
+
+    tbody.innerHTML = "";
+    bajasDraftBienes.forEach((row, idx) => {
+        const tr = document.createElement("tr");
+        const optionsHtml = estados
+            .map((estado) => `<option value="${estado}" ${String(row?.estado || "").trim() === estado ? "selected" : ""}>${estado}</option>`)
+            .join("");
+
+        const cells = selectedCols.map((col) => {
+            if (col.id === "estado") {
+                return `
+                    <td>
+                        <select class="form-select form-select-sm bajas-edit-estado" data-index="${idx}">
+                            ${optionsHtml}
+                        </select>
+                    </td>
+                `;
+            }
+            if (col.id === "justificacion") {
+                return `
+                    <td>
+                        <textarea class="form-control form-control-sm bajas-edit-justificacion" rows="2" data-index="${idx}" placeholder="Justificación de la baja...">${String(row?.justificacion || "")}</textarea>
+                    </td>
+                `;
+            }
+            return `<td>${String(row?.[col.id] || (col.id === "item_numero" ? "-" : ""))}</td>`;
+        });
+        tr.innerHTML = cells.join("");
+        tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll(".bajas-edit-estado").forEach((select) => {
+        select.addEventListener("change", (event) => {
+            const idx = Number(event.target?.dataset?.index || -1);
+            if (idx < 0 || !bajasDraftBienes[idx]) return;
+            bajasDraftBienes[idx].estado = String(event.target.value || "").trim() || "MALO";
+        });
+    });
+
+    tbody.querySelectorAll(".bajas-edit-justificacion").forEach((textarea) => {
+        textarea.addEventListener("input", (event) => {
+            const idx = Number(event.target?.dataset?.index || -1);
+            if (idx < 0 || !bajasDraftBienes[idx]) return;
+            bajasDraftBienes[idx].justificacion = String(event.target.value || "").trim();
+        });
+    });
+}
+
+function renderBajasColumnSelector() {
+    const container = document.getElementById("bajas-column-selector");
+    if (!container) return;
+
+    const selected = new Set(normalizeBajasColumnIds(bajasSelectedColumnIds));
+    container.innerHTML = "";
+
+    BAJAS_BIENES_COLUMNS.forEach((col) => {
+        const isRequired = BAJAS_REQUIRED_COLUMN_IDS.includes(col.id);
+        const item = document.createElement("label");
+        item.className = "list-group-item d-flex align-items-center gap-2";
+        item.innerHTML = `
+            <input class="form-check-input me-1" type="checkbox" value="${col.id}" ${selected.has(col.id) ? "checked" : ""} ${isRequired ? "disabled" : ""}>
+            <span>${col.label}</span>
+            ${isRequired ? '<span class="badge text-bg-secondary ms-auto">Obligatoria</span>' : ""}
+        `;
+        container.appendChild(item);
+    });
+}
+
+function setupBajasBienesModal() {
+    const modalEl = document.getElementById("modalBajasBienes");
+    if (!modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+    const btnOpen = document.querySelector("#sec-bajas .btn-bajas-seleccionar");
+    const btnBuscar = document.getElementById("btn-bajas-buscar");
+    const btnPrev = document.getElementById("btn-bajas-atras");
+    const btnNext = document.getElementById("btn-bajas-siguiente");
+    const btnConfirm = document.getElementById("btn-bajas-confirmar");
+    const checkAll = document.getElementById("bajas-check-all");
+    const btnColumnas = document.getElementById("btn-bajas-columnas");
+    const btnColumnasGuardar = document.getElementById("btn-bajas-columnas-guardar");
+    const modalColumnasEl = document.getElementById("modalBajasColumnas");
+    const modalColumnas = modalColumnasEl ? bootstrap.Modal.getOrCreateInstance(modalColumnasEl) : null;
+
+    const refreshSelection = () => {
+        applyBajasSelectionFilter();
+        renderBajasSelectionTable();
+    };
+
+    btnOpen?.addEventListener("click", async (event) => {
+        event.preventDefault();
+        await loadExtraccionData();
+        await loadBajasEstadoOptions();
+        bajasSelectedItemIds = new Set((Array.isArray(bajasBienesTemp) ? bajasBienesTemp : []).map((row) => Number(row?.id || 0)).filter(Boolean));
+        bajasDraftBienes = [];
+        setBajasStep(1);
+        refreshSelection();
+        modal.show();
+    });
+
+    btnBuscar?.addEventListener("click", refreshSelection);
+    document.getElementById("bajas-buscar")?.addEventListener("input", refreshSelection);
+
+    checkAll?.addEventListener("change", (event) => {
+        const shouldCheck = Boolean(event.target.checked);
+        (Array.isArray(bajasFilteredItems) ? bajasFilteredItems : []).forEach((item) => {
+            const itemId = Number(item?.id || 0);
+            if (!itemId) return;
+            if (shouldCheck) {
+                bajasSelectedItemIds.add(itemId);
+            } else {
+                bajasSelectedItemIds.delete(itemId);
+            }
+        });
+        renderBajasSelectionTable();
+    });
+
+    btnPrev?.addEventListener("click", () => {
+        setBajasStep(1);
+    });
+
+    btnNext?.addEventListener("click", () => {
+        if (!bajasSelectedItemIds.size) {
+            notify("Seleccione al menos un bien para continuar.", true);
+            return;
+        }
+
+        const selectedRows = (Array.isArray(inventoryDataCache) ? inventoryDataCache : [])
+            .filter((item) => bajasSelectedItemIds.has(Number(item?.id || 0)))
+            .map((item) => ({
+                ...item,
+                id: Number(item?.id || 0),
+                item_numero: item?.item_numero,
+                cod_inventario: String(item?.cod_inventario || ""),
+                cod_esbye: String(item?.cod_esbye || ""),
+                descripcion: String(item?.descripcion || ""),
+                estado: "MALO",
+                justificacion: String(item?.justificacion || ""),
+                procedencia: String(item?.procedencia || ""),
+            }));
+
+        if (!selectedRows.length) {
+            notify("No se pudo preparar la lista de bienes seleccionados.", true);
+            return;
+        }
+
+        bajasDraftBienes = selectedRows;
+        renderBajasEditionTable();
+        setBajasStep(2);
+    });
+
+    btnColumnas?.addEventListener("click", () => {
+        renderBajasColumnSelector();
+        modalColumnas?.show();
+    });
+
+    btnColumnasGuardar?.addEventListener("click", async () => {
+        const checks = Array.from(document.querySelectorAll("#bajas-column-selector input[type='checkbox']:checked"));
+        const selected = checks.map((node) => String(node.value || "").trim()).filter(Boolean);
+        bajasSelectedColumnIds = normalizeBajasColumnIds(selected);
+        await saveBajasColumnPreferences();
+        renderBajasEditionTable();
+        modalColumnas?.hide();
+    });
+
+    btnConfirm?.addEventListener("click", () => {
+        if (!Array.isArray(bajasDraftBienes) || !bajasDraftBienes.length) {
+            notify("No hay bienes seleccionados para el acta de baja.", true);
+            return;
+        }
+        bajasBienesTemp = bajasDraftBienes.map((row) => ({
+            ...row,
+            estado: String(row?.estado || "").trim() || "MALO",
+            justificacion: String(row?.justificacion || "").trim(),
+        }));
+        updateBajasSummary();
+        modal.hide();
+        document.dispatchEvent(new CustomEvent("informe:tablaExtraida"));
+    });
+
+    modalEl.addEventListener("hidden.bs.modal", () => {
+        setBajasStep(1);
+        bajasDraftBienes = [];
+    });
+}
+
+function setupBajasRegistradosModal() {
+    const btnOpen = document.querySelector("#sec-bajas .btn-bajas-registrados");
+    if (!btnOpen) return;
+
+    btnOpen.addEventListener("click", () => {
+        window.location.href = "/api/inventario/bajas/export";
+    });
+}
+
 function fillActaFormFromData(tipo, formularioData) {
     const tabId = mapTipoToTabId(tipo);
     document.getElementById(tabId)?.click();
@@ -2402,9 +3473,19 @@ function applyHistorialPayloadToEditor(record) {
     window._globalSelectedTableRows = Array.isArray(parsed.tabla) ? parsed.tabla : [];
     window._globalSelectedColumns = Array.isArray(parsed.columnas) ? parsed.columnas : [];
     if (normalizeTipoActa(record.tipo_acta) === "recepcion") {
+        recepcionBienesTemp = Array.isArray(parsed.tabla) ? parsed.tabla.map((row) => ({ ...row })) : [];
         recepcionSelectedColumnIds = normalizeRecepcionColumnIds(parsed.columnas || []);
         renderRecepcionBienesTable();
         updateRecepcionSummary();
+    }
+    if (normalizeTipoActa(record.tipo_acta) === "bajas" || normalizeTipoActa(record.tipo_acta) === "baja") {
+        bajasBienesTemp = Array.isArray(parsed.tabla) ? parsed.tabla.map((row) => ({
+            ...row,
+            estado: String(row?.estado || "").trim() || "MALO",
+            justificacion: String(row?.justificacion || "").trim(),
+        })) : [];
+        bajasSelectedColumnIds = normalizeBajasColumnIds(parsed.columnas || []);
+        updateBajasSummary();
     }
     activeHistorialTemplateSnapshotPath =
         (record && record.plantilla_snapshot_path) ||
@@ -2748,6 +3829,8 @@ function renderColumnSelector() {
             } else {
                 selectedColumns = selectedColumns.filter((id) => id !== e.target.value);
             }
+            saveEntregaColumnPreferences();
+            extraccionPage = 1;
             applyExtraccionesFilter();
         });
     });
@@ -2817,9 +3900,51 @@ function renderExtraccionTable(items) {
             if (e.target.checked) selectedItemIds.add(id);
             else selectedItemIds.delete(id);
             updateSelectedItemsCount();
+
+            const headerChk = document.getElementById("chk-all-items");
+            if (headerChk) {
+                const visibleChecks = Array.from(document.querySelectorAll(".item-extract-chk"));
+                const checkedCount = visibleChecks.filter((node) => node.checked).length;
+                headerChk.checked = visibleChecks.length > 0 && checkedCount === visibleChecks.length;
+                headerChk.indeterminate = checkedCount > 0 && checkedCount < visibleChecks.length;
+            }
         });
     });
+
+    const headerChk = document.getElementById("chk-all-items");
+    if (headerChk) {
+        const visibleChecks = Array.from(document.querySelectorAll(".item-extract-chk"));
+        const checkedCount = visibleChecks.filter((node) => node.checked).length;
+        headerChk.checked = visibleChecks.length > 0 && checkedCount === visibleChecks.length;
+        headerChk.indeterminate = checkedCount > 0 && checkedCount < visibleChecks.length;
+    }
     updateSelectedItemsCount();
+}
+
+function updateExtraccionPagination(totalItems) {
+    const info = document.getElementById("ext-page-info");
+    const prev = document.getElementById("ext-page-prev");
+    const next = document.getElementById("ext-page-next");
+    const size = document.getElementById("ext-page-size");
+
+    const total = Math.max(0, Number(totalItems || 0));
+    const pages = Math.max(1, Math.ceil(total / extraccionPerPage));
+    extraccionPage = Math.min(Math.max(extraccionPage, 1), pages);
+
+    if (size) size.value = String(extraccionPerPage);
+    if (info) info.textContent = total > 0 ? `Página ${extraccionPage} de ${pages}` : "0 de 0";
+    if (prev) prev.disabled = extraccionPage <= 1 || total <= 0;
+    if (next) next.disabled = extraccionPage >= pages || total <= 0;
+}
+
+function renderExtraccionCurrentPage() {
+    const total = extraccionFilteredItems.length;
+    const totalPages = Math.max(1, Math.ceil(total / extraccionPerPage));
+    extraccionPage = Math.min(Math.max(extraccionPage, 1), totalPages);
+    const start = (extraccionPage - 1) * extraccionPerPage;
+    const pageItems = extraccionFilteredItems.slice(start, start + extraccionPerPage);
+    renderExtraccionTable(pageItems);
+    updateExtraccionPagination(total);
 }
 
 function updateSelectedItemsCount() {
@@ -2833,7 +3958,7 @@ function applyExtraccionesFilter() {
     const areaSel = document.getElementById("ext-area");
     const areaTxt = areaSel && areaSel.value ? areaSel.options[areaSel.selectedIndex].text.toLowerCase() : "";
 
-    const filtered = inventoryDataCache.filter((it) => {
+    extraccionFilteredItems = inventoryDataCache.filter((it) => {
         const matchText =
             !textVal ||
             String(it.cod_inventario || "").toLowerCase().includes(textVal) ||
@@ -2843,7 +3968,7 @@ function applyExtraccionesFilter() {
         return matchText && matchArea;
     });
 
-    renderExtraccionTable(filtered);
+    renderExtraccionCurrentPage();
 }
 
 async function loadExtraccionData() {
@@ -2853,9 +3978,10 @@ async function loadExtraccionData() {
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-primary"><div class="spinner-border spinner-border-sm" role="status"></div> Cargando inventario...</td></tr>';
     }
     try {
-        const response = await api.get("/api/inventario");
+        const response = await api.get("/api/inventario?per_page=500");
         inventoryDataCache = response.data || [];
-        renderExtraccionTable(inventoryDataCache);
+        extraccionFilteredItems = [...inventoryDataCache];
+        renderExtraccionCurrentPage();
     } catch (error) {
         notify("Error cargando inventario para extracción: " + error.message, true);
     }
@@ -2864,11 +3990,47 @@ async function loadExtraccionData() {
 function setupExtraccionModal() {
     renderColumnSelector();
 
-    document.getElementById("btn-buscar-ext")?.addEventListener("click", applyExtraccionesFilter);
-    document.getElementById("ext-buscar")?.addEventListener("input", applyExtraccionesFilter);
-    document.getElementById("ext-area")?.addEventListener("change", applyExtraccionesFilter);
-    document.getElementById("ext-piso")?.addEventListener("change", applyExtraccionesFilter);
-    document.getElementById("ext-bloque")?.addEventListener("change", applyExtraccionesFilter);
+    const onExtraccionFilterChanged = () => {
+        extraccionPage = 1;
+        applyExtraccionesFilter();
+    };
+
+    document.getElementById("btn-buscar-ext")?.addEventListener("click", onExtraccionFilterChanged);
+    document.getElementById("ext-buscar")?.addEventListener("input", onExtraccionFilterChanged);
+    document.getElementById("ext-area")?.addEventListener("change", onExtraccionFilterChanged);
+    document.getElementById("ext-piso")?.addEventListener("change", onExtraccionFilterChanged);
+    document.getElementById("ext-bloque")?.addEventListener("change", onExtraccionFilterChanged);
+
+    const extPagePrev = document.getElementById("ext-page-prev");
+    const extPageNext = document.getElementById("ext-page-next");
+    const extPageSize = document.getElementById("ext-page-size");
+
+    if (extPagePrev && extPagePrev.dataset.bound !== "1") {
+        extPagePrev.dataset.bound = "1";
+        extPagePrev.addEventListener("click", () => {
+            if (extraccionPage <= 1) return;
+            extraccionPage -= 1;
+            renderExtraccionCurrentPage();
+        });
+    }
+
+    if (extPageNext && extPageNext.dataset.bound !== "1") {
+        extPageNext.dataset.bound = "1";
+        extPageNext.addEventListener("click", () => {
+            extraccionPage += 1;
+            renderExtraccionCurrentPage();
+        });
+    }
+
+    if (extPageSize && extPageSize.dataset.bound !== "1") {
+        extPageSize.dataset.bound = "1";
+        extPageSize.addEventListener("change", () => {
+            const parsed = Number(extPageSize.value || 25);
+            extraccionPerPage = Number.isFinite(parsed) && parsed > 0 ? parsed : 25;
+            extraccionPage = 1;
+            renderExtraccionCurrentPage();
+        });
+    }
 
     const modalExtraerEl = document.getElementById("modalExtraerTabla");
     const modalExtraer = modalExtraerEl ? new bootstrap.Modal(modalExtraerEl) : null;
@@ -2884,8 +4046,9 @@ function setupExtraccionModal() {
         if (Array.isArray(window._globalSelectedTableRows) && window._globalSelectedTableRows.length) {
             selectedItemIds = new Set(window._globalSelectedTableRows.map((it) => Number(it.id)));
         }
+        extraccionPage = 1;
         await loadExtraccionData();
-        applyExtraccionesFilter();
+        onExtraccionFilterChanged();
     });
 
     document.getElementById("btn-confirmar-extraccion")?.addEventListener("click", () => {
@@ -2955,6 +4118,7 @@ async function cargarPersonalDatalist() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+    await loadColumnPreferences();
     const canAccessActas = await checkActaTemplatesAccessGuard();
     if (!canAccessActas) return;
 
@@ -2974,12 +4138,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     populateLocationSelects();
     setupExtraccionModal();
     setupRecepcionBienesModal();
+    setupBajasBienesModal();
+    setupBajasRegistradosModal();
     cargarPersonalDatalist();
     setupHistorialModal();
     initInformeSSE();
     initNumeroActaOnTabs();
     refreshNumeroActaAula(false);
     updateAulaBatchPreviewCard();
+
+    document.getElementById("btn-vaciar-entrega")?.addEventListener("click", () => {
+        clearInformeFormByType("entrega");
+    });
+
+    document.getElementById("btn-vaciar-recepcion")?.addEventListener("click", () => {
+        clearInformeFormByType("recepcion");
+    });
+
+    document.getElementById("btn-vaciar-bajas")?.addEventListener("click", () => {
+        clearInformeFormByType("bajas");
+    });
+
+    document.getElementById("btn-vaciar-aula")?.addEventListener("click", () => {
+        clearAulaForm();
+    });
 
     document.getElementById("aula-scope")?.addEventListener("change", () => {
         updateAulaBatchPreviewCard();
@@ -3076,6 +4258,15 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         if (tipo === "recepcion" && (!datosTabla.length || !datosColumnas.length)) {
             notify("Debe registrar al menos un bien nuevo en 'Registrar bienes' para generar el acta de recepción.", true);
+            isGeneratingActa = false;
+            document.querySelectorAll(".btn-descargar-acta").forEach((btn) => {
+                btn.disabled = false;
+            });
+            return;
+        }
+
+        if ((tipo === "bajas" || tipo === "baja") && !datosTabla.length) {
+            notify("Debe seleccionar al menos un bien en 'Seleccionar bienes' para generar el acta de baja.", true);
             isGeneratingActa = false;
             document.querySelectorAll(".btn-descargar-acta").forEach((btn) => {
                 btn.disabled = false;

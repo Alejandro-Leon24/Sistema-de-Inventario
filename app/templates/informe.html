@@ -170,12 +170,12 @@
                                 <input type="text" class="form-control" name="rol_entrega" id="entrega-rol-entrega"
                                     placeholder="Ej: Guardalmacén">
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <label class="form-label">Recibido por/ Usuario final</label>
                                 <input type="text" class="form-control" name="recibido_por" id="entrega-recibido"
                                     placeholder="Ej: Abg. Candy Mendoza">
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <label class="form-label">Rol del que recibe</label>
                                 <input type="text" class="form-control" name="rol_recibe" id="entrega-rol-recibe"
                                     placeholder="Ej: Asistente de secretaria">
@@ -212,6 +212,9 @@
 
                         <!-- Botonera Inferior -->
                         <div class="d-flex justify-content-center gap-3 mt-3">
+                            <button type="button" class="btn btn-outline-secondary shadow-sm" id="btn-vaciar-entrega">
+                                <i class="bi bi-eraser me-1"></i>Vaciar formulario
+                            </button>
                             <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
                             <button class="btn btn-outline-primary shadow-sm btn-historial"><i
                                     class="bi bi-clock-history me-1"></i>Historial</button>
@@ -309,7 +312,63 @@
 
                         <!-- Botonera Inferior -->
                         <div class="d-flex justify-content-center gap-3 mt-3">
+                            <button type="button" class="btn btn-outline-secondary shadow-sm" id="btn-vaciar-recepcion">
+                                <i class="bi bi-eraser me-1"></i>Vaciar formulario
+                            </button>
                             <button class="btn btn-edu-secondary shadow-sm btn-registrar-bienes">Registrar bienes</button>
+                            <button class="btn btn-outline-primary shadow-sm btn-historial"><i
+                                    class="bi bi-clock-history me-1"></i>Historial</button>
+                            <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
+                        </div>
+                    </div>
+
+                    <!-- sección de acta de bienes de baja -->
+                    <div id="sec-bajas" class="tab-section d-none">
+                        <form class="row g-3 compact-form" id="form-bajas">
+                            <div class="col-md-4">
+                                <label class="form-label">Número de acta</label>
+                                <input type="text" class="form-control" name="numero_acta" id="bajas-numero-acta"
+                                    placeholder="Ej: 012-2026" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Fecha de emisión</label>
+                                <input type="date" class="form-control" name="fecha_emision" id="bajas-fecha-emision">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Rol de quien entrega</label>
+                                <input type="text" class="form-control" name="rol_entrega" id="bajas-rol-entrega"
+                                    placeholder="Ej: Guardalmacén">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Entregado por</label>
+                                <input type="text" class="form-control" name="entregado_por" id="bajas-entregado-por"
+                                    placeholder="Ej: Econ. Jenny Ortega">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Recibido por</label>
+                                <input type="text" class="form-control" name="recibido_por" id="bajas-recibido-por"
+                                    placeholder="Ej: Ing. Maria Perez">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Nombre del delegado</label>
+                                <input type="text" class="form-control" name="nombre_delegado" id="bajas-nombre-delegado"
+                                    placeholder="Ej: Dr. Juan Perez">
+                            </div>
+                            <div id="dinamico-bajas-container" class="col-12 row g-4 m-0 p-0"></div>
+                        </form>
+                        <div class="col-12 mt-3 text-center resultado-tabla-container d-none" style="min-height: 2.5rem;">
+                            <!-- Aquí va a inyectarse el resultado -->
+                        </div>
+                        <div class="d-flex flex-wrap justify-content-center gap-3 mt-3">
+                            <button type="button" class="btn btn-outline-secondary shadow-sm" id="btn-vaciar-bajas">
+                                <i class="bi bi-eraser me-1"></i>Vaciar formulario
+                            </button>
+                            <button type="button" class="btn btn-outline-dark shadow-sm btn-bajas-registrados">
+                                <i class="bi bi-file-earmark-excel me-1"></i>Exportar bienes de bajas
+                            </button>
+                            <button type="button" class="btn btn-edu-secondary shadow-sm btn-bajas-seleccionar">
+                                Seleccionar bienes
+                            </button>
                             <button class="btn btn-outline-primary shadow-sm btn-historial"><i
                                     class="bi bi-clock-history me-1"></i>Historial</button>
                             <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
@@ -400,6 +459,9 @@
 
                         <!-- Botonera Inferior -->
                         <div class="d-flex justify-content-center gap-3 mt-3">
+                            <button type="button" class="btn btn-outline-secondary shadow-sm" id="btn-vaciar-aula">
+                                <i class="bi bi-eraser me-1"></i>Vaciar formulario
+                            </button>
                             <button class="btn btn-edu-primary shadow-lg btn-generar-lote-aula">Generar DOCX por Ubicación</button>
                         </div>
                     </div>
@@ -459,7 +521,7 @@
                 <div class="modal-body bg-soft">
                     <!-- sección de extraer datos tabla movida dentro del modal -->
                     <div class="card-edu m-0"
-                        style="background: linear-gradient(to right, #ffffff, #f8f9ff); padding: 1.5rem;">
+                        style="background: linear-gradient(to right, #ffffff, #f8f9ff);">
                         <div class="row h-100">
                             <!-- Columna Izquierda: Selector de columnas -->
                             <div class="col-md-3 border-end">
@@ -515,7 +577,7 @@
                                 </div>
 
                                 <div class="table-responsive mt-4" id="contenedor-tabla-extraccion"
-                                    style="max-height: 350px;">
+                                    style="max-height: 350px; overflow: auto;">
                                     <table class="table table-sm table-hover table-bordered shadow-sm"
                                         style="font-size: 0.85rem;" id="tabla-extraccion">
                                         <thead class="table-light sticky-top">
@@ -541,6 +603,21 @@
                                         </tbody>
                                     </table>
                                 </div>
+                                <div class="d-flex justify-content-between align-items-center mt-2 small text-muted">
+                                    <div>
+                                        <span id="ext-page-info">0 de 0</span>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="mb-0" for="ext-page-size">Filas</label>
+                                        <select id="ext-page-size" class="form-select form-select-sm" style="width: 84px;">
+                                            <option value="10">10</option>
+                                            <option value="25" selected>25</option>
+                                            <option value="50">50</option>
+                                        </select>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="ext-page-prev">Anterior</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="ext-page-next">Siguiente</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -561,6 +638,145 @@
     </div>
 </section>
 
+<!-- Modal de selección de bienes para Acta de Baja -->
+<div class="modal fade" id="modalBajasBienes" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content shadow-lg border-0">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title fw-bold"><i class="bi bi-trash me-2"></i>Bienes de baja</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body bg-soft">
+                <div class="d-flex align-items-center gap-2 mb-3 small">
+                    <span class="badge bg-primary" id="bajas-step-badge-1">1</span>
+                    <span id="bajas-step-label-1" class="fw-semibold">Seleccionar bienes</span>
+                    <span class="text-muted">→</span>
+                    <span class="badge bg-secondary" id="bajas-step-badge-2">2</span>
+                    <span id="bajas-step-label-2" class="text-muted">Editar estado y justificación</span>
+                </div>
+
+                <div id="bajas-step-1">
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <input type="text" class="form-control form-control-sm" id="bajas-buscar"
+                                placeholder="Buscar por código, descripción, marca, modelo...">
+                        </div>
+                        <div class="col-md-2">
+                            <button type="button" class="btn btn-primary btn-sm w-100" id="btn-bajas-buscar">
+                                <i class="bi bi-search me-1"></i>Buscar
+                            </button>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-center justify-content-end">
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="btn-bajas-columnas">
+                                <i class="bi bi-columns-gap me-1"></i>Columnas
+                            </button>
+                        </div>
+                        <div class="col-md-4 text-end small text-muted d-flex align-items-center justify-content-end">
+                            <span id="bajas-seleccionados-info">0 seleccionados</span>
+                        </div>
+                    </div>
+                    <div class="table-responsive border rounded" style="max-height: 58vh; overflow: auto;">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 48px;"><input class="form-check-input" type="checkbox" id="bajas-check-all"></th>
+                                    <th>ITEM</th>
+                                    <th>COD INV.</th>
+                                    <th>COD. ESBYE</th>
+                                    <th>Descripción</th>
+                                    <th>Estado actual</th>
+                                    <th>Ubicación</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-bajas-seleccion">
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted">Cargando bienes...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="bajas-step-2" class="d-none">
+                    <p class="small text-muted mb-2">Se listan únicamente los bienes seleccionados. Puedes ajustar el estado y agregar justificación por ítem.</p>
+                    <div class="table-responsive border rounded" style="max-height: 58vh; overflow: auto;">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light sticky-top" id="thead-bajas-edicion">
+                                <tr></tr>
+                            </thead>
+                            <tbody id="tbody-bajas-edicion">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">No hay bienes seleccionados.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light justify-content-between">
+                <span class="small text-muted" id="bajas-modal-footer-info">Paso 1 de 2</span>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-bajas-atras" disabled>Anterior</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-bajas-siguiente">Siguiente</button>
+                    <button type="button" class="btn btn-success btn-sm d-none" id="btn-bajas-confirmar">
+                        <i class="bi bi-check2-circle me-1"></i>Usar bienes seleccionados
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal listado de bienes registrados en actas de baja -->
+<div class="modal fade" id="modalBajasRegistrados" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title"><i class="bi bi-journal-text me-2"></i>Bienes registrados por Acta de Baja</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive" style="max-height: 65vh; overflow: auto;">
+                    <table class="table table-sm table-hover table-bordered align-middle mb-0">
+                        <thead class="table-light sticky-top" id="thead-bajas-registrados"></thead>
+                        <tbody id="tbody-bajas-registrados">
+                            <tr>
+                                <td class="text-center text-muted">Cargando bienes...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal selector de columnas para Acta de Baja -->
+<div class="modal fade" id="modalBajasColumnas" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Columnas de la tabla de baja</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div id="bajas-column-selector" class="list-group"></div>
+                <p class="small text-muted mt-2 mb-0">
+                    Las columnas <strong>Estado</strong> y <strong>Justificación</strong> son obligatorias.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-bajas-columnas-guardar">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal de registro temporal de bienes para Acta de Recepción -->
 <div class="modal fade" id="modalRecepcionBienes" tabindex="-1" aria-labelledby="modalRecepcionBienesLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
@@ -573,8 +789,11 @@
                 <div class="row g-3">
                     <div class="col-lg-5">
                         <div class="card border-0 shadow-sm">
-                            <div class="card-body">
+                            <div class="card-body" style="overflow-y: auto; max-height: 72vh;">
                                 <h6 class="fw-bold text-primary mb-3">Datos del bien</h6>
+                                <p class="text-muted small mb-2">Completa los campos o pega una fila copiada directamente desde Excel en este cuadro.</p>
+                                <textarea id="recepcion-excel-single-row" class="form-control form-control-sm mb-3" rows="2"
+                                    placeholder="Pegado rápido desde Excel (selecciona y pega directo)"></textarea>
                                 <div class="row g-2">
                                     <div class="col-md-6">
                                         <label class="form-label small">Cód. Inventario</label>
@@ -677,6 +896,7 @@
                                 </div>
                             </div>
                             <div class="card-footer bg-white d-flex gap-2 justify-content-end">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-recepcion-bien-vaciar">Vaciar</button>
                                 <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="btn-recepcion-bien-cancelar">Cancelar</button>
                                 <button type="button" class="btn btn-primary btn-sm" id="btn-recepcion-bien-guardar"><i class="bi bi-plus-circle me-1"></i>Guardar bien</button>
                             </div>
@@ -694,7 +914,7 @@
                                         <span class="badge bg-primary" id="recepcion-bienes-count">0</span>
                                     </div>
                                 </div>
-                                <div class="table-responsive" style="max-height: 450px;">
+                                <div class="table-responsive" style="max-height: 450px; overflow: auto;">
                                     <table class="table table-sm table-hover table-bordered align-middle">
                                         <thead class="table-light sticky-top">
                                             <tr id="thead-recepcion-bienes"></tr>
@@ -703,6 +923,21 @@
                                             <tr><td colspan="7" class="text-center text-muted">Aún no hay bienes registrados.</td></tr>
                                         </tbody>
                                     </table>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-2 small text-muted">
+                                    <div>
+                                        <span id="recepcion-bienes-page-info">0 de 0</span>
+                                    </div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="mb-0" for="recepcion-bienes-page-size">Filas</label>
+                                        <select id="recepcion-bienes-page-size" class="form-select form-select-sm" style="width: 84px;">
+                                            <option value="5">5</option>
+                                            <option value="10" selected>10</option>
+                                            <option value="20">20</option>
+                                        </select>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="recepcion-bienes-page-prev">Anterior</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="recepcion-bienes-page-next">Siguiente</button>
+                                    </div>
                                 </div>
                                 <div class="small text-muted mt-2">Haz clic en una fila para editarla.</div>
                             </div>
@@ -730,7 +965,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
-                <div id="recepcion-column-selector" class="list-group"></div>
+                <div id="recepcion-column-selector" style="overflow-y: auto; height: 60vh;" class="list-group"></div>
                 <p class="small text-muted mt-2 mb-0">Estas columnas se mostrarán en la tabla temporal y se usarán en el acta.</p>
             </div>
             <div class="modal-footer">

@@ -14,6 +14,8 @@
 	{ field: "valor", label: "VALOR", editable: true },
 	{ field: "usuario_final", label: "USUARIO FINAL", editable: true },
 	{ field: "observacion", label: "OBSERVACIÓN", editable: true },
+	{ field: "justificacion", label: "JUSTIFICACIÓN", editable: true },
+	{ field: "procedencia", label: "PROCEDENCIA", editable: true },
 	{ field: "descripcion_esbye", label: "DESCRIPCIÓN ESBYE", editable: true },
 	{ field: "marca_esbye", label: "MARCA ESBYE", editable: true },
 	{ field: "modelo_esbye", label: "MODELO ESBYE", editable: true },
@@ -93,6 +95,8 @@ const MODAL_PASTE_FIELDS = [
 	"valor",
 	"usuario_final",
 	"observacion",
+	"justificacion",
+	"procedencia",
 	"descripcion_esbye",
 	"marca_esbye",
 	"modelo_esbye",
@@ -561,6 +565,34 @@ async function initInventoryPage() {
 		return resolveAreaFromPastedText(value);
 	}
 
+	async function resolveAreaEntryFromLocationValueBackend(rawValue) {
+		const value = String(rawValue || "").trim();
+		if (!value) return null;
+
+		try {
+			const query = new URLSearchParams({ texto: value });
+			const response = await fetch(`/api/inventario/resolver-ubicacion?${query.toString()}`);
+			const payload = await response.json();
+			const match = payload?.match;
+			if (!response.ok || !payload?.success || !match || !Number.isFinite(Number(match.area_id))) {
+				return null;
+			}
+
+			const areaEntry = flattenAreas().find((entry) => String(entry.id) === String(match.area_id));
+			if (areaEntry) return areaEntry;
+
+			return {
+				id: Number(match.area_id),
+				nombre: String(match.display || "").trim(),
+				bloque_nombre: "",
+				piso_nombre: "",
+				area_nombre: String(match.display || "").trim(),
+			};
+		} catch (_error) {
+			return null;
+		}
+	}
+
 	function refreshAddItemSelects() {
 		const estadoSelect = document.querySelector("#form-agregar-item [data-field='estado']");
 		const cuentaSelect = document.querySelector("#form-agregar-item [data-field='cuenta']");
@@ -817,8 +849,16 @@ async function initInventoryPage() {
 
 		const targetAulaCode = extractCompactAulaCode(input);
 		const floorHint = extractFloorHint(input);
-		let best = null;
-		let bestScore = 0;
+		const targetKind = input.includes("pasillo") ? "pasillo" : (input.includes("aula") || targetAulaCode ? "aula" : "");
+		let explicitBlockLetter = "";
+		const explicitBlockMatch = input.match(/\bbloque\s+([a-z])\b/);
+		if (explicitBlockMatch) {
+			explicitBlockLetter = explicitBlockMatch[1];
+		}
+
+		const ranked = [];
+		let bestPasillo = null;
+		let bestPasilloScore = -Infinity;
 
 		flattenAreas().forEach((entry) => {
 			const areaName = normalizeText(entry.area_nombre);
@@ -850,13 +890,95 @@ async function initInventoryPage() {
 				score += 10;
 			}
 
-			if (score > bestScore) {
-				bestScore = score;
-				best = entry;
+			if (explicitBlockLetter) {
+				if (blockName.includes(`bloque ${explicitBlockLetter}`)) {
+					score += 12;
+				} else {
+					score -= 16;
+				}
+			}
+
+			if (targetKind === "pasillo") {
+				if (areaName.includes("pasillo")) {
+					score += 22;
+				} else {
+					score -= 20;
+				}
+			} else if (targetKind === "aula") {
+				if (areaName.includes("aula") || areaCode) {
+					score += 8;
+				}
+			}
+
+			ranked.push({
+				entry,
+				score,
+				areaCode,
+				floorName,
+				areaName,
+			});
+
+			if (targetKind === "pasillo" && areaName.includes("pasillo")) {
+				let pasilloScore = score;
+				if (floorHint && floorName.includes(floorHint)) {
+					pasilloScore += 5;
+				}
+				if (pasilloScore > bestPasilloScore) {
+					bestPasilloScore = pasilloScore;
+					bestPasillo = entry;
+				}
 			}
 		});
 
-		return bestScore >= 10 ? best : null;
+		if (!ranked.length) return null;
+
+		if (targetKind === "pasillo") {
+			return bestPasillo;
+		}
+
+		ranked.sort((a, b) => b.score - a.score);
+		const best = ranked[0];
+		const second = ranked[1];
+		const margin = second ? best.score - second.score : 999;
+		const hasExactAulaCode = Boolean(targetAulaCode && best.areaCode && targetAulaCode === best.areaCode);
+
+		if (best.score < 10) return null;
+		if (!hasExactAulaCode && margin <= 1) return null;
+
+		return best.entry;
+	}
+
+	async function resolveAreaFromPastedTextDefault(rawText) {
+		const text = String(rawText || "").trim();
+		if (!text) return null;
+
+		try {
+			const query = new URLSearchParams({ texto: text });
+			const response = await fetch(`/api/inventario/resolver-ubicacion?${query.toString()}`);
+			const payload = await response.json();
+			const match = payload?.match;
+			if (!response.ok || !payload?.success) return null;
+			if (!match || !Number.isFinite(Number(match.area_id))) {
+				return null;
+			}
+
+			const areaEntry = flattenAreas().find((entry) => String(entry.id) === String(match.area_id));
+			if (areaEntry) return areaEntry;
+
+			if (String(match.display || "").trim()) {
+				return {
+					id: Number(match.area_id),
+					nombre: String(match.display).trim(),
+					bloque_nombre: "",
+					piso_nombre: "",
+					area_nombre: String(match.display).trim(),
+				};
+			}
+
+			return null;
+		} catch (_error) {
+			return null;
+		}
 	}
 
 	function offerOpenSettingsForMissingAreas(missingAreas) {
@@ -1116,7 +1238,7 @@ async function initInventoryPage() {
 	async function saveCell(id, field, value, options = {}) {
 		const payload = { [field]: value };
 		if (field === "ubicacion") {
-			const areaEntry = resolveAreaEntryFromLocationValue(value);
+			const areaEntry = await resolveAreaEntryFromLocationValueBackend(value);
 			if (areaEntry) {
 				payload.ubicacion = areaEntry.nombre;
 				payload.area_id = Number(areaEntry.id);
@@ -1124,6 +1246,7 @@ async function initInventoryPage() {
 		}
 		if (options.forceDuplicate) payload.force_duplicate = true;
 		await api.send(`/api/inventario/${id}`, "PATCH", payload);
+		return payload;
 	}
 
 	async function removeItem(itemId) {
@@ -1236,6 +1359,9 @@ async function initInventoryPage() {
 	}
 
 	async function openEditModal(itemId) {
+					   // Mostrar campos justificación y procedencia solo en edición
+					   document.getElementById("wrap-justificacion")?.classList.remove("d-none");
+					   document.getElementById("wrap-procedencia")?.classList.remove("d-none");
 		await loadModalParams();
 		const response = await api.get(`/api/inventario/${itemId}`);
 		const item = response.data || {};
@@ -1299,6 +1425,8 @@ async function initInventoryPage() {
 				<div class="col-md-6"><strong>Usuario:</strong> ${item.usuario_final || "-"}</div>
 				<div class="col-12"><strong>Descripción:</strong> ${item.descripcion || "-"}</div>
 				<div class="col-12"><strong>Observación:</strong> ${item.observacion || "-"}</div>
+				<div class="col-12"><strong>Justificación:</strong> ${item.justificacion || "-"}</div>
+				<div class="col-12"><strong>Procedencia:</strong> ${item.procedencia || "-"}</div>
 				<div class="col-12"><strong>Descripción ESBYE:</strong> ${item.descripcion_esbye || "-"}</div>
 				<div class="col-md-4"><strong>Marca ESBYE:</strong> ${item.marca_esbye || "-"}</div>
 				<div class="col-md-4"><strong>Modelo ESBYE:</strong> ${item.modelo_esbye || "-"}</div>
@@ -1325,10 +1453,16 @@ async function initInventoryPage() {
 		};
 
 		const trySaveValue = async (newValue) => {
-			setCellDisplay(newValue);
 			try {
-				await saveCell(id, field, newValue);
-				updateLocalItemValue(id, field, newValue);
+				const savedPayload = await saveCell(id, field, newValue);
+				const committedValue = Object.prototype.hasOwnProperty.call(savedPayload, field)
+					? savedPayload[field]
+					: newValue;
+				setCellDisplay(committedValue);
+				updateLocalItemValue(id, field, committedValue);
+				if (field === "ubicacion" && Object.prototype.hasOwnProperty.call(savedPayload, "area_id")) {
+					updateLocalItemValue(id, "area_id", savedPayload.area_id);
+				}
 			} catch (error) {
 				const duplicateList = error?.payload?.duplicates;
 				if (error?.status === 409 && Array.isArray(duplicateList) && duplicateList.length) {
@@ -1345,8 +1479,15 @@ async function initInventoryPage() {
 						return;
 					}
 					try {
-						await saveCell(id, field, newValue, { forceDuplicate: true });
-						updateLocalItemValue(id, field, newValue);
+						const savedPayload = await saveCell(id, field, newValue, { forceDuplicate: true });
+						const committedValue = Object.prototype.hasOwnProperty.call(savedPayload, field)
+							? savedPayload[field]
+							: newValue;
+						setCellDisplay(committedValue);
+						updateLocalItemValue(id, field, committedValue);
+						if (field === "ubicacion" && Object.prototype.hasOwnProperty.call(savedPayload, "area_id")) {
+							updateLocalItemValue(id, "area_id", savedPayload.area_id);
+						}
 						return;
 					} catch (forcedError) {
 						setCellDisplay(oldRawValue);
@@ -1367,6 +1508,22 @@ async function initInventoryPage() {
 			const select = document.createElement("select");
 			select.className = "form-select form-select-sm";
 			renderSelectWithQuickAdd(select, selectConfig, oldRawValue);
+			if (field === "ubicacion") {
+				const rowAreaId = getRowFieldValue(id, "area_id");
+				if (rowAreaId !== null && rowAreaId !== undefined && String(rowAreaId).trim() !== "") {
+					const linkedArea = flattenAreas().find((entry) => String(entry.id) === String(rowAreaId));
+					if (linkedArea && linkedArea.nombre) {
+						select.value = String(linkedArea.nombre);
+					}
+				}
+
+				if (!String(select.value || "").trim() && String(oldRawValue || "").trim()) {
+					const resolvedArea = await resolveAreaEntryFromLocationValueBackend(oldRawValue);
+					if (resolvedArea && resolvedArea.nombre) {
+						select.value = String(resolvedArea.nombre);
+					}
+				}
+			}
 			cell.innerHTML = "";
 			cell.appendChild(select);
 			select.focus();
@@ -1788,7 +1945,7 @@ if (nodes.excelSingleRow) {
 
 				const pastedLocation = String(mapped.ubicacion ?? "").trim();
 				if (pastedLocation) {
-					const resolvedArea = resolveAreaFromPastedText(pastedLocation);
+					const resolvedArea = await resolveAreaFromPastedTextDefault(pastedLocation);
 					if (resolvedArea && nodes.modalAreaSelect) {
 						nodes.modalAreaSelect.value = String(resolvedArea.id);
 						if (nodes.modalUbicacion) {

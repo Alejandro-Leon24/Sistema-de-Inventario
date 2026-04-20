@@ -374,6 +374,7 @@
                 areaRefreshPollerId: null,
                 isSaving: false,
                 isRecoveringSession: false,
+                areaResolveCacheByText: {},
             };
         }
 
@@ -804,21 +805,58 @@
             return bestScore >= 3 ? best : null;
         }
 
-        function applyAreaSuggestionToRows() {
-            state.reviewRows.forEach((row) => {
+        async function resolveAreaByBackend(ubicacionText) {
+            const raw = String(ubicacionText || "").trim();
+            if (!raw) return null;
+
+            const cacheKey = normalizeText(raw);
+            if (Object.prototype.hasOwnProperty.call(state.areaResolveCacheByText, cacheKey)) {
+                return state.areaResolveCacheByText[cacheKey];
+            }
+
+            try {
+                const query = new URLSearchParams({ texto: raw });
+                const res = await fetch(`/api/inventario/resolver-ubicacion?${query.toString()}`);
+                const payload = await res.json();
+                if (!res.ok || !payload?.success || !payload?.match) {
+                    state.areaResolveCacheByText[cacheKey] = null;
+                    return null;
+                }
+
+                const areaId = Number(payload.match.area_id);
+                const found = state.areaOptions.find((opt) => String(opt.id) === String(areaId)) || null;
+                const resolved = found || {
+                    id: areaId,
+                    block: "",
+                    floor: "",
+                    area: "",
+                    label: String(payload.match.display || ubicacionText || "").trim(),
+                };
+                state.areaResolveCacheByText[cacheKey] = resolved;
+                return resolved;
+            } catch (_err) {
+                state.areaResolveCacheByText[cacheKey] = null;
+                return null;
+            }
+        }
+
+        async function applyAreaSuggestionToRows() {
+            for (const row of state.reviewRows) {
+                if (!row || !row.data) continue;
                 if (row.data.area_id) {
                     if (!row.areaLabel) {
                         const existing = state.areaOptions.find((opt) => String(opt.id) === String(row.data.area_id));
                         if (existing) row.areaLabel = existing.label;
                     }
-                    return;
+                    continue;
                 }
-                const suggested = suggestAreaId(row.data.ubicacion);
+
+                const suggested = await resolveAreaByBackend(row.data.ubicacion);
                 if (suggested) {
                     row.data.area_id = suggested.id;
                     row.areaLabel = suggested.label;
                 }
-            });
+            }
         }
 
         function applyCatalogSuggestionToRows() {
@@ -882,6 +920,9 @@
 
             const areaIdValue = row.data.area_id;
             if (areaIdValue != null && String(areaIdValue).trim() !== "") {
+                if (!state.areaOptions.length) {
+                    return;
+                }
                 const existsById = state.areaOptions.some((opt) => String(opt.id) === String(areaIdValue));
                 if (!existsById) {
                     row.invalidLocation = true;
@@ -890,11 +931,8 @@
                 return;
             }
 
-            const suggested = suggestAreaId(locationText);
-            if (!suggested) {
-                row.invalidLocation = true;
-                row.invalidLocationReason = "Ubicacion no encontrada en configuracion.";
-            }
+            row.invalidLocation = true;
+            row.invalidLocationReason = "Ubicacion no encontrada en configuracion.";
         }
 
         function refreshInvalidLocationFlags() {
@@ -996,6 +1034,7 @@
                 });
                 const json = await res.json();
                 state.areaOptions = flattenAreas(json.data || []);
+                state.areaResolveCacheByText = {};
                 state.areaOptions.forEach((opt) => {
                     const option = document.createElement("option");
                     option.value = String(opt.id);
@@ -1020,7 +1059,7 @@
             state.isRefreshingAreas = true;
             try {
                 await loadAreasForSelect();
-                applyAreaSuggestionToRows();
+                await applyAreaSuggestionToRows();
                 refreshInvalidLocationFlags();
                 renderReviewRows();
                 renderSummaryFromRows();
@@ -1086,7 +1125,7 @@
                 const incomingRows = Array.isArray(data.rows) ? data.rows : [];
                 state.reviewRows = applyRemovedRowsFilter(incomingRows);
                 state.selectedReviewRowIndex = null;
-                applyAreaSuggestionToRows();
+                await applyAreaSuggestionToRows();
                 applyCatalogSuggestionToRows();
                 refreshInvalidLocationFlags();
                 renderSummaryFromRows();
@@ -1276,7 +1315,7 @@
                     if (!goOn) {
                         const incomingRows = Array.isArray(data.rows) ? data.rows : state.reviewRows;
                         state.reviewRows = applyRemovedRowsFilter(incomingRows);
-                        applyAreaSuggestionToRows();
+                        await applyAreaSuggestionToRows();
                         refreshInvalidLocationFlags();
                         renderReviewSummary(summary);
                         renderSummaryFromRows();
@@ -1544,7 +1583,7 @@
                 const previousValue = String(row.data[field] || "").trim();
                 const previousAreaId = row.data.area_id == null ? "" : String(row.data.area_id);
 
-                const commit = () => {
+                const commit = async () => {
                     const selected = select.options[select.selectedIndex];
                     const value = String(select.value || "").trim();
                     let nextAreaId = row.data.area_id;
@@ -1557,10 +1596,13 @@
                         nextAreaId = null;
                         nextAreaLabel = "";
                     } else {
-                        const suggestion = suggestAreaId(value);
+                        const suggestion = await resolveAreaByBackend(value);
                         if (suggestion) {
                             nextAreaId = suggestion.id;
                             nextAreaLabel = suggestion.label;
+                        } else {
+                            nextAreaId = null;
+                            nextAreaLabel = "";
                         }
                     }
 
@@ -1581,8 +1623,12 @@
                     renderReviewRows();
                     renderSummaryFromRows();
                 };
-                select.addEventListener("change", commit, { once: true });
-                select.addEventListener("blur", commit, { once: true });
+                select.addEventListener("change", () => {
+                    commit();
+                }, { once: true });
+                select.addEventListener("blur", () => {
+                    commit();
+                }, { once: true });
                 return;
             }
 
@@ -1661,7 +1707,7 @@
             const previousValue = String(row.data[field] == null ? "" : row.data[field]).trim();
             const previousAreaId = row.data.area_id == null ? "" : String(row.data.area_id);
 
-            const commit = () => {
+            const commit = async () => {
                 const rawValue = String(input.value || "").trim();
                 const nextValue = (field === "cod_inventario" || field === "cod_esbye")
                     ? normalizeCodeToPlaceholder(rawValue)
@@ -1671,11 +1717,12 @@
                 let nextAreaLabel = row.areaLabel;
 
                 if (field === "ubicacion") {
-                    const suggestion = suggestAreaId(nextValue);
+                    const suggestion = await resolveAreaByBackend(nextValue);
                     if (suggestion) {
                         nextAreaId = suggestion.id;
                         nextAreaLabel = suggestion.label;
                     } else {
+                        nextAreaId = null;
                         nextAreaLabel = "";
                     }
                 }
@@ -1703,13 +1750,15 @@
             input.addEventListener("keydown", (e) => {
                 if (e.key === "Enter") {
                     e.preventDefault();
-                    commit();
+                    void commit();
                 }
                 if (e.key === "Escape") {
                     renderReviewRows();
                 }
             });
-            input.addEventListener("blur", commit, { once: true });
+            input.addEventListener("blur", () => {
+                void commit();
+            }, { once: true });
         });
 
         dropzone.addEventListener("dragover", (e) => {

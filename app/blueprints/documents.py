@@ -118,6 +118,136 @@ def _format_fecha_es_larga(value):
     return f"{dt.day} de {meses[dt.month - 1]} del {dt.year}"
 
 
+def _build_acta_procedencia_text(tipo_norm, numero_acta):
+    tipo = str(tipo_norm or "").strip().lower()
+    numero = str(numero_acta or "").strip()
+    if not numero:
+        return ""
+    if tipo == "entrega":
+        return f"Acta de entrega {numero}"
+    if tipo == "recepcion":
+        return f"Acta de recepción {numero}"
+    if tipo in {"baja", "bajas"}:
+        return f"Acta de baja {numero}"
+    return f"Acta {numero}"
+
+
+_ACTA_INVENTORY_STATE_FIELDS = [
+    "area_id",
+    "ubicacion",
+    "estado",
+    "justificacion",
+    "procedencia",
+]
+
+
+def _snapshot_inventory_item_state(db, item_id):
+    row = db.execute(
+        """
+        SELECT id, area_id, ubicacion, estado, justificacion, procedencia
+        FROM inventario_items
+        WHERE id = ?
+        """,
+        (int(item_id),),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def _states_are_different(before_state, after_state):
+    before = dict(before_state or {})
+    after = dict(after_state or {})
+    for field in _ACTA_INVENTORY_STATE_FIELDS:
+        if before.get(field) != after.get(field):
+            return True
+    return False
+
+
+def _persist_acta_inventory_mutations(db, acta_id, tipo_acta, pending_mutations):
+    safe_acta_id = int(acta_id)
+    safe_tipo = str(tipo_acta or "").strip().lower() or "general"
+    for entry in pending_mutations or []:
+        kind = str(entry.get("kind") or "").strip().lower()
+        if kind not in {"update", "insert"}:
+            continue
+        item_id = _parse_positive_int(entry.get("item_id"))
+        if kind == "insert" and not item_id:
+            continue
+        before_json = json.dumps(entry.get("before"), ensure_ascii=False) if entry.get("before") is not None else None
+        after_json = json.dumps(entry.get("after"), ensure_ascii=False) if entry.get("after") is not None else None
+        db.execute(
+            """
+            INSERT INTO acta_inventory_mutaciones (
+                acta_id,
+                tipo_acta,
+                item_id,
+                mutation_kind,
+                before_data_json,
+                after_data_json
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (safe_acta_id, safe_tipo, item_id, kind, before_json, after_json),
+        )
+
+
+def _revert_acta_inventory_mutations(db, acta_id):
+    safe_acta_id = int(acta_id)
+    rows = db.execute(
+        """
+        SELECT id, item_id, mutation_kind, before_data_json
+        FROM acta_inventory_mutaciones
+        WHERE acta_id = ?
+        ORDER BY id DESC
+        """,
+        (safe_acta_id,),
+    ).fetchall()
+
+    for row in rows:
+        kind = str(row["mutation_kind"] or "").strip().lower()
+        item_id = _parse_positive_int(row["item_id"])
+
+        if kind == "insert":
+            if item_id:
+                db.execute("DELETE FROM inventario_items WHERE id = ?", (item_id,))
+            continue
+
+        if kind != "update" or not item_id:
+            continue
+
+        before_raw = str(row["before_data_json"] or "").strip()
+        if not before_raw:
+            continue
+        try:
+            before_data = json.loads(before_raw)
+        except Exception:
+            continue
+
+        db.execute(
+            """
+            UPDATE inventario_items
+            SET
+                area_id = ?,
+                ubicacion = ?,
+                estado = ?,
+                justificacion = ?,
+                procedencia = ?,
+                actualizado_en = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (
+                before_data.get("area_id"),
+                before_data.get("ubicacion"),
+                before_data.get("estado"),
+                before_data.get("justificacion"),
+                before_data.get("procedencia"),
+                item_id,
+            ),
+        )
+
+
+def _clear_acta_inventory_mutations(db, acta_id):
+    db.execute("DELETE FROM acta_inventory_mutaciones WHERE acta_id = ?", (int(acta_id),))
+
+
 def _is_fecha_key(key):
     normalized = str(key or "").strip().lower()
     if not normalized:
@@ -809,6 +939,8 @@ def api_generar_informe():
             ), 409
 
     entrega_selected_ids = []
+    bajas_selected_rows = []
+    pending_inventory_mutations = []
 
     target_area_id = None
     if not vista_previa and tipo_norm in {"entrega", "recepcion"}:
@@ -894,6 +1026,50 @@ def api_generar_informe():
             return jsonify({
                 "success": False,
                 "error": "En Acta de Recepción, el campo Área de trabajo es obligatorio.",
+            }), 400
+
+    if not vista_previa and tipo_norm in {"baja", "bajas"}:
+        required_bajas = [
+            "numero_acta",
+            "nombre_delegado",
+            "recibido_por",
+            "entregado_por",
+            "rol_entrega",
+            "fecha_emision",
+        ]
+        missing = [k for k in required_bajas if not str(context_data.get(k) or "").strip()]
+        if missing:
+            labels = ", ".join(missing)
+            return jsonify({
+                "success": False,
+                "error": f"Faltan campos obligatorios en bajas: {labels}.",
+            }), 400
+
+        if not isinstance(tabla_data, list) or not tabla_data or not isinstance(tabla_columnas, list) or not tabla_columnas:
+            return jsonify({
+                "success": False,
+                "error": "La variable {{tabla_dinamica}} es obligatoria en Bajas: seleccione al menos un bien.",
+            }), 400
+
+        seen_ids = set()
+        for row in (tabla_data or []):
+            row_data = dict(row or {})
+            item_id = _parse_positive_int(row_data.get("id"))
+            if not item_id or item_id in seen_ids:
+                continue
+            seen_ids.add(item_id)
+            bajas_selected_rows.append(
+                {
+                    "id": item_id,
+                    "estado": str(row_data.get("estado") or "").strip() or "MALO",
+                    "justificacion": str(row_data.get("justificacion") or "").strip(),
+                }
+            )
+
+        if not bajas_selected_rows:
+            return jsonify({
+                "success": False,
+                "error": "No se identificaron bienes válidos para dar de baja.",
             }), 400
 
     nombres_campos_personal = [
@@ -1034,16 +1210,48 @@ def api_generar_informe():
         if not vista_previa:
             db = get_db()
             try:
+                if editing_acta_id:
+                    _revert_acta_inventory_mutations(db, editing_acta_id)
+                    _clear_acta_inventory_mutations(db, editing_acta_id)
+
                 if tipo_norm == "entrega":
+                    before_states = {}
+                    for item_id in entrega_selected_ids:
+                        snapshot = _snapshot_inventory_item_state(db, item_id)
+                        if snapshot:
+                            before_states[int(item_id)] = snapshot
+
                     placeholders = ",".join(["?"] * len(entrega_selected_ids))
                     db.execute(
                         f"""
                         UPDATE inventario_items
-                        SET area_id = ?, ubicacion = ?, actualizado_en = CURRENT_TIMESTAMP
+                        SET area_id = ?, ubicacion = ?, procedencia = ?, actualizado_en = CURRENT_TIMESTAMP
                         WHERE id IN ({placeholders})
                         """,
-                        (target_area_id_int, str(context_data.get("area_trabajo") or "").strip(), *entrega_selected_ids),
+                        (
+                            target_area_id_int,
+                            str(context_data.get("area_trabajo") or "").strip(),
+                            _build_acta_procedencia_text(tipo_norm, numero_acta),
+                            *entrega_selected_ids,
+                        ),
                     )
+
+                    for item_id in entrega_selected_ids:
+                        item_id_int = int(item_id)
+                        before_state = before_states.get(item_id_int)
+                        after_state = _snapshot_inventory_item_state(db, item_id_int)
+                        if not before_state or not after_state:
+                            continue
+                        if not _states_are_different(before_state, after_state):
+                            continue
+                        pending_inventory_mutations.append(
+                            {
+                                "kind": "update",
+                                "item_id": item_id_int,
+                                "before": before_state,
+                                "after": after_state,
+                            }
+                        )
 
                 if tipo_norm == "recepcion":
                     db.execute("BEGIN IMMEDIATE")
@@ -1085,8 +1293,9 @@ def api_generar_informe():
                                 fecha_adquisicion,
                                 valor,
                                 observacion,
+                                procedencia,
                                 area_id
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             (
                                 next_item_numero + idx,
@@ -1104,9 +1313,55 @@ def api_generar_informe():
                                 str(item.get("fecha_adquisicion") or "").strip() or None,
                                 valor,
                                 str(item.get("observacion") or "").strip() or None,
+                                _build_acta_procedencia_text(tipo_norm, numero_acta) or None,
                                 target_area_id_int,
                             ),
                         )
+
+                        inserted_id = _parse_positive_int(db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+                        if inserted_id:
+                            inserted_state = _snapshot_inventory_item_state(db, inserted_id)
+                            pending_inventory_mutations.append(
+                                {
+                                    "kind": "insert",
+                                    "item_id": inserted_id,
+                                    "before": None,
+                                    "after": inserted_state,
+                                }
+                            )
+
+                if tipo_norm in {"baja", "bajas"}:
+                    procedencia_text = _build_acta_procedencia_text("bajas", numero_acta)
+                    for row in bajas_selected_rows:
+                        item_id_int = int(row.get("id"))
+                        before_state = _snapshot_inventory_item_state(db, item_id_int)
+                        db.execute(
+                            """
+                            UPDATE inventario_items
+                            SET
+                                estado = ?,
+                                justificacion = ?,
+                                procedencia = ?,
+                                actualizado_en = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """,
+                            (
+                                str(row.get("estado") or "").strip() or "MALO",
+                                str(row.get("justificacion") or "").strip() or None,
+                                procedencia_text or None,
+                                item_id_int,
+                            ),
+                        )
+                        after_state = _snapshot_inventory_item_state(db, item_id_int)
+                        if before_state and after_state and _states_are_different(before_state, after_state):
+                            pending_inventory_mutations.append(
+                                {
+                                    "kind": "update",
+                                    "item_id": item_id_int,
+                                    "before": before_state,
+                                    "after": after_state,
+                                }
+                            )
             except sqlite3.DatabaseError:
                 logger.exception("Error de base de datos al actualizar inventario en generación de acta")
                 return jsonify(
@@ -1130,6 +1385,7 @@ def api_generar_informe():
                     "variables": plantilla_variables,
                 },
             }
+            target_acta_id = None
             if editing_acta_id and editing_row:
                 update_historial_acta(
                     editing_acta_id,
@@ -1141,8 +1397,9 @@ def api_generar_informe():
                     plantilla_hash=plantilla_hash,
                     plantilla_snapshot_path=plantilla_snapshot_path,
                 )
+                target_acta_id = int(editing_acta_id)
             else:
-                save_historial_acta(
+                target_acta_id = save_historial_acta(
                     tipo,
                     json.dumps(datos_completos),
                     docx_path,
@@ -1151,6 +1408,11 @@ def api_generar_informe():
                     plantilla_hash=plantilla_hash,
                     plantilla_snapshot_path=plantilla_snapshot_path,
                 )
+
+            if target_acta_id and pending_inventory_mutations:
+                _persist_acta_inventory_mutations(db, target_acta_id, tipo_norm, pending_inventory_mutations)
+                db.commit()
+
             publish_event("actas_changed", {"tipo": tipo})
         else:
             with PREVIEW_CACHE_LOCK:
