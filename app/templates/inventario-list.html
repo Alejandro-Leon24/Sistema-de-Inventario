@@ -563,25 +563,6 @@
         </div>
     </div>
 </div>
-<script>
-
-function validarEnteros(input) {
-    let value = String(input.value || "").replace(/[^0-9]/g, "");
-    if (value.length > 1) {
-        value = value.replace(/^0+/, "") || "0";
-    }
-    input.value = value;
-}
-
-function validarNumerosComas(input) {
-    let value = String(input.value || "").replace(/[^0-9,]/g, "");
-    const firstComma = value.indexOf(",");
-    if (firstComma !== -1) {
-        value = value.slice(0, firstComma + 1) + value.slice(firstComma + 1).replace(/,/g, "");
-    }
-    input.value = value;
-}
-</script>
 <script src="{{ url_for('static', filename='js/utils/api.js') }}"></script>
 <script src="{{ url_for('static', filename='js/utils/helpers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/inventario-tabla.js') }}"></script>

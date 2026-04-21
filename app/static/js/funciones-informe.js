@@ -667,6 +667,7 @@ function normalizeRecepcionRowLikeInventarioImport(row, forcedLocation) {
         modelo: toText(src.modelo),
         serie: toText(src.serie),
         estado: toText(src.estado),
+        condicion: toText(src.condicion),
         usuario_final: toText(src.usuario_final),
         observacion: toText(src.observacion),
         descripcion_esbye: toText(src.descripcion_esbye),
@@ -1720,6 +1721,8 @@ function getRecepcionBienFormValues() {
     }
     // Siempre tomar la ubicación actual del área de trabajo
     const ubicacion = String(document.getElementById("recepcion-area-trabajo")?.value || "").trim();
+    const helper = window.appHelpers;
+
     return {
         cod_inventario: normalizeCodeToPlaceholder(document.getElementById("recepcion-bien-cod-inventario")?.value),
         cod_esbye: normalizeCodeToPlaceholder(document.getElementById("recepcion-bien-cod-esbye")?.value),
@@ -1730,9 +1733,10 @@ function getRecepcionBienFormValues() {
         modelo: String(document.getElementById("recepcion-bien-modelo")?.value || "").trim(),
         serie: String(document.getElementById("recepcion-bien-serie")?.value || "").trim(),
         estado: String(document.getElementById("recepcion-bien-estado")?.value || "").trim(),
+        condicion: String(document.getElementById("recepcion-bien-condicion")?.value || "").trim(),
         ubicacion: ubicacion,
         fecha_adquisicion: String(document.getElementById("recepcion-bien-fecha-adquisicion")?.value || "").trim(),
-        valor: String(document.getElementById("recepcion-bien-valor")?.value || "").trim(),
+        valor: helper.parseDecimalWithComma(document.getElementById("recepcion-bien-valor")?.value),
         usuario_final: String(document.getElementById("recepcion-bien-usuario-final")?.value || "").trim(),
         observacion: String(document.getElementById("recepcion-bien-observacion")?.value || "").trim(),
         descripcion_esbye: String(document.getElementById("recepcion-bien-descripcion-esbye")?.value || "").trim(),
@@ -1740,7 +1744,7 @@ function getRecepcionBienFormValues() {
         modelo_esbye: String(document.getElementById("recepcion-bien-modelo-esbye")?.value || "").trim(),
         serie_esbye: String(document.getElementById("recepcion-bien-serie-esbye")?.value || "").trim(),
         fecha_adquisicion_esbye: String(document.getElementById("recepcion-bien-fecha-esbye")?.value || "").trim(),
-        valor_esbye: String(document.getElementById("recepcion-bien-valor-esbye")?.value || "").trim(),
+        valor_esbye: helper.parseDecimalWithComma(document.getElementById("recepcion-bien-valor-esbye")?.value),
         ubicacion_esbye: String(document.getElementById("recepcion-bien-ubicacion-esbye")?.value || "").trim(),
         observacion_esbye: String(document.getElementById("recepcion-bien-observacion-esbye")?.value || "").trim(),
     };
@@ -1851,9 +1855,20 @@ function loadRecepcionBienIntoForm(index) {
         }
         el.value = val;
     };
-    const assign = (id, value) => {
+    const assign = (id, value, field = "") => {
         const el = document.getElementById(id);
-        if (el) el.value = String(value || "");
+        if (!el) return;
+        if ((field === "valor" || field === "valor_esbye") && value != null && value !== "") {
+            const num = Number(value);
+            if (!Number.isNaN(num)) {
+                el.value = num.toLocaleString("es-EC", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                });
+                return;
+            }
+        }
+        el.value = String(value || "");
     };
     assign("recepcion-bien-cod-inventario", item.cod_inventario);
     assign("recepcion-bien-cod-esbye", item.cod_esbye);
@@ -1865,7 +1880,7 @@ function loadRecepcionBienIntoForm(index) {
     assign("recepcion-bien-serie", item.serie);
     assignSelect("recepcion-bien-estado", item.estado);
     assign("recepcion-bien-fecha-adquisicion", normalizeImportDateLikeInventario(item.fecha_adquisicion));
-    assign("recepcion-bien-valor", item.valor);
+    assign("recepcion-bien-valor", item.valor, "valor");
     assignSelect("recepcion-bien-usuario-final", item.usuario_final);
     assign("recepcion-bien-observacion", item.observacion);
     assign("recepcion-bien-descripcion-esbye", item.descripcion_esbye);
@@ -1873,7 +1888,7 @@ function loadRecepcionBienIntoForm(index) {
     assign("recepcion-bien-modelo-esbye", item.modelo_esbye);
     assign("recepcion-bien-serie-esbye", item.serie_esbye);
     assign("recepcion-bien-fecha-esbye", normalizeImportDateLikeInventario(item.fecha_adquisicion_esbye || item.fecha_esbye));
-    assign("recepcion-bien-valor-esbye", item.valor_esbye);
+    assign("recepcion-bien-valor-esbye", item.valor_esbye, "valor_esbye");
     assign("recepcion-bien-ubicacion-esbye", item.ubicacion_esbye || "");
     assign("recepcion-bien-observacion-esbye", item.observacion_esbye);
     // Forzar que la ubicación (acta) sea la seleccionada actualmente en el formulario principal
@@ -3532,13 +3547,13 @@ function setupBajasBienesModal() {
 
             filtroBloque.addEventListener("change", () => {
                 updatePisosYAreas();
-                applyBajasSelectionFilter();
+                refreshSelection();
             });
             filtroPiso.addEventListener("change", () => {
                 updateAreas();
-                applyBajasSelectionFilter();
+                refreshSelection();
             });
-            filtroArea.addEventListener("change", applyBajasSelectionFilter);
+            filtroArea.addEventListener("change", refreshSelection);
         }
 
         // Paginación
@@ -3572,6 +3587,25 @@ function setupBajasBienesModal() {
     const btnColumnasGuardar = document.getElementById("btn-bajas-columnas-guardar");
     const modalColumnasEl = document.getElementById("modalBajasColumnas");
     const modalColumnas = modalColumnasEl ? bootstrap.Modal.getOrCreateInstance(modalColumnasEl) : null;
+
+    // --- CORRECCIÓN: Delegación de eventos para el Check All de Bajas ---
+    const theadBajas = document.getElementById("thead-bajas-seleccion");
+    theadBajas?.addEventListener("change", (event) => {
+        if (event.target.id === "bajas-check-all") {
+            const shouldCheck = Boolean(event.target.checked);
+            // Solo afectar a los ítems que están actualmente filtrados y visibles
+            (Array.isArray(bajasFilteredItems) ? bajasFilteredItems : []).forEach((item) => {
+                const itemId = Number(item?.id || 0);
+                if (!itemId) return;
+                if (shouldCheck) {
+                    bajasSelectedItemIds.add(itemId);
+                } else {
+                    bajasSelectedItemIds.delete(itemId);
+                }
+            });
+            renderBajasSelectionTable();
+        }
+    });
 
     const refreshSelection = () => {
         applyBajasSelectionFilter();

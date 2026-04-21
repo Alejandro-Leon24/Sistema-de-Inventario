@@ -92,7 +92,8 @@
                             </div>
                         </div>
                     </button>
-                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn"
+                    <!-- Oculto por solicitud -->
+                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn d-none"
                         id="tab-fin-gestion" data-target="sec-fin-gestion" href="#">
                         <div class="row align-items-center w-100 m-0">
                             <div class="col-lg-2 col-3 d-flex justify-content-center p-0">
@@ -204,7 +205,7 @@
                             <button type="button" class="btn btn-outline-secondary shadow-sm" id="btn-vaciar-entrega">
                                 <i class="bi bi-eraser me-1"></i>Vaciar formulario
                             </button>
-                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
+                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Seleccionar Bienes</button>
                             <button class="btn btn-outline-primary shadow-sm btn-historial"><i
                                     class="bi bi-clock-history me-1"></i>Historial</button>
                             <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
@@ -244,7 +245,7 @@
                             <div class="col-md-6">
                                 <label class="form-label">Entregado por</label>
                                 <input type="text" class="form-control" name="entregado_por" id="recepcion-entregado"
-                                    placeholder="Ej: Econ. Jenny Ortega">
+                                    placeholder="Ej: Ing. Manuel Reyes">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Rol de quien entrega</label>
@@ -252,24 +253,24 @@
                                     placeholder="Ej: Guardalmacén">
                             </div>
                             <div class="col-md-6">
+                                <label class="form-label">Entregado por (segunda delegada)</label>
+                                <input type="text" class="form-control" name="entregado_por_segunda_delegada" id="recepcion-entregado-segunda"
+                                placeholder="Ej: Ing. Maria Perez">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Rol segunda delegada</label>
+                                <input type="text" class="form-control" name="rol_entrega_segunda_delegada" id="recepcion-rol-segunda"
+                                placeholder="Ej: Delegada de Bienes">
+                            </div>
+                            <div class="col-md-6">
                                 <label class="form-label">Recibido por/ Usuario final</label>
                                 <input type="text" class="form-control" name="recibido_por" id="recepcion-recibido"
-                                    placeholder="Ej: Abg. Candy Mendoza">
+                                    placeholder="Ej: Econ. Jenny Ortega">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Rol de quien recibe</label>
                                 <input type="text" class="form-control" name="rol_recibe" id="recepcion-rol-recibe"
                                     placeholder="Ej: Responsable del área">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Entregado por (segunda delegada)</label>
-                                <input type="text" class="form-control" name="entregado_por_segunda_delegada" id="recepcion-entregado-segunda"
-                                    placeholder="Ej: Ing. Maria Perez">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Rol segunda delegada</label>
-                                <input type="text" class="form-control" name="rol_entrega_segunda_delegada" id="recepcion-rol-segunda"
-                                    placeholder="Ej: Delegada de Bienes">
                             </div>
                             <div class="col-12">
                                 <label class="form-label">Área de trabajo</label>
@@ -314,31 +315,31 @@
                     <!-- sección de acta de bienes de baja -->
                     <div id="sec-bajas" class="tab-section d-none">
                         <form class="row g-3 compact-form" id="form-bajas">
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <label class="form-label">Número de acta</label>
                                 <input type="text" class="form-control" name="numero_acta" id="bajas-numero-acta"
                                     placeholder="Ej: 012-2026" required>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <label class="form-label">Fecha de emisión</label>
                                 <input type="date" class="form-control" name="fecha_emision" id="bajas-fecha-emision">
-                            </div>
-                            <div class="col-md-4">
-                                <label class="form-label">Rol de quien entrega</label>
-                                <input type="text" class="form-control" name="rol_entrega" id="bajas-rol-entrega"
-                                    placeholder="Ej: Guardalmacén">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Entregado por</label>
                                 <input type="text" class="form-control" name="entregado_por" id="bajas-entregado-por"
-                                    placeholder="Ej: Econ. Jenny Ortega">
+                                placeholder="Ej: Econ. Jenny Ortega">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Rol de quien entrega</label>
+                                <input type="text" class="form-control" name="rol_entrega" id="bajas-rol-entrega"
+                                    placeholder="Ej: Guardalmacén">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Recibido por</label>
                                 <input type="text" class="form-control" name="recibido_por" id="bajas-recibido-por"
                                     placeholder="Ej: Ing. Maria Perez">
                             </div>
-                            <div class="col-12">
+                            <div class="col-6">
                                 <label class="form-label">Nombre del delegado</label>
                                 <input type="text" class="form-control" name="nombre_delegado" id="bajas-nombre-delegado"
                                     placeholder="Ej: Dr. Juan Perez">
@@ -430,7 +431,7 @@
                             <button type="button" class="btn btn-outline-dark shadow-sm btn-traspaso-exportar">
                                 <i class="bi bi-file-earmark-excel me-1"></i>Bienes Fuera
                             </button>
-                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Extraer Tabla</button>
+                            <button class="btn btn-edu-secondary shadow-sm btn-extraer-tabla">Seleccionar Bienes</button>
                             <button class="btn btn-outline-primary shadow-sm btn-historial"><i
                                     class="bi bi-clock-history me-1"></i>Historial</button>
                             <button class="btn btn-edu-primary shadow-lg btn-descargar-acta">Descargar Acta</button>
@@ -884,7 +885,7 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Cantidad</label>
-                                        <input type="number" min="1" step="1" class="form-control form-control-sm" id="recepcion-bien-cantidad" value="1">
+                                        <input type="number" min="1" step="1" class="form-control form-control-sm" id="recepcion-bien-cantidad" value="1" oninput="validarEnteros(this)">
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small">Descripción</label>
@@ -909,6 +910,14 @@
                                         </select>
                                     </div>
                                     <div class="col-md-6">
+                                        <label class="form-label small">Condición</label>
+                                        <select class="form-select form-select-sm" id="recepcion-bien-condicion">
+                                            <option value="">-- Seleccionar condición --</option>
+                                            <option value="BIEN">BIEN</option>
+                                            <option value="REB">REB</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
                                         <label class="form-label small">Ubicación (acta)</label>
                                         <input type="text" class="form-control form-control-sm" id="recepcion-bien-ubicacion" readonly>
                                     </div>
@@ -918,7 +927,7 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Valor</label>
-                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-valor" placeholder="0,00">
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-valor" placeholder="0,00" oninput="validarNumerosComas(this)">
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Usuario final</label>
@@ -956,7 +965,7 @@
                                     </div>
                                     <div class="col-md-6">
                                         <label class="form-label small">Valor ESBYE</label>
-                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-valor-esbye" placeholder="0,00">
+                                        <input type="text" class="form-control form-control-sm" id="recepcion-bien-valor-esbye" placeholder="0,00" oninput="validarNumerosComas(this)">
                                     </div>
                                     <div class="col-md-12">
                                         <label class="form-label small">Ubicación ESBYE</label>

@@ -53,13 +53,29 @@ except ModuleNotFoundError:
     from utils.filesystem import cleanup_empty_parent_dirs
 
 
+import sys
+from flask import Blueprint, jsonify, request, current_app
+
 documents_bp = Blueprint("documents", __name__)
 logger = logging.getLogger(__name__)
 
 NUMERO_ACTA_PATTERN = re.compile(r"^[A-Z0-9-]{1,20}-\d{4}$")
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+# Manejo de rutas para entorno empaquetado (PyInstaller)
+if getattr(sys, 'frozen', False):
+    # Carpeta donde está el .exe
+    BASE_DIR = Path(sys.executable).parent
+    # Carpeta interna del bundle
+    BUNDLE_DIR = Path(sys._MEIPASS)
+else:
+    BASE_DIR = Path(__file__).resolve().parents[2]
+    BUNDLE_DIR = BASE_DIR
+
+# Las plantillas se pueden leer del bundle, pero permitimos que existan fuera también
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "plantillas")
+if not os.path.exists(UPLOAD_FOLDER) and getattr(sys, 'frozen', False):
+    UPLOAD_FOLDER = os.path.join(BUNDLE_DIR, "plantillas")
+
 ACTAS_OUTPUT_ROOT = os.path.join(BASE_DIR, "salidas", "inventario", "actas")
 PREVIEW_OUTPUT_ROOT = os.environ.get(
     "INVENTARIO_PREVIEW_ROOT",
@@ -67,6 +83,8 @@ PREVIEW_OUTPUT_ROOT = os.environ.get(
 )
 TEMPLATE_HISTORY_ROOT = os.path.join(UPLOAD_FOLDER, "_historial")
 AREA_REPORTS_OUTPUT_ROOT = os.path.join(ACTAS_OUTPUT_ROOT, "informes-area")
+
+# Asegurar que las carpetas existan en el BASE_DIR real
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(ACTAS_OUTPUT_ROOT, exist_ok=True)
 os.makedirs(PREVIEW_OUTPUT_ROOT, exist_ok=True)
@@ -461,49 +479,70 @@ def api_generar_informe():
             pending = []
             procedencia_text = _build_acta_procedencia_text(tipo_norm, numero_acta)
 
+            # 1. Guardar primero el acta en el historial (esto valida duplicados y hace commit del acta)
+            t_h, t_s, _ = _snapshot_template_for_historial(tipo, tpl_p)
+            full_data_json = json.dumps({"formulario": ctx_raw, "tabla": tabla_data, "columnas": tabla_cols})
+            if editing_id:
+                update_historial_acta(editing_id, tipo, full_data_json, docx_p, None, numero_acta, t_h, t_s)
+                acta_id = editing_id
+            else:
+                acta_id = save_historial_acta(tipo, full_data_json, docx_p, None, numero_acta, t_h, t_s)
+
+            # 2. Solo si el acta se guardó bien, realizamos las mutaciones en el inventario
             if tipo_norm == "entrega" and target_area:
                 for r in tabla_data:
                     iid = _parse_positive_int(r.get("id"))
                     if iid:
                         bef = _snapshot_inventory_item_state(db, iid)
-                        db.execute("UPDATE inventario_items SET area_id = ?, ubicacion = ?, procedencia = ? WHERE id = ?",
+                        db.execute("UPDATE inventario_items SET area_id = ?, ubicacion = ?, procedencia = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
                                    (target_area, ctx.get("area_trabajo"), procedencia_text, iid))
                         pending.append({"kind": "update", "item_id": iid, "before": bef, "after": _snapshot_inventory_item_state(db, iid)})
             
             elif tipo_norm == "recepcion" and target_area:
-                with db:
-                    row_next = db.execute("SELECT COALESCE(MAX(item_numero), 0) + 1 AS next FROM inventario_items").fetchone()
-                    next_item_num = int(row_next["next"]) if row_next else 1
-                    for idx, row in enumerate(tabla_data or []):
-                        db.execute(
-                            """
-                            INSERT INTO inventario_items (
-                                item_numero, cod_inventario, cod_esbye, cuenta, cantidad, descripcion,
-                                ubicacion, marca, modelo, serie, estado, usuario_final,
-                                fecha_adquisicion, valor, observacion, procedencia, area_id
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                next_item_num + idx,
-                                str(row.get("cod_inventario") or "").strip() or None,
-                                str(row.get("cod_esbye") or "").strip() or None,
-                                str(row.get("cuenta") or "").strip() or None,
-                                int(row.get("cantidad") or 1),
-                                str(row.get("descripcion") or "").strip() or None,
-                                str(ctx.get("area_trabajo") or "").strip() or None,
-                                str(row.get("marca") or "").strip() or None,
-                                str(row.get("modelo") or "").strip() or None,
-                                str(row.get("serie") or "").strip() or None,
-                                str(row.get("estado") or "").strip() or None,
-                                str(row.get("usuario_final") or "").strip() or None,
-                                str(row.get("fecha_adquisicion") or "").strip() or None,
-                                row.get("valor"),
-                                str(row.get("observacion") or "").strip() or None,
-                                procedencia_text, target_area
-                            ),
-                        )
-                        ins_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-                        pending.append({"kind": "insert", "item_id": ins_id, "before": None, "after": _snapshot_inventory_item_state(db, ins_id)})
+                row_next = db.execute("SELECT COALESCE(MAX(item_numero), 0) + 1 AS next FROM inventario_items").fetchone()
+                next_item_num = int(row_next["next"]) if row_next else 1
+                for idx, row in enumerate(tabla_data or []):
+                    db.execute(
+                        """
+                        INSERT INTO inventario_items (
+                            item_numero, cod_inventario, cod_esbye, cuenta, cantidad, descripcion,
+                            ubicacion, marca, modelo, serie, estado, condicion, usuario_final,
+                            fecha_adquisicion, valor, observacion, justificacion, procedencia, area_id,
+                            descripcion_esbye, marca_esbye, modelo_esbye, serie_esbye,
+                            valor_esbye, ubicacion_esbye, observacion_esbye, fecha_adquisicion_esbye
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            next_item_num + idx,
+                            str(row.get("cod_inventario") or "").strip() or None,
+                            str(row.get("cod_esbye") or "").strip() or None,
+                            str(row.get("cuenta") or "").strip() or None,
+                            int(row.get("cantidad") or 1),
+                            str(row.get("descripcion") or "").strip() or None,
+                            str(ctx.get("area_trabajo") or "").strip() or None,
+                            str(row.get("marca") or "").strip() or None,
+                            str(row.get("modelo") or "").strip() or None,
+                            str(row.get("serie") or "").strip() or None,
+                            str(row.get("estado") or "").strip() or None,
+                            str(row.get("condicion") or "").strip() or None,
+                            str(row.get("usuario_final") or "").strip() or None,
+                            str(row.get("fecha_adquisicion") or "").strip() or None,
+                            row.get("valor"),
+                            str(row.get("observacion") or "").strip() or None,
+                            str(row.get("justificacion") or "").strip() or None,
+                            procedencia_text, target_area,
+                            str(row.get("descripcion_esbye") or "").strip() or None,
+                            str(row.get("marca_esbye") or "").strip() or None,
+                            str(row.get("modelo_esbye") or "").strip() or None,
+                            str(row.get("serie_esbye") or "").strip() or None,
+                            row.get("valor_esbye"),
+                            str(row.get("ubicacion_esbye") or "").strip() or None,
+                            str(row.get("observacion_esbye") or "").strip() or None,
+                            str(row.get("fecha_adquisicion_esbye") or "").strip() or None
+                        ),
+                    )
+                    ins_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    pending.append({"kind": "insert", "item_id": ins_id, "before": None, "after": _snapshot_inventory_item_state(db, ins_id)})
 
             elif tipo_norm == "traspaso":
                 facultad_recibe = str(ctx.get("facultad_recibe") or "OTRA FACULTAD").strip()
@@ -538,22 +577,16 @@ def api_generar_informe():
                     iid = _parse_positive_int(row.get("id"))
                     if iid:
                         bef = _snapshot_inventory_item_state(db, iid)
-                        db.execute("UPDATE inventario_items SET estado = ?, justificacion = ?, procedencia = ? WHERE id = ?",
+                        db.execute("UPDATE inventario_items SET estado = ?, justificacion = ?, procedencia = ?, actualizado_en = CURRENT_TIMESTAMP WHERE id = ?",
                                    (str(row.get("estado") or "MALO"), str(row.get("justificacion") or ""), procedencia_text, iid))
                         pending.append({"kind": "update", "item_id": iid, "before": bef, "after": _snapshot_inventory_item_state(db, iid)})
 
-            t_h, t_s, _ = _snapshot_template_for_historial(tipo, tpl_p)
-            full_data_json = json.dumps({"formulario": ctx_raw, "tabla": tabla_data, "columnas": tabla_cols})
-            if editing_id:
-                update_historial_acta(editing_id, tipo, full_data_json, docx_p, None, numero_acta, t_h, t_s)
-                acta_id = editing_id
-            else:
-                acta_id = save_historial_acta(tipo, full_data_json, docx_p, None, numero_acta, t_h, t_s)
-            
+            # 3. Persistir log de mutaciones y commit final
             if pending: _persist_acta_inventory_mutations(db, acta_id, tipo_norm, pending)
             if tipo_norm == "traspaso": db.execute("UPDATE inventario_traspasos SET acta_traspaso_id = ? WHERE acta_traspaso_id IS NULL", (acta_id,))
             db.commit()
             publish_event("actas_changed", {"tipo": tipo})
+
 
         return jsonify({"success": True, "docx_path": docx_p, "numero_acta": numero_acta, "html_preview": html})
     except Exception as e:

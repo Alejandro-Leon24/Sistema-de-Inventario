@@ -588,7 +588,6 @@ def _ensure_historial_actas_table_without_global_unique_runtime():
                 fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 datos_json TEXT,
                 docx_path TEXT,
-                pdf_path TEXT,
                 plantilla_hash TEXT,
                 plantilla_snapshot_path TEXT
             )
@@ -604,7 +603,6 @@ def _ensure_historial_actas_table_without_global_unique_runtime():
                 fecha,
                 datos_json,
                 docx_path,
-                pdf_path,
                 plantilla_hash,
                 plantilla_snapshot_path
             )
@@ -615,7 +613,6 @@ def _ensure_historial_actas_table_without_global_unique_runtime():
                 fecha,
                 datos_json,
                 docx_path,
-                pdf_path,
                 plantilla_hash,
                 plantilla_snapshot_path
             FROM historial_actas

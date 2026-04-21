@@ -14,7 +14,7 @@
                     <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="parametros">
                         <i class="bi bi-gear me-2"></i>Parámetros
                     </button>
-                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="diagnostico">
+                    <button type="button" class="list-group-item list-group-item-action settings-menu-btn d-none" data-target="diagnostico">
                         <i class="bi bi-speedometer2 me-2"></i>Diagnóstico
                     </button>
                     <button type="button" class="list-group-item list-group-item-action settings-menu-btn" data-target="personal" style="border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem;">
@@ -72,29 +72,32 @@
             </div>
 
             <div id="section-parametros" class="settings-section d-none">
-                <h3 class="fw-bold text-primary mb-4">Parámetros de la Universidad</h3>
+                <!-- Universidad Oculto -->
+                <div class="d-none">
+                    <h3 class="fw-bold text-primary mb-4">Parámetros de la Universidad</h3>
 
-                <div class="row g-4 mb-4">
-                    <div>
-                        <div class="card border-0 shadow-sm">
-                            <div class="card-header bg-light border-bottom">
-                                <h5 class="m-0 fw-bold small text-uppercase">Universidad</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="mb-3">
-                                    <label class="form-label fw-semibold">Nombre de la Universidad</label>
-                                    <input type="text" id="param-universidad-nombre" class="form-control" maxlength="150" readonly>
+                    <div class="row g-4 mb-4">
+                        <div>
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-header bg-light border-bottom">
+                                    <h5 class="m-0 fw-bold small text-uppercase">Universidad</h5>
                                 </div>
-                                <div class="d-flex gap-2">
-                                    <button type="button" id="btn-edit-universidad" class="btn btn-outline-primary btn-sm">
-                                        <i class="bi bi-pencil me-1"></i>Editar
-                                    </button>
-                                    <button type="button" id="btn-save-universidad" class="btn btn-success btn-sm d-none">
-                                        <i class="bi bi-check-lg me-1"></i>Guardar
-                                    </button>
-                                    <button type="button" id="btn-cancel-universidad" class="btn btn-outline-secondary btn-sm d-none">
-                                        <i class="bi bi-x-lg me-1"></i>Cancelar
-                                    </button>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold">Nombre de la Universidad</label>
+                                        <input type="text" id="param-universidad-nombre" class="form-control" maxlength="150" readonly>
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button type="button" id="btn-edit-universidad" class="btn btn-outline-primary btn-sm">
+                                            <i class="bi bi-pencil me-1"></i>Editar
+                                        </button>
+                                        <button type="button" id="btn-save-universidad" class="btn btn-success btn-sm d-none">
+                                            <i class="bi bi-check-lg me-1"></i>Guardar
+                                        </button>
+                                        <button type="button" id="btn-cancel-universidad" class="btn btn-outline-secondary btn-sm d-none">
+                                            <i class="bi bi-x-lg me-1"></i>Cancelar
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -265,32 +268,35 @@
             </div>
 
             <div id="section-diagnostico" class="settings-section d-none">
-                <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                    <h3 class="m-0 fw-bold text-primary">Diagnóstico de Búsqueda</h3>
-                </div>
-
-                <div class="card border-0 shadow-sm mb-3">
-                    <div class="card-body">
-                        <div class="row g-2 align-items-end">
-                            <div class="col-md-9">
-                                <label for="diag-search-input" class="form-label fw-semibold">Término de búsqueda</label>
-                                <input id="diag-search-input" type="text" class="form-control" placeholder="Ejemplo: laptop, proyector, HP">
-                            </div>
-                            <div class="col-md-3 d-grid">
-                                <button id="btn-run-search-diagnostics" type="button" class="btn btn-primary">
-                                    <i class="bi bi-play-circle me-1"></i>Ejecutar diagnóstico
-                                </button>
-                            </div>
-                        </div>
-                        <p class="text-muted small mt-2 mb-0">Consulta el endpoint técnico y muestra modo WAL, uso de FTS y EXPLAIN QUERY PLAN.</p>
+                <!-- Diagnóstico Oculto -->
+                <div class="d-none">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                        <h3 class="m-0 fw-bold text-primary">Diagnóstico de Búsqueda</h3>
                     </div>
-                </div>
 
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body">
-                        <div id="diag-search-summary" class="mb-3 text-muted small">Aún no se ha ejecutado el diagnóstico.</div>
-                        <label class="form-label fw-semibold">Plan de consulta</label>
-                        <pre id="diag-search-plan" class="bg-light border rounded p-3 small mb-0" style="max-height: 420px; overflow: auto;">[]</pre>
+                    <div class="card border-0 shadow-sm mb-3">
+                        <div class="card-body">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-9">
+                                    <label for="diag-search-input" class="form-label fw-semibold">Término de búsqueda</label>
+                                    <input id="diag-search-input" type="text" class="form-control" placeholder="Ejemplo: laptop, proyector, HP">
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button id="btn-run-search-diagnostics" type="button" class="btn btn-primary">
+                                        <i class="bi bi-play-circle me-1"></i>Ejecutar diagnóstico
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="text-muted small mt-2 mb-0">Consulta el endpoint técnico y muestra modo WAL, uso de FTS y EXPLAIN QUERY PLAN.</p>
+                        </div>
+                    </div>
+
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            <div id="diag-search-summary" class="mb-3 text-muted small">Aún no se ha ejecutado el diagnóstico.</div>
+                            <label class="form-label fw-semibold">Plan de consulta</label>
+                            <pre id="diag-search-plan" class="bg-light border rounded p-3 small mb-0" style="max-height: 420px; overflow: auto;">[]</pre>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -412,8 +418,8 @@
                         </div>
                     </div>
 
-                    <!-- Plantilla Fin de Gestion -->
-                    <div class="col-md-6">
+                    <!-- Plantilla Fin de Gestion Oculto -->
+                    <div class="col-md-6 d-none">
                         <div class="card border-0 shadow-sm h-100">
                             <div class="card-header bg-light border-bottom d-flex align-items-center">
                                 <h6 class="m-0 fw-bold"><i class="bi bi-clipboard-data me-2 text-primary"></i>Acta de Fin Gestión</h6>

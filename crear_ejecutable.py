@@ -2,57 +2,85 @@ import os
 import subprocess
 import sys
 import shutil
+from pathlib import Path
+
+def limpiar_carpetas():
+    """Borra carpetas de compilaciones anteriores para evitar conflictos."""
+    for folder in ['build', 'dist']:
+        if os.path.exists(folder):
+            print(f"Limpiando carpeta {folder}...")
+            shutil.rmtree(folder, ignore_errors=True)
 
 def crear_app():
-    print("--- Iniciando proceso de empaquetado del Sistema de Inventario ---")
+    print("\n--- Iniciando proceso de empaquetado del Sistema de Inventario ---")
     
-    # 1. Verificar dependencias necesarias
+    limpiar_carpetas()
+
+    # 1. Verificar PyInstaller
     try:
         import PyInstaller
     except ImportError:
-        print("Error: PyInstaller no está instalado. Instalando...")
+        print("Instalando PyInstaller...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
 
-    # 2. Definir carpetas de datos (static, templates, database, plantillas)
-    # Formato para PyInstaller: "origen;destino" (en Windows usa ;)
+    # 2. Carpetas que van DENTRO del ejecutable (Solo lectura)
+    # Formato: (origen, destino)
     data_folders = [
         ("app/static", "app/static"),
         ("app/templates", "app/templates"),
-        ("database", "database"),
-        ("plantillas", "plantillas"),
+        ("database/schema.sql", "database"), # Necesario para inicializar DBs nuevas
     ]
 
-    # Construir el comando de PyInstaller
     cmd = [
         "pyinstaller",
         "--noconfirm",
-        "--onedir", # Recomendado para apps portables: más rápido al arrancar que --onefile
-        "--windowed", # No abre consola de comandos al iniciar
+        "--onedir",
+        "--windowed",
         "--name", "SistemaInventario",
-        "--icon", "app/static/img/favicon.ico" if os.path.exists("app/static/img/favicon.ico") else "NONE",
         "--clean",
     ]
 
-    # Añadir las carpetas de datos al comando
     for src, dest in data_folders:
         if os.path.exists(src):
             cmd.extend(["--add-data", f"{src}{os.pathsep}{dest}"])
-        else:
-            print(f"Advertencia: No se encontró la carpeta {src}, se omitirá.")
 
-    # El script principal de entrada
     cmd.append("app/app.py")
 
     # 3. Ejecutar PyInstaller
-    print(f"Ejecutando: {' '.join(cmd)}")
+    print(f"\nEmpaquetando aplicación (esto puede tardar unos minutos)...")
     try:
         subprocess.check_call(cmd)
-        print("\n--- ¡ÉXITO! ---")
-        print("La aplicación ha sido creada en la carpeta: dist/SistemaInventario")
-        print("Para usarla, solo copia la carpeta 'SistemaInventario' a cualquier lugar (USB, Disco, etc.) y ejecuta 'SistemaInventario.exe'.")
+        
+        # 4. Preparar carpeta de salida final
+        dist_path = Path("dist/SistemaInventario")
+        
+        # Crear carpetas necesarias fuera del exe para persistencia
+        print("\nConfigurando carpetas de persistencia...")
+        (dist_path / "plantillas").mkdir(exist_ok=True)
+        (dist_path / "salidas").mkdir(exist_ok=True)
+        
+        # Copiar plantillas base si existen
+        if os.path.exists("plantillas"):
+            print("Copiando plantillas base...")
+            for item in os.listdir("plantillas"):
+                s = os.path.join("plantillas", item)
+                d = os.path.join(dist_path / "plantillas", item)
+                if os.path.isfile(s):
+                    shutil.copy2(s, d)
+                elif os.path.isdir(s) and item != "_historial":
+                    shutil.copytree(s, d, dirs_exist_ok=True)
+
+        print("\n" + "="*50)
+        print("¡PROCESO FINALIZADO CON ÉXITO!")
+        print("="*50)
+        print(f"\n1. Ve a la carpeta: {dist_path.absolute()}")
+        print("2. Ejecuta 'SistemaInventario.exe'")
+        print("\nNOTA: Para mover el programa, debes copiar TODA la carpeta 'SistemaInventario',")
+        print("no solo el archivo .exe.")
+        print("="*50)
+
     except subprocess.CalledProcessError:
-        print("\n--- ERROR ---")
-        print("Hubo un error durante el proceso de empaquetado.")
+        print("\n--- ERROR: No se pudo crear el ejecutable ---")
 
 if __name__ == "__main__":
     crear_app()

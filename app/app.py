@@ -70,6 +70,17 @@ def create_app() -> Flask:
 app = create_app()
 
 
+import webbrowser
+from threading import Timer
+
+def open_browser():
+    webbrowser.open_new("http://127.0.0.1:5000")
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)
+    # Si la app está empaquetada, abrimos el navegador automáticamente
+    if getattr(sys, 'frozen', False):
+        Timer(1.5, open_browser).start()
+        app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False)
+    else:
+        app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)
 

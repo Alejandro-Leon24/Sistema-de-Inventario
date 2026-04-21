@@ -55,38 +55,17 @@ function parseExcelText(text) {
 		.map((line) => line.split("\t").map((cell) => String(cell || "").trim()));
 }
 
-function parseDecimalWithComma(value) {
-	const raw = String(value ?? "").trim();
-	if (!raw) return null;
-	
-	// Si tiene ambos, asumimos formato local (1.234,56)
-	if (raw.includes(",") && raw.includes(".")) {
-		const normalized = raw.replace(/\./g, "").replace(",", ".");
-		const number = Number(normalized);
-		return Number.isFinite(number) ? number : null;
-	}
-	
-	// Si solo tiene coma, es el separador decimal
-	if (raw.includes(",")) {
-		const normalized = raw.replace(",", ".");
-		const number = Number(normalized);
-		return Number.isFinite(number) ? number : null;
-	}
-	
-	// Si solo tiene punto (o nada), el Number() de JS ya lo trata como decimal (formato 1234.56)
-	const number = Number(raw);
-	return Number.isFinite(number) ? number : null;
-}
+	const helper = window.appHelpers;
 
-function formatValue(field, value) {
-	if (value === null || value === undefined) return "";
-	if ((field === "valor" || field === "valor_esbye") && value !== "") {
-		const num = typeof value === "number" ? value : parseDecimalWithComma(value);
-		if (num === null) return value;
-		return num.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+	function formatValue(field, value) {
+		if (value === null || value === undefined) return "";
+		if ((field === "valor" || field === "valor_esbye") && value !== "") {
+			const num = typeof value === "number" ? value : helper.parseDecimalWithComma(value);
+			if (num === null) return value;
+			return num.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		}
+		return value;
 	}
-	return value;
-}
 
 function normalizeCodeToPlaceholder(value) {
 	const text = String(value || "").trim();
@@ -1350,10 +1329,10 @@ async function initInventoryPage() {
 				value = Number.isInteger(quantity) && quantity > 0 ? quantity : null;
 			}
 			if (input.dataset.field === "valor") {
-				value = parseDecimalWithComma(value);
+				value = helper.parseDecimalWithComma(value);
 			}
 			if (input.dataset.field === "valor_esbye") {
-				value = parseDecimalWithComma(value);
+				value = helper.parseDecimalWithComma(value);
 			}
 			if (input.dataset.field === "area_id") {
 				value = value === "" ? null : parseInt(value, 10);
