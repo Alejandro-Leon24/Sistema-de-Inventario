@@ -25,7 +25,6 @@ const REQUIRED_VARS_INFORME = {
         "rol_entrega_segunda_delegada",
         "area_trabajo",
     ],
-    movimiento: ["numero_acta"],
     bajas: [
         "numero_acta",
         "nombre_delegado",
@@ -53,12 +52,9 @@ const REQUIRED_VARS_INFORME = {
 };
 
 let previewTimer = null;
-let previewRetryTimer = null;
-let previewNoRenderRetries = 0;
 let previewInFlight = false;
 let previewQueuedWhileBusy = false;
 const PREVIEW_DELAY_MS = 1400;
-const MAX_PREVIEW_NO_RENDER_RETRIES = 3;
 const PREVIEW_DOC_WIDTH_PX = 794;
 const PREVIEW_DOC_PADDING_PX = 32;
 
@@ -78,6 +74,18 @@ function isInternalTemplateVar(value) {
     if (normalized.startsWith("col.")) return true;
     if (normalized.startsWith("fila.")) return true;
     return false;
+}
+
+function normalizeTemplateVarName(value) {
+    let v = String(value || "").trim();
+    if (!v) return "";
+    v = v.replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "");
+    v = v.split("|")[0].trim();
+    v = v.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
+    v = v.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    v = v.toLowerCase().replace(/[\s-]+/g, "_");
+    v = v.replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+    return v;
 }
 
 function getActiveTipoActa() {
@@ -125,7 +133,7 @@ function setPreviewError(message) {
     placeholder.classList.remove("d-none");
     placeholder.innerHTML = `
         <div class="text-danger fw-semibold mb-2">Error de plantilla en vista previa</div>
-        <div class="small text-muted">${String(message || "No se pudo renderizar el documento.")}</div>
+        <div class="small text-muted">${String(message || "No se pudo renderizar el documento.")}</div>        
     `;
 }
 
@@ -151,19 +159,6 @@ function setPreviewTransitionLoading(message) {
     setPreviewUiState("loading");
 }
 
-function updatePreviewIframe(pdfPath) {
-    const iframe = document.getElementById("preview-iframe");
-    const placeholder = document.getElementById("preview-placeholder");
-    if (!iframe || !placeholder || !pdfPath) return;
-
-    const pdfUrl = `/api/ver?path=${encodeURIComponent(String(pdfPath))}&t=${Date.now()}`;
-
-    placeholder.classList.add("d-none");
-    iframe.classList.remove("d-none");
-    iframe.removeAttribute("srcdoc");
-    iframe.src = pdfUrl;
-}
-
 function updatePreviewHtml(htmlContent) {
     const iframe = document.getElementById("preview-iframe");
     const placeholder = document.getElementById("preview-placeholder");
@@ -172,21 +167,21 @@ function updatePreviewHtml(htmlContent) {
     placeholder.classList.add("d-none");
     iframe.classList.remove("d-none");
     iframe.removeAttribute("src");
-        iframe.srcdoc = buildScaledPreviewHtmlDocument(htmlContent);
+    iframe.srcdoc = buildScaledPreviewHtmlDocument(htmlContent);
 }
 
 function normalizePreviewHtmlFragment(htmlContent) {
-        return String(htmlContent || "")
-                .replace(/<!doctype[^>]*>/gi, "")
-                .replace(/<\/?html[^>]*>/gi, "")
-                .replace(/<\/?head[^>]*>/gi, "")
-                .replace(/<\/?body[^>]*>/gi, "")
-                .trim();
+    return String(htmlContent || "")
+        .replace(/<!doctype[^>]*>/gi, "")
+        .replace(/<\/?html[^>]*>/gi, "")
+        .replace(/<\/?head[^>]*>/gi, "")
+        .replace(/<\/?body[^>]*>/gi, "")
+        .trim();
 }
 
 function buildScaledPreviewHtmlDocument(htmlContent) {
-        const fragment = normalizePreviewHtmlFragment(htmlContent);
-        return `<!doctype html>
+    const fragment = normalizePreviewHtmlFragment(htmlContent);
+    return `<!doctype html>
 <html lang="es">
 <head>
     <meta charset="utf-8">
@@ -283,8 +278,6 @@ function buildScaledPreviewHtmlDocument(htmlContent) {
 </html>`;
 }
 
-window.buildInformePreviewDoc = buildScaledPreviewHtmlDocument;
-
 async function cargarCamposDinamicosActa(tipo) {
     const container = document.getElementById(`dinamico-${tipo}-container`);
     if (!container) return;
@@ -336,12 +329,12 @@ function buildPreviewPayload(tipo) {
             datosTabla: Array.isArray(window._globalSelectedTableRows) ? window._globalSelectedTableRows : [],
             datosColumnas: Array.isArray(window._globalSelectedColumns) ? window._globalSelectedColumns : [],
         };
+    
     const tablaSeleccionada = Array.isArray(tablePayload.datosTabla) ? tablePayload.datosTabla : [];
     const columnasSeleccionadas = Array.isArray(tablePayload.datosColumnas) ? tablePayload.datosColumnas : [];
+    
     const hasAnyFormValues = Object.values(datosFormulario).some((v) => String(v || "").trim() !== "");
     const hasTableValues = tablaSeleccionada.length > 0 && columnasSeleccionadas.length > 0;
-    // Evita llamadas pesadas mientras el usuario apenas empieza a escribir.
-    if (!hasAnyFormValues && !hasTableValues) return null;
 
     return {
         tipo,
@@ -382,47 +375,18 @@ async function triggerPreview() {
             body: JSON.stringify(payload),
         });
         const json = await response.json();
-        if (response.ok && json.success && json.pdf_path) {
-            clearTimeout(previewRetryTimer);
-            previewNoRenderRetries = 0;
-            updatePreviewIframe(json.pdf_path);
-            setPreviewUiState("ready");
-        } else if (response.ok && json.success && json.html_preview) {
-            clearTimeout(previewRetryTimer);
-            previewNoRenderRetries = 0;
+        
+        if (response.ok && json.success && json.html_preview) {
             updatePreviewHtml(json.html_preview);
             setPreviewUiState("ready");
-        } else if (response.ok && json.success && !json.pdf_path && !json.html_preview) {
-            clearTimeout(previewRetryTimer);
-            if (previewNoRenderRetries < MAX_PREVIEW_NO_RENDER_RETRIES) {
-                previewNoRenderRetries += 1;
-                setPreviewUiState("loading");
-                setPreviewInfo("Word está procesando la vista previa. Reintentando...");
-                previewRetryTimer = setTimeout(() => {
-                    queuePreview(0);
-                }, 1200);
-            } else {
-                setPreviewUiState("error");
-                const warning = json && json.preview_warning
-                    ? json.preview_warning
-                    : "No se pudo generar la vista previa en PDF en este momento.";
-                const docxHint = json && json.docx_path
-                    ? `<div class=\"mt-2\"><a class=\"btn btn-sm btn-outline-primary\" href=\"/api/descargar?path=${encodeURIComponent(String(json.docx_path))}\">Descargar DOCX generado</a></div>`
-                    : "";
-                setPreviewError(`${warning}${docxHint}`);
-                previewNoRenderRetries = 0;
-            }
         } else {
             setPreviewUiState("error");
-            const msg = json && json.error ? json.error : "No se generó el PDF para vista previa.";
+            const msg = json && json.error ? json.error : "No se pudo generar la vista previa.";
             setPreviewError(msg);
-            console.warn("Error en preview:", msg);
-            previewNoRenderRetries = 0;
         }
     } catch (_err) {
         setPreviewUiState("error");
         setPreviewError("Error de red al generar la vista previa.");
-        previewNoRenderRetries = 0;
     } finally {
         previewInFlight = false;
         if (previewQueuedWhileBusy) {
@@ -461,7 +425,8 @@ function bindPreviewEvents() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-    await cargarCamposDinamicosActa("entrega");
+    const tipo = getActiveTipoActa();
+    await cargarCamposDinamicosActa(tipo);
     bindPreviewEvents();
     queuePreview(1200);
 });

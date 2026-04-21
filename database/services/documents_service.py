@@ -1,7 +1,7 @@
 """Servicio de dominio para historial y numeracion de actas."""
 
 from pathlib import Path
-
+import re
 from database.db import get_db
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -37,23 +37,31 @@ def _to_storage_absolute_path(path_value):
 
 def _normalize_historial_row_paths(row_dict):
     normalized = dict(row_dict or {})
-    for field in ("docx_path", "pdf_path", "plantilla_snapshot_path"):
-        normalized[field] = _to_storage_absolute_path(normalized.get(field))
+    for field in ("docx_path", "plantilla_snapshot_path"):
+        if field in normalized:
+            normalized[field] = _to_storage_absolute_path(normalized.get(field))
     return normalized
 
 
 def _split_numero_acta(numero_acta):
     text = str(numero_acta or "").strip()
-    if "-" not in text:
+    # Soporta formatos como "001-2026", "ACTA-001-2026", "001/2026", etc.
+    # Busca el último bloque numérico como año y el anterior como secuencia.
+    matches = re.findall(r"(\d+)", text)
+    if len(matches) < 2:
         return None, None
-    left, right = text.split("-", 1)
-    if not left.isdigit() or not right.isdigit():
+    try:
+        seq = int(matches[-2])
+        year = int(matches[-1])
+        return seq, year
+    except (ValueError, IndexError):
         return None, None
-    return int(left), int(right)
 
 
 def _normalize_tipo_acta(tipo_acta):
     text = str(tipo_acta or "").strip().lower()
+    if text == "baja":
+        return "bajas"
     return text or "general"
 
 
@@ -74,7 +82,7 @@ def save_historial_acta(
     tipo_acta,
     datos_json,
     docx_path,
-    pdf_path,
+    pdf_path=None,  # Mantener por compatibilidad de firma pero no usar
     numero_acta=None,
     plantilla_hash=None,
     plantilla_snapshot_path=None,
@@ -84,7 +92,6 @@ def save_historial_acta(
     _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     stored_docx_path = _to_storage_relative_path(docx_path)
-    stored_pdf_path = _to_storage_relative_path(pdf_path)
     stored_snapshot_path = _to_storage_relative_path(plantilla_snapshot_path)
     cursor = db.execute(
         """
@@ -93,17 +100,15 @@ def save_historial_acta(
             numero_acta,
             datos_json,
             docx_path,
-            pdf_path,
             plantilla_hash,
             plantilla_snapshot_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
             tipo_acta,
             numero_acta,
             datos_json,
             stored_docx_path,
-            stored_pdf_path,
             plantilla_hash,
             stored_snapshot_path,
         ),
@@ -117,7 +122,7 @@ def update_historial_acta(
     tipo_acta,
     datos_json,
     docx_path,
-    pdf_path,
+    pdf_path=None,  # Mantener por compatibilidad de firma pero no usar
     numero_acta=None,
     plantilla_hash=None,
     plantilla_snapshot_path=None,
@@ -127,7 +132,6 @@ def update_historial_acta(
     _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     stored_docx_path = _to_storage_relative_path(docx_path)
-    stored_pdf_path = _to_storage_relative_path(pdf_path)
     stored_snapshot_path = _to_storage_relative_path(plantilla_snapshot_path)
     cursor = db.execute(
         """
@@ -138,7 +142,6 @@ def update_historial_acta(
             fecha = CURRENT_TIMESTAMP,
             datos_json = ?,
             docx_path = ?,
-            pdf_path = ?,
             plantilla_hash = ?,
             plantilla_snapshot_path = ?
         WHERE id = ?
@@ -148,7 +151,6 @@ def update_historial_acta(
             numero_acta,
             datos_json,
             stored_docx_path,
-            stored_pdf_path,
             plantilla_hash,
             stored_snapshot_path,
             int(acta_id),
@@ -164,29 +166,33 @@ def get_max_numero_acta_for_year(year, tipo_acta=None):
     _ensure_historial_actas_numero_unique_by_type_runtime()
     db = get_db()
     target_year = int(year)
+    
     where_tipo = ""
-    params = (target_year,)
+    params = []
     if tipo_acta is not None:
         where_tipo = " AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?)"
-        params = (target_year, _normalize_tipo_acta(tipo_acta))
+        params.append(_normalize_tipo_acta(tipo_acta))
 
-    row = db.execute(
+    # Obtenemos todos los números del año para procesarlos en Python (más robusto que SQL puro para formatos variables)
+    rows = db.execute(
         f"""
-        SELECT COALESCE(
-            MAX(CAST(substr(numero_acta, 1, instr(numero_acta, '-') - 1) AS INTEGER)),
-            0
-        ) AS max_value
+        SELECT numero_acta
         FROM historial_actas
         WHERE numero_acta IS NOT NULL
           AND TRIM(numero_acta) != ''
-          AND instr(numero_acta, '-') > 1
-          AND CAST(substr(numero_acta, instr(numero_acta, '-') + 1) AS INTEGER) = ?
-          AND substr(numero_acta, 1, instr(numero_acta, '-') - 1) GLOB '[0-9]*'
           {where_tipo}
         """,
         params,
-    ).fetchone()
-    return int(row["max_value"] if row else 0)
+    ).fetchall()
+    
+    max_val = 0
+    for row in rows:
+        seq, y = _split_numero_acta(row["numero_acta"])
+        if y == target_year and seq is not None:
+            if seq > max_val:
+                max_val = seq
+                
+    return max_val
 
 
 def get_next_numero_acta(year, tipo_acta=None):
@@ -210,7 +216,7 @@ def get_next_numero_acta(year, tipo_acta=None):
     return f"{next_value:03d}-{target_year}"
 
 
-def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None):
+def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None, editing_acta_id=None):
     from database.controller import (
         _ensure_actas_sequence_by_type_table_runtime,
         _ensure_historial_actas_numero_unique_by_type_runtime,
@@ -249,11 +255,26 @@ def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None):
             seq, year_in_num = _split_numero_acta(preferred_numero_acta)
             if seq is None or year_in_num != target_year:
                 raise ValueError("Numero de acta invalido para reservar.")
-            existing = db.execute(
-                "SELECT 1 FROM historial_actas WHERE numero_acta = ? AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?) LIMIT 1",
-                (f"{seq:03d}-{target_year}", tipo_key),
-            ).fetchone()
+            
+            # Verificar si el numero ya existe en otra acta del mismo tipo
+            sql_exists = "SELECT id FROM historial_actas WHERE numero_acta = ? AND LOWER(tipo_acta) = LOWER(?) "
+            params_exists = [preferred_numero_acta, tipo_key]
+            
+            # Si estamos editando, ignoramos el acta actual
+            if editing_acta_id:
+                try:
+                    eid = int(editing_acta_id)
+                    sql_exists += " AND id != ? "
+                    params_exists.append(eid)
+                    from database.controller import logger as db_logger
+                    db_logger.info(f"Checking existing acta for number={preferred_numero_acta}, type={tipo_key}, excluding id={eid}")
+                except (ValueError, TypeError):
+                    pass
+            
+            existing = db.execute(sql_exists + " LIMIT 1", params_exists).fetchone()
             if existing:
+                from database.controller import logger as db_logger
+                db_logger.warning(f"Duplicate acta found for number={preferred_numero_acta}, type={tipo_key}. Existing ID: {existing['id']}")
                 raise ValueError("El numero de acta ya existe.")
             reserved = seq
         else:
@@ -265,7 +286,7 @@ def reserve_numero_acta(year, preferred_numero_acta=None, tipo_acta=None):
             (nuevo_ultimo, tipo_key, target_year),
         )
         db.commit()
-        return f"{reserved:03d}-{target_year}"
+        return f"{reserved:03d}-{target_year}" if not preferred_numero_acta else preferred_numero_acta
     except Exception:
         db.rollback()
         raise
@@ -284,7 +305,7 @@ def numero_acta_exists(numero_acta, tipo_acta=None):
         ).fetchone()
     else:
         row = db.execute(
-            "SELECT 1 FROM historial_actas WHERE numero_acta = ? AND LOWER(COALESCE(tipo_acta, '')) = LOWER(?) LIMIT 1",
+            "SELECT 1 FROM historial_actas WHERE numero_acta = ? AND LOWER(tipo_acta) = LOWER(?) LIMIT 1",
             (numero, _normalize_tipo_acta(tipo_acta)),
         ).fetchone()
     return bool(row)
@@ -292,18 +313,9 @@ def numero_acta_exists(numero_acta, tipo_acta=None):
 
 def get_historial_actas(tipo_acta=None):
     db = get_db()
-    order_sql = """
-        ORDER BY
-            CASE
-                WHEN numero_acta IS NOT NULL AND instr(numero_acta, '-') > 0 THEN CAST(substr(numero_acta, instr(numero_acta, '-') + 1) AS INTEGER)
-                ELSE 0
-            END DESC,
-            CASE
-                WHEN numero_acta IS NOT NULL AND instr(numero_acta, '-') > 0 THEN CAST(substr(numero_acta, 1, instr(numero_acta, '-') - 1) AS INTEGER)
-                ELSE 0
-            END DESC,
-            id DESC
-    """
+    # Ordenar por fecha es lo más seguro si el formato de número varía
+    order_sql = "ORDER BY fecha DESC, id DESC"
+    
     if tipo_acta:
         rows = db.execute(
             f"SELECT * FROM historial_actas WHERE tipo_acta = ? {order_sql}",

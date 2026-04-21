@@ -1,37 +1,46 @@
-import sys
-print('SYS.EXECUTABLE:', sys.executable)
-print('SYS.PATH:', sys.path)
+import os
 import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Manejo de rutas para entorno empaquetado (PyInstaller)
+if getattr(sys, 'frozen', False):
+    # Si la app está empaquetada, BASE_DIR es donde está el .exe
+    # sys._MEIPASS es la carpeta temporal de PyInstaller
+    BASE_DIR = Path(sys.executable).parent
+    BUNDLE_DIR = Path(sys._MEIPASS)
+else:
+    # Si corre como script normal
+    BASE_DIR = Path(__file__).resolve().parent.parent
+    BUNDLE_DIR = BASE_DIR
+
 if str(BASE_DIR) in sys.path:
     sys.path.remove(str(BASE_DIR))
 sys.path.insert(0, str(BASE_DIR))
 
 from flask import Flask, render_template
 
-try:
-    from app.blueprints import register_blueprints
-except ModuleNotFoundError:
-    from blueprints import register_blueprints
-
-from database.schema_manager import init_schema
-from database.db import init_app
-
-
-def _resolve_database_path(base_dir: Path) -> Path:
-    return base_dir / "inventario.db"
-
-
 def create_app() -> Flask:
-    app = Flask(__name__)
-    app.config["DATABASE"] = _resolve_database_path(BASE_DIR)
+    # Configuramos Flask para buscar templates y static en BUNDLE_DIR (interno al exe)
+    app = Flask(__name__, 
+                template_folder=str(BUNDLE_DIR / "app" / "templates"),
+                static_folder=str(BUNDLE_DIR / "app" / "static"))
+    
+    # La base de datos debe estar en BASE_DIR para que sea persistente (fuera del exe)
+    app.config["DATABASE"] = BASE_DIR / "inventario.db"
+    
+    from database.db import init_app
     init_app(app)
 
     with app.app_context():
-        init_schema(BASE_DIR)
+        from database.schema_manager import init_schema
+        # Usamos BUNDLE_DIR para leer schema.sql pero BASE_DIR para la DB
+        init_schema(BUNDLE_DIR)
 
+    try:
+        from app.blueprints import register_blueprints
+    except ModuleNotFoundError:
+        from blueprints import register_blueprints
+    
     register_blueprints(app)
 
     # Keep legacy endpoint names used by templates after blueprint split.

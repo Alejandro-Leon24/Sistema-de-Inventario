@@ -58,15 +58,32 @@ function parseExcelText(text) {
 function parseDecimalWithComma(value) {
 	const raw = String(value ?? "").trim();
 	if (!raw) return null;
-	const normalized = raw.replace(/\./g, "").replace(",", ".");
-	const number = Number(normalized);
+	
+	// Si tiene ambos, asumimos formato local (1.234,56)
+	if (raw.includes(",") && raw.includes(".")) {
+		const normalized = raw.replace(/\./g, "").replace(",", ".");
+		const number = Number(normalized);
+		return Number.isFinite(number) ? number : null;
+	}
+	
+	// Si solo tiene coma, es el separador decimal
+	if (raw.includes(",")) {
+		const normalized = raw.replace(",", ".");
+		const number = Number(normalized);
+		return Number.isFinite(number) ? number : null;
+	}
+	
+	// Si solo tiene punto (o nada), el Number() de JS ya lo trata como decimal (formato 1234.56)
+	const number = Number(raw);
 	return Number.isFinite(number) ? number : null;
 }
 
 function formatValue(field, value) {
 	if (value === null || value === undefined) return "";
 	if ((field === "valor" || field === "valor_esbye") && value !== "") {
-		return Number(value).toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		const num = typeof value === "number" ? value : parseDecimalWithComma(value);
+		if (num === null) return value;
+		return num.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 	}
 	return value;
 }
@@ -1244,8 +1261,8 @@ async function initInventoryPage() {
 			}
 		}
 		if (options.forceDuplicate) payload.force_duplicate = true;
-		await api.send(`/api/inventario/${id}`, "PATCH", payload);
-		return payload;
+		const response = await api.send(`/api/inventario/${id}`, "PATCH", payload);
+		return response.data || payload;
 	}
 
 	async function removeItem(itemId) {

@@ -67,6 +67,34 @@ CREATE INDEX IF NOT EXISTS idx_inventario_cod_esbye ON inventario_items(cod_esby
 CREATE INDEX IF NOT EXISTS idx_inventario_area_id ON inventario_items(area_id);
 CREATE INDEX IF NOT EXISTS idx_inventario_item_numero_id ON inventario_items(item_numero, id);
 
+CREATE TABLE IF NOT EXISTS inventario_traspasos (
+    id INTEGER PRIMARY KEY, -- Mismo ID que tenía en inventario_items
+    item_numero INTEGER NOT NULL,
+    cod_inventario TEXT,
+    cod_esbye TEXT,
+    cuenta TEXT,
+    cantidad INTEGER NOT NULL DEFAULT 1,
+    descripcion TEXT,
+    ubicacion TEXT,
+    marca TEXT,
+    modelo TEXT,
+    serie TEXT,
+    estado TEXT,
+    condicion TEXT,
+    usuario_final TEXT,
+    fecha_adquisicion TEXT,
+    valor REAL,
+    observacion TEXT,
+    justificacion TEXT,
+    procedencia TEXT,
+    area_id INTEGER,
+    facultad_destino TEXT,
+    acta_traspaso_id INTEGER,
+    fecha_traspaso TEXT DEFAULT CURRENT_TIMESTAMP,
+    datos_originales_json TEXT, -- Para restaurar si es necesario
+    FOREIGN KEY (area_id) REFERENCES areas (id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS column_mappings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     columna_origen TEXT NOT NULL,
@@ -204,7 +232,6 @@ CREATE TABLE IF NOT EXISTS historial_actas (
     fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     datos_json TEXT,
     docx_path TEXT,
-    pdf_path TEXT,
     plantilla_hash TEXT,
     plantilla_snapshot_path TEXT
 );

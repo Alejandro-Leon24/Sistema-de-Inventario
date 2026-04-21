@@ -372,14 +372,29 @@ const ACTA_TEMPLATE_REQUIRED_VARS = {
         "descripcion_de_bienes",
         "tabla_dinamica",
     ],
+    "fin-gestion": ["numero_acta"],
     aula: ["tabla_dinamica"],
 };
 
 const ACTA_TEMPLATE_REQUIRED_ALIASES = {
     entrega: {
-        rol_recibe: ["usuario_final", "recibe_custodio"],
-        area_trabajo: ["ubicacion", "ubicacion_entrega"],
+        rol_recibe: ["usuario_final", "recibe_custodio", "rol_recibido"],
+        area_trabajo: ["ubicacion", "ubicacion_entrega", "area"],
+        fecha_corte: ["fecha_emision", "fecha"],
     },
+    recepcion: {
+        fecha_elaboracion: ["fecha_emision", "fecha", "fecha_elaboracion", "fecha_elaboracion_acta"],
+        area_trabajo: ["ubicacion", "ubicacion_recepcion", "area"],
+        memorandum: ["memorando", "numero_memorandum", "nro_memorandum"],
+    },
+    bajas: {
+        nombre_delegado: ["delegado", "recibido_por", "recibe_delegado"],
+        fecha_emision: ["fecha", "fecha_acta"],
+    },
+    traspaso: {
+        facultad_destino: ["facultad_recibe", "destino"],
+        fecha_emision: ["fecha", "fecha_acta"],
+    }
 };
 
 function normalizeImportDateLikeInventario(value) {
@@ -710,34 +725,35 @@ function resolveActaGuardDestination() {
     }
 }
 
-function showActaGuardModal(issues) {
-    const modalEl = document.getElementById("modalBloqueoActasPlantilla");
-    const detailEl = document.getElementById("bloqueo-actas-detalle");
-    const okBtn = document.getElementById("btn-bloqueo-actas-ok");
-    if (!modalEl || !detailEl || !okBtn) {
-        window.location.href = resolveActaGuardDestination();
-        return;
-    }
-
-    detailEl.innerHTML = "";
-    const list = document.createElement("ul");
-    list.className = "mb-0 ps-3";
-    issues.forEach((issue) => {
-        const li = document.createElement("li");
-        li.innerHTML = `<strong>${issue.tipoLabel}:</strong> ${issue.reason}`;
-        list.appendChild(li);
-    });
-    detailEl.appendChild(list);
-
-    if (okBtn.dataset.bound !== "1") {
-        okBtn.dataset.bound = "1";
-        okBtn.addEventListener("click", () => {
-            window.location.href = resolveActaGuardDestination();
+function showActaGuardWarning(issues) {
+    // Ya no bloqueamos con modal. Mostramos un aviso en la consola y preparamos indicadores visuales.
+    console.warn("Problemas con plantillas detectados:", issues);
+    
+    // Marcamos los botones de la barra lateral que tienen problemas
+    issues.forEach(issue => {
+        const tipo = Object.keys(ACTA_TEMPLATE_REQUIRED_VARS).find(t => {
+            const labels = {
+                entrega: "Acta de Entrega",
+                recepcion: "Acta de Recepción",
+                bajas: "Acta de Bienes de Baja",
+                aula: "Inventario por Área"
+            };
+            return labels[t] === issue.tipoLabel || t === issue.tipoLabel;
         });
-    }
 
-    const modal = new bootstrap.Modal(modalEl, { backdrop: "static", keyboard: false });
-    modal.show();
+        if (tipo) {
+            const btn = document.getElementById(`tab-${tipo}`);
+            if (btn) {
+                // Agregar un pequeño indicador visual si no existe
+                if (!btn.querySelector(".template-warning-icon")) {
+                    const icon = document.createElement("i");
+                    icon.className = "bi bi-exclamation-triangle-fill text-warning ms-auto template-warning-icon";
+                    icon.title = issue.reason;
+                    btn.querySelector(".row").appendChild(icon);
+                }
+            }
+        }
+    });
 }
 
 async function checkActaTemplatesAccessGuard() {
@@ -774,9 +790,11 @@ async function checkActaTemplatesAccessGuard() {
         }
     }
 
-    if (!issues.length) return true;
-    showActaGuardModal(issues);
-    return false;
+    if (issues.length) {
+        showActaGuardWarning(issues);
+    }
+    // Siempre permitimos el acceso, el bloqueo real será al intentar generar
+    return true;
 }
 
 function _updateUbicacionFromSelects(prefix) {
@@ -1359,7 +1377,9 @@ function isRecepcionAreaTrabajoValida(_value) {
 }
 
 function normalizeTipoActa(value) {
-    return String(value || "").trim().toLowerCase();
+    const text = String(value || "").trim().toLowerCase();
+    if (text === "baja") return "bajas";
+    return text;
 }
 
 function syncModalBackdropState() {
@@ -3453,53 +3473,72 @@ function setupBajasBienesModal() {
         const filtroBloque = document.getElementById("bajas-filtro-bloque");
         const filtroPiso = document.getElementById("bajas-filtro-piso");
         const filtroArea = document.getElementById("bajas-filtro-area");
+        
         if (filtroBloque && filtroPiso && filtroArea && Array.isArray(structureData)) {
             // Llenar bloques
             filtroBloque.innerHTML = '<option value="">Bloque</option>';
-            const bloques = [...new Set(structureData.map(a => a.bloque).filter(Boolean))];
-            bloques.forEach(b => {
+            structureData.forEach(b => {
                 const opt = document.createElement("option");
-                opt.value = b;
-                opt.textContent = b;
+                opt.value = b.nombre; // Usamos nombre para el filtro de texto
+                opt.textContent = b.nombre;
+                opt.dataset.id = b.id;
                 filtroBloque.appendChild(opt);
             });
-            // Llenar pisos y áreas según bloque seleccionado
+
             const updatePisosYAreas = () => {
-                const bloqueSel = filtroBloque.value;
+                const bId = filtroBloque.options[filtroBloque.selectedIndex]?.dataset.id;
+                const bloque = structureData.find(b => String(b.id) === String(bId));
+                
                 filtroPiso.innerHTML = '<option value="">Piso</option>';
                 filtroArea.innerHTML = '<option value="">Área</option>';
-                if (!bloqueSel) return;
-                const pisos = [...new Set(structureData.filter(a => a.bloque === bloqueSel).map(a => a.piso).filter(Boolean))];
-                pisos.forEach(p => {
+                
+                if (!bloque) {
+                    filtroPiso.disabled = true;
+                    filtroArea.disabled = true;
+                    return;
+                }
+
+                (bloque.pisos || []).forEach(p => {
                     const opt = document.createElement("option");
-                    opt.value = p;
-                    opt.textContent = p;
+                    opt.value = p.nombre;
+                    opt.textContent = p.nombre;
+                    opt.dataset.id = p.id;
                     filtroPiso.appendChild(opt);
                 });
-                filtroPiso.disabled = !pisos.length;
+                filtroPiso.disabled = false;
                 filtroArea.disabled = true;
             };
+
+            const updateAreas = () => {
+                const bId = filtroBloque.options[filtroBloque.selectedIndex]?.dataset.id;
+                const pId = filtroPiso.options[filtroPiso.selectedIndex]?.dataset.id;
+                const bloque = structureData.find(b => String(b.id) === String(bId));
+                const piso = (bloque?.pisos || []).find(p => String(p.id) === String(pId));
+                
+                filtroArea.innerHTML = '<option value="">Área</option>';
+                if (!piso) {
+                    filtroArea.disabled = true;
+                    return;
+                }
+
+                (piso.areas || []).forEach(a => {
+                    const opt = document.createElement("option");
+                    opt.value = a.nombre;
+                    opt.textContent = a.nombre;
+                    filtroArea.appendChild(opt);
+                });
+                filtroArea.disabled = false;
+            };
+
             filtroBloque.addEventListener("change", () => {
                 updatePisosYAreas();
                 applyBajasSelectionFilter();
             });
             filtroPiso.addEventListener("change", () => {
-                const bloqueSel = filtroBloque.value;
-                const pisoSel = filtroPiso.value;
-                filtroArea.innerHTML = '<option value="">Área</option>';
-                if (!bloqueSel || !pisoSel) return;
-                const areas = [...new Set(structureData.filter(a => a.bloque === bloqueSel && a.piso === pisoSel).map(a => a.area).filter(Boolean))];
-                areas.forEach(a => {
-                    const opt = document.createElement("option");
-                    opt.value = a;
-                    opt.textContent = a;
-                    filtroArea.appendChild(opt);
-                });
-                filtroArea.disabled = !areas.length;
+                updateAreas();
                 applyBajasSelectionFilter();
             });
             filtroArea.addEventListener("change", applyBajasSelectionFilter);
-            updatePisosYAreas();
         }
 
         // Paginación
@@ -4260,7 +4299,7 @@ async function loadExtraccionData(actaId = null) {
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-primary"><div class="spinner-border spinner-border-sm" role="status"></div> Cargando inventario...</td></tr>';
     }
     try {
-        let url = "/api/inventario?per_page=500";
+        let url = "/api/inventario?per_page=100000";
         if (actaId) url += `&include_traspaso_acta_id=${actaId}`;
         
         const response = await api.get(url);
@@ -4494,6 +4533,32 @@ document.addEventListener("DOMContentLoaded", async () => {
         document.body.removeChild(a);
     };
 
+    const validateActaForm = (tipo, datos) => {
+        const requiredFields = {
+            entrega: ["numero_acta", "fecha_emision", "entregado_por", "rol_entrega", "recibido_por", "rol_recibe", "area_trabajo"],
+            recepcion: ["numero_acta", "fecha_elaboracion", "entregado_por", "rol_entrega", "recibido_por", "rol_recibe", "area_trabajo"],
+            bajas: ["numero_acta", "fecha_emision", "nombre_delegado", "entregado_por", "recibido_por"],
+            traspaso: ["numero_acta", "fecha_emision", "entregado_por", "rol_entrega", "recibido_por", "rol_recibe", "facultad_recibe"]
+        };
+        
+        const tipoNorm = normalizeTipoActa(tipo);
+        const fields = requiredFields[tipoNorm] || [];
+        const missing = [];
+        
+        fields.forEach(f => {
+            if (!datos[f] || String(datos[f]).trim() === "") {
+                const label = f.replace(/_/g, " ");
+                missing.push(label);
+            }
+        });
+        
+        if (missing.length > 0) {
+            notify(`Debe completar los campos obligatorios: ${missing.join(", ")}`, true);
+            return false;
+        }
+        return true;
+    };
+
     const generarYDescargarActa = async (originEl = null) => {
         if (isGeneratingActa) {
             notify("Ya se está generando un acta. Espere un momento...", true);
@@ -4532,6 +4597,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         datosFormulario.bloque_id = bloqueId;
         datosFormulario.piso_id = pisoId;
         datosFormulario.area_id = areaId;
+
+        if (!validateActaForm(tipo, datosFormulario)) {
+            isGeneratingActa = false;
+            document.querySelectorAll(".btn-descargar-acta").forEach((btn) => {
+                btn.disabled = false;
+            });
+            return;
+        }
 
         if (tipo === "entrega" && !isEntregaAreaTrabajoValida(datosFormulario.area_trabajo)) {
             notify("Debe seleccionar Bloque, Piso y Área para el Acta de Entrega.", true);

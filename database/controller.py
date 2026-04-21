@@ -2,11 +2,14 @@ import sqlite3
 import json
 import re
 import unicodedata
+import logging
 from difflib import SequenceMatcher
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
 from database.db import get_db, execute_schema
+
+logger = logging.getLogger(__name__)
 
 AREA_EXPORT_COLUMN_ORDER = [
     "identificacion_ambiente",
@@ -1555,18 +1558,34 @@ def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, p
     safe_per_page = max(int(per_page or 50), 1)
     db = get_db()
 
-    traspaso_where = ""
-    traspaso_params = []
     if include_traspaso_acta_id:
-        traspaso_where = "WHERE acta_traspaso_id = ?"
-        traspaso_params = [include_traspaso_acta_id]
+        count_query = f"""
+            SELECT (
+                SELECT COUNT(1) 
+                FROM inventario_items i 
+                LEFT JOIN areas a ON a.id = i.area_id
+                LEFT JOIN pisos p ON p.id = a.piso_id
+                LEFT JOIN bloques b ON b.id = p.bloque_id
+                {where_sql}
+            ) + (
+                SELECT COUNT(1) 
+                FROM inventario_traspasos 
+                WHERE acta_traspaso_id = ?
+            ) AS total
+        """
+        query_params_count = [*params, include_traspaso_acta_id]
+    else:
+        count_query = f"""
+            SELECT COUNT(1) AS total 
+            FROM inventario_items i 
+            LEFT JOIN areas a ON a.id = i.area_id
+            LEFT JOIN pisos p ON p.id = a.piso_id
+            LEFT JOIN bloques b ON b.id = p.bloque_id
+            {where_sql}
+        """
+        query_params_count = params
 
-    count_query = f"""
-        SELECT 
-            (SELECT COUNT(1) FROM inventario_items i {where_sql}) +
-            (SELECT COUNT(1) FROM inventario_traspasos {traspaso_where}) AS total
-    """
-    total_row = db.execute(count_query, [*params, *traspaso_params]).fetchone()
+    total_row = db.execute(count_query, query_params_count).fetchone()
     total = total_row["total"] if total_row else 0
     total_pages = (total + safe_per_page - 1) // safe_per_page if total else 0
     safe_page = min(max(int(page or 1), 1), max(total_pages, 1))
@@ -1577,7 +1596,13 @@ def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, p
         main_query = f"""
             SELECT * FROM (
                 SELECT
-                    i.*, a.nombre AS area_nombre, a.piso_id, p.nombre AS piso_nombre, 
+                    i.id, i.item_numero, i.cod_inventario, i.cod_esbye, i.cuenta, i.cantidad, i.descripcion,
+                    i.ubicacion, i.marca, i.modelo, i.serie, i.estado, i.condicion, i.usuario_final,
+                    i.fecha_adquisicion, i.valor, i.observacion, i.justificacion, i.procedencia,
+                    i.descripcion_esbye, i.marca_esbye, i.modelo_esbye, i.serie_esbye,
+                    i.valor_esbye, i.ubicacion_esbye, i.observacion_esbye, i.fecha_adquisicion_esbye,
+                    i.area_id, i.actualizado_en,
+                    a.nombre AS area_nombre, a.piso_id, p.nombre AS piso_nombre, 
                     p.bloque_id, b.nombre AS bloque_nombre, 0 AS esta_fuera, 1 AS prioridad
                 FROM inventario_items i
                 LEFT JOIN areas a ON a.id = i.area_id
@@ -1591,8 +1616,8 @@ def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, p
                     t.id, t.item_numero, t.cod_inventario, t.cod_esbye, t.cuenta, t.cantidad, t.descripcion,
                     t.ubicacion, t.marca, t.modelo, t.serie, t.estado, t.condicion, t.usuario_final,
                     t.fecha_adquisicion, t.valor, t.observacion, t.justificacion, t.procedencia,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, -- Placeholders para campos esbye faltantes en t
                     t.area_id, t.fecha_traspaso AS actualizado_en,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, -- Placeholders para campos esbye faltantes en t
                     a.nombre AS area_nombre, a.piso_id, p.nombre AS piso_nombre, 
                     p.bloque_id, b.nombre AS bloque_nombre, 1 AS esta_fuera, 0 AS prioridad
                 FROM inventario_traspasos t
@@ -1626,7 +1651,7 @@ def list_inventory_items_paginated(filters=None, sort_direction="asc", page=1, p
     for row in rows:
         try:
             item = _row_to_inventory_item(row)
-            item["esta_fuera"] = bool(row.get("esta_fuera", 0))
+            item["esta_fuera"] = bool(row["esta_fuera"])
             items.append(item)
         except Exception as e:
             logger.error(f"Error procesando fila de inventario: {e}")
@@ -1771,6 +1796,26 @@ def _canonicalize_estado_value(value, estado_options=None):
     return _resolve_catalog_name(raw, options)
 
 
+def _parse_money_value(value):
+    if value in (None, ""):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip().replace(" ", "")
+        if not text:
+            return None
+        # Si tiene coma y punto (formato 1.234,56), quitamos el punto y cambiamos coma por punto
+        if "," in text and "." in text:
+            text = text.replace(".", "").replace(",", ".")
+        # Si solo tiene coma (formato 148,15), cambiamos coma por punto
+        elif "," in text:
+            text = text.replace(",", ".")
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
 def create_inventory_item(payload, commit=True):
     db = get_db()
     fields = {k: payload.get(k) for k in ALLOWED_INVENTORY_FIELDS if k in payload}
@@ -1783,8 +1828,8 @@ def create_inventory_item(payload, commit=True):
             create_if_missing=True,
         )
     fields["cantidad"] = int(fields.get("cantidad") or 1)
-    fields["valor"] = float(fields.get("valor")) if fields.get("valor") not in (None, "") else None
-    fields["valor_esbye"] = float(fields.get("valor_esbye")) if fields.get("valor_esbye") not in (None, "") else None
+    fields["valor"] = _parse_money_value(fields.get("valor"))
+    fields["valor_esbye"] = _parse_money_value(fields.get("valor_esbye"))
 
     if fields.get("item_numero") in (None, ""):
         if commit:
@@ -1829,9 +1874,9 @@ def update_inventory_item(item_id, payload):
         if field == "cantidad":
             value = int(value or 1)
         if field == "valor":
-            value = float(value) if value not in (None, "") else None
+            value = _parse_money_value(value)
         if field == "valor_esbye":
-            value = float(value) if value not in (None, "") else None
+            value = _parse_money_value(value)
         updates.append(f"{field} = ?")
         values.append(value)
         _audit_change(item_id, "update", field, current[field], value)

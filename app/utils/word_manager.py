@@ -18,37 +18,13 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-# docx2pdf works perfectly on windows if MS Word is installed. 
-# We wrap it in a try-except to log an error gracefully if MS Word is missing.
-try:
-    from docx2pdf import convert
-except ImportError:
-    convert = None
 
 try:
     import mammoth
 except ImportError:
     mammoth = None
 
-try:
-    import pythoncom
-except ImportError:
-    pythoncom = None
-
-try:
-    import win32com.client
-except ImportError:
-    win32com = None
-
-try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfgen import canvas
-except ImportError:
-    A4 = None
-    canvas = None
-
 logger = logging.getLogger(__name__)
-PDF_CONVERT_LOCK = threading.Lock()
 
 _JINJA_TAG_NORMALIZE_PATTERNS = [
     (re.compile(r"\{\%\s*end\s+for\s*\%\}", re.IGNORECASE), "{% endfor %}"),
@@ -57,242 +33,10 @@ _JINJA_TAG_NORMALIZE_PATTERNS = [
 ]
 
 
-def _find_libreoffice_binary():
-    for candidate in ("libreoffice", "soffice", "soffice.exe"):
-        path = shutil.which(candidate)
-        if path:
-            return path
-    return None
-
-
-def _convert_docx_to_pdf_with_libreoffice(docx_path, pdf_path):
-    binary = _find_libreoffice_binary()
-    if not binary:
-        return False, "LibreOffice no está instalado o no está en PATH."
-
-    out_dir = os.path.dirname(pdf_path)
-    basename = os.path.splitext(os.path.basename(docx_path))[0]
-    generated_pdf = os.path.join(out_dir, f"{basename}.pdf")
-
-    cmd = [
-        binary,
-        "--headless",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        out_dir,
-        docx_path,
-    ]
-
-    try:
-        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
-    except Exception as exc:
-        return False, f"Falló la ejecución de LibreOffice: {exc}"
-
-    if completed.returncode != 0:
-        stderr = (completed.stderr or "").strip()
-        stdout = (completed.stdout or "").strip()
-        detail = stderr or stdout or f"Código de salida {completed.returncode}"
-        return False, f"LibreOffice no pudo convertir el DOCX a PDF. {detail}"
-
-    if not os.path.exists(generated_pdf):
-        return False, "LibreOffice finalizó, pero no se encontró el PDF generado."
-
-    try:
-        if os.path.abspath(generated_pdf) != os.path.abspath(pdf_path):
-            os.replace(generated_pdf, pdf_path)
-    except Exception as exc:
-        return False, f"No se pudo mover el PDF convertido a su destino final: {exc}"
-
-    return True, None
-
-
-def _run_word_docx2pdf_convert(input_docx, output_pdf, converter):
-    with PDF_CONVERT_LOCK:
-        co_initialized = False
-        try:
-            if pythoncom:
-                pythoncom.CoInitialize()
-                co_initialized = True
-            converter(input_docx, output_pdf)
-        finally:
-            if co_initialized and pythoncom:
-                try:
-                    pythoncom.CoUninitialize()
-                except Exception:
-                    pass
-
-
-def _convert_docx_to_pdf_with_word_com(docx_path, pdf_path):
-    if not pythoncom or not win32com:
-        return False, "pywin32 no disponible para conversión directa con Word COM."
-
-    abs_docx = os.path.abspath(docx_path)
-    abs_pdf = os.path.abspath(pdf_path)
-    word = None
-    doc = None
-
-    # 17 = wdExportFormatPDF
-    wd_export_format_pdf = 17
-
-    with PDF_CONVERT_LOCK:
-        co_initialized = False
-        try:
-            pythoncom.CoInitialize()
-            co_initialized = True
-
-            word = win32com.client.DispatchEx("Word.Application")
-            word.Visible = False
-            word.DisplayAlerts = 0
-
-            # Open with ReadOnly avoids many SaveAs/Open lock conflicts.
-            doc = word.Documents.Open(abs_docx, ReadOnly=True)
-            doc.ExportAsFixedFormat(abs_pdf, wd_export_format_pdf)
-
-            if not os.path.exists(abs_pdf):
-                return False, "Word COM finalizó sin generar PDF."
-            return True, None
-        except Exception as exc:
-            return False, str(exc)
-        finally:
-            try:
-                if doc is not None:
-                    doc.Close(False)
-            except Exception:
-                pass
-            try:
-                if word is not None:
-                    word.Quit()
-            except Exception:
-                pass
-            if co_initialized:
-                try:
-                    pythoncom.CoUninitialize()
-                except Exception:
-                    pass
-
-
-def _convert_docx_to_pdf_with_word(docx_path, pdf_path, converter):
-    if not converter:
-        return False, "docx2pdf no está disponible."
-
-    abs_docx = os.path.abspath(docx_path)
-    abs_pdf = os.path.abspath(pdf_path)
-    last_error = None
-
-    # Intento 1: conversión directa en ruta final.
-    try:
-        _run_word_docx2pdf_convert(abs_docx, abs_pdf, converter)
-        if os.path.exists(abs_pdf):
-            return True, None
-        last_error = "Word finalizó sin generar el archivo PDF esperado."
-    except Exception as exc:
-        last_error = str(exc)
-
-    # Intento 2: conversión en carpeta temporal local para evitar bloqueos de OneDrive/ruta.
-    tmp_dir = None
-    try:
-        tmp_dir = tempfile.mkdtemp(prefix="docx2pdf_tmp_")
-        tmp_docx = os.path.join(tmp_dir, "input.docx")
-        tmp_pdf = os.path.join(tmp_dir, "output.pdf")
-        shutil.copy2(abs_docx, tmp_docx)
-
-        _run_word_docx2pdf_convert(tmp_docx, tmp_pdf, converter)
-        if not os.path.exists(tmp_pdf):
-            return False, (
-                f"{last_error or 'Word/docx2pdf falló en conversión directa.'} "
-                "Reintento temporal: Word no generó el PDF."
-            )
-
-        os.makedirs(os.path.dirname(abs_pdf), exist_ok=True)
-        shutil.copy2(tmp_pdf, abs_pdf)
-        return True, None
-    except Exception as exc:
-        detail = str(exc)
-        if last_error:
-            return False, f"{last_error} | Reintento temporal: {detail}"
-        return False, detail
-    finally:
-        if tmp_dir:
-            # Word puede liberar handles unos ms después; no fallar por limpieza.
-            for _ in range(3):
-                try:
-                    shutil.rmtree(tmp_dir, ignore_errors=False)
-                    break
-                except Exception:
-                    time.sleep(0.25)
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-
 def get_preview_unavailable_reason():
     if mammoth is None:
         return "No se pudo mostrar la vista previa. Instala mammoth con: pip install mammoth"
     return None
-
-
-def generate_area_summary_pdf_fallback(pdf_path, titulo_acta, table_rows):
-    """
-    Fallback puro Python para generar PDF cuando no hay Word/LibreOffice.
-    table_rows: [{'descripcion': str, 'cantidad': int}, ...]
-    """
-    if not canvas or not A4:
-        return False, "No está instalada la librería reportlab."
-
-    try:
-        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
-        c = canvas.Canvas(pdf_path, pagesize=A4)
-        page_w, page_h = A4
-
-        margin_x = 42
-        y = page_h - 56
-
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(margin_x, y, str(titulo_acta or "ACTA"))
-        y -= 24
-
-        # Encabezado de tabla
-        c.setFont("Helvetica-Bold", 10)
-        c.drawString(margin_x, y, "DESCRIPCION")
-        c.drawRightString(page_w - margin_x, y, "CANTIDAD")
-        y -= 8
-        c.line(margin_x, y, page_w - margin_x, y)
-        y -= 14
-
-        c.setFont("Helvetica", 10)
-        for row in table_rows or []:
-            descripcion = str((row or {}).get("descripcion") or "-")
-            cantidad = str((row or {}).get("cantidad") or 0)
-
-            if y < 60:
-                c.showPage()
-                y = page_h - 56
-                c.setFont("Helvetica-Bold", 10)
-                c.drawString(margin_x, y, "DESCRIPCION")
-                c.drawRightString(page_w - margin_x, y, "CANTIDAD")
-                y -= 8
-                c.line(margin_x, y, page_w - margin_x, y)
-                y -= 14
-                c.setFont("Helvetica", 10)
-
-            # recorte simple de linea larga
-            if len(descripcion) > 95:
-                descripcion = f"{descripcion[:92]}..."
-
-            is_total = descripcion.strip().upper() == "TOTAL DE BIENES"
-            if is_total:
-                c.setFont("Helvetica-Bold", 10)
-
-            c.drawString(margin_x, y, descripcion)
-            c.drawRightString(page_w - margin_x, y, cantidad)
-            y -= 14
-
-            if is_total:
-                c.setFont("Helvetica", 10)
-
-        c.save()
-        return True, None
-    except Exception as exc:
-        return False, str(exc)
 
 
 def _normalize_jinja_in_docx(template_path):
@@ -326,14 +70,13 @@ def _normalize_jinja_in_docx(template_path):
 
 # Configuración y estilos para las tablas extraidas
 TABLE_STYLES_CONFIG = {
-    # Aquí puedes personalizar cómo se renderiza la tabla generada dinámicamente
     "font_size": 9,
     "font_name": "Arial",
     "header_bg_color": "D9EAF7",
     "header_font_color": "000000",
     "header_font_bold": True,
     "border_color": "000000",
-    "border_size": 4  # tamaño estándar en docx
+    "border_size": 4
 }
 
 
@@ -442,12 +185,6 @@ def extract_variables_from_template(file_path):
         return []
 
 def configure_table_data(extraction_data):
-    """
-    Toma los datos de la selección de inventario y los preprocesa
-    para ser inyectados en el Word respetando la configuración de estilos.
-    
-    extraction_data: lista de diccionarios, e.g., [{"CÓDIGO INV.": "123", "DESCRIPCIÓN": "Silla"}, ...]
-    """
     if not extraction_data:
         return []
 
@@ -483,14 +220,6 @@ def configure_table_data(extraction_data):
     return normalized_rows
 
 def build_dynamic_table_context(table_rows, table_columns):
-    """
-    Construye estructuras para tablas dinámicas (columnas y filas)
-    consumibles por docxtpl en Word.
-
-    table_rows: lista de dicts con filas de inventario.
-    table_columns: lista de columnas seleccionadas, por ejemplo:
-        [{"id": "cod_inventario", "label": "CODIGO INV."}, ...]
-    """
     if not table_rows or not table_columns:
         return [], []
 
@@ -591,7 +320,6 @@ def _build_area_summary_table_subdoc(subdoc, filas, context_data):
     max_desc_len = max((len(v) for v in desc_values), default=0)
     use_compact_size = max_desc_len > 0 and max_desc_len < 15
 
-    # Tamaño base (normal) y variante compacta (40% menor total: 20% previo + 20% adicional).
     desc_width = 5.9
     qty_width = 1.1
     if use_compact_size:
@@ -628,13 +356,11 @@ def _compute_general_table_widths(columnas, total_width_in=7.0):
 
     if estado_idx >= 0 and desc_idx >= 0 and estado_idx != desc_idx:
         old_estado = widths[estado_idx]
-        # Afinado de diseño: ceder ancho de ESTADO a DESCRIPCION.
         new_estado = max(0.9, round(old_estado - 0.35, 2))
         delta_estado = old_estado - new_estado
         widths[estado_idx] = new_estado
         widths[desc_idx] = round(widths[desc_idx] + delta_estado, 2)
 
-    # Ajuste fino para que la suma permanezca igual al total.
     diff = round(total_width_in - sum(widths), 4)
     if abs(diff) > 0 and n > 0:
         target_idx = desc_idx if desc_idx >= 0 else 0
@@ -644,12 +370,6 @@ def _compute_general_table_widths(columnas, total_width_in=7.0):
 
 
 def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns, context_data=None):
-    """
-    Construye una tabla dinámica dentro de un subdocumento para evitar depender
-    de tags complejos {%tc %}/{%tr %} sensibles a cambios de Word.
-
-    Se renderiza en plantilla usando una sola variable: {{ tabla_dinamica }}
-    """
     if not table_rows or not table_columns:
         return None
 
@@ -660,8 +380,6 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns, context_data=
     try:
         subdoc = doc_tpl.new_subdoc()
     except Exception as exc:
-        # new_subdoc depends on docxcompose; if it is missing, keep generation alive
-        # so fixed-field templates and preview continue working.
         if "docxcompose" in str(exc).lower():
             logger.warning("docxcompose no instalado. tabla_dinamica se omitira temporalmente.")
             return None
@@ -671,7 +389,6 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns, context_data=
         return _build_area_summary_table_subdoc(subdoc, filas, context_data)
 
     table = subdoc.add_table(rows=1, cols=len(columnas))
-    # Algunas plantillas no incluyen el estilo en ingles; degradamos con fallback seguro.
     for style_name in ("Table Grid", "Tabla con cuadricula", "Tabla con cuadrícula"):
         try:
             table.style = style_name
@@ -680,7 +397,6 @@ def build_dynamic_table_subdoc(doc_tpl, table_rows, table_columns, context_data=
             continue
     table.autofit = False
 
-    # Mantiene tabla en tamaño normal/completo y redistribuye ancho entre columnas clave.
     column_widths = _compute_general_table_widths(columnas, total_width_in=7.0)
 
     # Encabezados
@@ -713,33 +429,23 @@ def generate_acta(
     table_columns=None,
     output_dir=None,
     doc_name="acta",
-    generate_pdf=True,
     use_date_subfolder=True,
     include_time_suffix=True,
 ):
     """
-    Genera el archivo DOCX final y un PDF.
-    
-    template_path: ruta de la plantilla DOCX base
-    context_data: Diccionario con los datos del form (e.g. {"entregado_por": "Juan", "ubicacion": "Bloque A"})
-    table_data: Lista de diccionarios con la tabla del inventario
-    output_dir: Directorio base de descargas (por ej: C:/Users/x/Downloads/inventario)
+    Genera únicamente el archivo DOCX final.
     """
     normalized_template = _normalize_jinja_in_docx(template_path)
     doc = DocxTemplate(normalized_template)
-    # Evita mutar el contexto original del request (puede romper json.dumps en historial).
     render_context = dict(context_data or {})
     
-    # Inyectar tabla si existe
     if table_data:
         render_context['tabla_items'] = configure_table_data(table_data)
 
-    # Modo dinámico completo: encabezados y celdas según columnas seleccionadas
     if table_data and table_columns:
         tabla_columnas, tabla_filas = build_dynamic_table_context(table_data, table_columns)
         render_context['tabla_columnas'] = tabla_columnas
         render_context['tabla_filas'] = tabla_filas
-        # Camino robusto recomendado: insertar tabla como subdocumento
         render_context['tabla_dinamica'] = build_dynamic_table_subdoc(
             doc,
             table_data,
@@ -755,15 +461,10 @@ def generate_acta(
             raise ValueError(
                 "Sintaxis de tabla dinámica inválida en Word. "
                 "Recomendado: use una sola variable {{ tabla_dinamica }} en la celda donde debe ir la tabla. "
-                "Alternativa avanzada: "
-                "{%tc for col in tabla_columnas %}{{ col.label }}{%tc endfor %} "
-                "y {%tr for fila in tabla_filas %}{%tc for celda in fila.celdas %}{{ celda }}{%tc endfor %}{%tr endfor %}."
             )
         raise
     
-    # Preparar el directorio de salida (e.g., ../Downloads/inventario/acta entrega/31-03-2026/ )
     if not output_dir:
-        # Default de reserva si no proveen uno
         home = os.path.expanduser("~")
         output_dir = os.path.join(home, "Downloads", "inventario", doc_name.lower())
         
@@ -773,71 +474,26 @@ def generate_acta(
     if not os.path.exists(final_output_dir):
         os.makedirs(final_output_dir, exist_ok=True)
     
-    # Generar ruta del archivo
     if include_time_suffix:
         time_str = datetime.datetime.now().strftime("%H%M%S")
         docx_filename = f"{doc_name}_{time_str}.docx"
-        pdf_filename = f"{doc_name}_{time_str}.pdf"
     else:
         docx_filename = f"{doc_name}.docx"
-        pdf_filename = f"{doc_name}.pdf"
     
     docx_path = os.path.join(final_output_dir, docx_filename)
-    pdf_path = os.path.join(final_output_dir, pdf_filename)
     
-    # Guardar docx
     try:
         doc.save(docx_path)
     except Exception as e:
         logger.error(f"Error guardando DOCX en {docx_path}: {e}")
-        return None, None
+        return None
         
-    # Guardar PDF con fallback multiplataforma:
-    # 1) Word/docx2pdf en Windows
-    # 2) LibreOffice headless en cualquier SO
-    gen_pdf = False
-    converter = convert
-    if platform.system() == "Windows" and not converter:
-        # Intento tardío por si la app inició antes de instalar docx2pdf.
-        try:
-            from docx2pdf import convert as runtime_convert
-            converter = runtime_convert
-        except Exception:
-            converter = None
-
-    if generate_pdf:
-        abs_docx = os.path.abspath(docx_path)
-        abs_pdf = os.path.abspath(pdf_path)
-
-        if platform.system() == "Windows" and converter:
-            ok_word_com, err_word_com = _convert_docx_to_pdf_with_word_com(abs_docx, abs_pdf)
-            gen_pdf = ok_word_com
-            if not gen_pdf:
-                logger.warning(
-                    f"Conversión directa con Word COM falló. Detalle: {err_word_com or 'sin detalle'}"
-                )
-                ok_word, err_word = _convert_docx_to_pdf_with_word(abs_docx, abs_pdf, converter)
-                gen_pdf = ok_word
-                if not gen_pdf:
-                    logger.error(
-                        f"Error convirtiendo DOCX a PDF con Word/docx2pdf. Detalle: {err_word or 'sin detalle'}"
-                    )
-
-        if not gen_pdf:
-            with PDF_CONVERT_LOCK:
-                lo_ok, lo_error = _convert_docx_to_pdf_with_libreoffice(abs_docx, abs_pdf)
-            gen_pdf = lo_ok
-            if not gen_pdf:
-                logger.warning(f"No fue posible convertir DOCX a PDF. {lo_error}")
-            
-    # Retornar rutas locales (absolutas preferiblemente o directas)
-    return docx_path, pdf_path if gen_pdf else None
+    return docx_path
 
 
 def render_docx_preview_html(docx_path):
     """
-    Convierte DOCX a HTML simple para fallback de vista previa cuando no se
-    dispone de PDF.
+    Convierte DOCX a HTML simple para vista previa.
     """
     if not docx_path or not os.path.exists(docx_path) or mammoth is None:
         return None
@@ -856,5 +512,5 @@ def render_docx_preview_html(docx_path):
             "</body></html>"
         )
     except Exception as exc:
-        logger.warning(f"No se pudo generar preview HTML para {docx_path}: {exc}")
+        logger.warning(f"No se pudo generar preview HTML for {docx_path}: {exc}")
         return None
