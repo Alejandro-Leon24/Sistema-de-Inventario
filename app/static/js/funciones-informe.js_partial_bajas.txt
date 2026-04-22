@@ -1,0 +1,149 @@
+function setupBajasBienesModal() {
+    const modalEl = document.getElementById("modalBajasBienes");
+    if (!modalEl) return;
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+
+    // Selectores del modal
+    const btnOpen = document.querySelector(".btn-bajas-seleccionar");
+    const btnBuscar = document.getElementById("btn-bajas-buscar");
+    const btnPrev = document.getElementById("btn-bajas-atras");
+    const btnNext = document.getElementById("btn-bajas-siguiente");
+    const btnConfirm = document.getElementById("btn-bajas-confirmar");
+    const checkAll = document.getElementById("bajas-check-all");
+    const btnColumnas = document.getElementById("btn-bajas-columnas");
+    const btnColumnasGuardar = document.getElementById("btn-bajas-columnas-guardar");
+    const modalColumnasEl = document.getElementById("modalBajasColumnas");
+    const modalColumnas = modalColumnasEl ? bootstrap.Modal.getOrCreateInstance(modalColumnasEl) : null;
+    const theadBajas = document.getElementById("thead-bajas-seleccion");
+
+    // Filtros de ubicación
+    const filtroBloque = document.getElementById("bajas-filtro-bloque");
+    const filtroPiso = document.getElementById("bajas-filtro-piso");
+    const filtroArea = document.getElementById("bajas-filtro-area");
+
+    const refreshSelection = () => {
+        applyBajasSelectionFilter();
+        renderBajasSelectionTable();
+    };
+
+    // Inicializar selects de ubicación si existen
+    if (filtroBloque && Array.isArray(structureData)) {
+        filtroBloque.innerHTML = '<option value="">Bloque</option>';
+        structureData.forEach(b => {
+            const opt = document.createElement("option");
+            opt.value = b.nombre;
+            opt.textContent = b.nombre;
+            opt.dataset.id = b.id;
+            filtroBloque.appendChild(opt);
+        });
+
+        filtroBloque.addEventListener("change", () => {
+            const bId = filtroBloque.options[filtroBloque.selectedIndex]?.dataset.id;
+            const bloque = structureData.find(x => String(x.id) === String(bId));
+            
+            filtroPiso.innerHTML = '<option value="">Piso</option>';
+            filtroArea.innerHTML = '<option value="">Área</option>';
+            
+            if (bloque) {
+                (bloque.pisos || []).forEach(p => {
+                    const opt = document.createElement("option");
+                    opt.value = p.nombre;
+                    opt.textContent = p.nombre;
+                    opt.dataset.id = p.id;
+                    filtroPiso.appendChild(opt);
+                });
+                filtroPiso.disabled = false;
+            } else {
+                filtroPiso.disabled = true;
+            }
+            filtroArea.disabled = true;
+            refreshSelection();
+        });
+
+        filtroPiso.addEventListener("change", () => {
+            const bId = filtroBloque.options[filtroBloque.selectedIndex]?.dataset.id;
+            const pId = filtroPiso.options[filtroPiso.selectedIndex]?.dataset.id;
+            const bloque = structureData.find(x => String(x.id) === String(bId));
+            const piso = (bloque?.pisos || []).find(x => String(x.id) === String(pId));
+            
+            filtroArea.innerHTML = '<option value="">Área</option>';
+            if (piso) {
+                (piso.areas || []).forEach(a => {
+                    const opt = document.createElement("option");
+                    opt.value = a.nombre;
+                    opt.textContent = a.nombre;
+                    filtroArea.appendChild(opt);
+                });
+                filtroArea.disabled = false;
+            } else {
+                filtroArea.disabled = true;
+            }
+            refreshSelection();
+        });
+
+        filtroArea.addEventListener("change", refreshSelection);
+    }
+
+    // Paginación
+    document.getElementById("bajas-page-prev")?.addEventListener("click", () => {
+        if (bajasPage > 1) {
+            bajasPage--;
+            renderBajasSelectionTable();
+        }
+    });
+    document.getElementById("bajas-page-next")?.addEventListener("click", () => {
+        const totalPages = Math.ceil(bajasFilteredItems.length / bajasPerPage);
+        if (bajasPage < totalPages) {
+            bajasPage++;
+            renderBajasSelectionTable();
+        }
+    });
+
+    // Check All
+    if (theadBajas) {
+        theadBajas.addEventListener("change", (e) => {
+            if (e.target.id === "bajas-check-all") {
+                const checked = e.target.checked;
+                (Array.isArray(bajasFilteredItems) ? bajasFilteredItems : []).forEach(item => {
+                    if (checked) bajasSelectedItemIds.add(Number(item.id));
+                    else bajasSelectedItemIds.delete(Number(item.id));
+                });
+                renderBajasSelectionTable();
+            }
+        });
+    }
+
+    btnOpen?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        notify("Cargando bienes...", "info");
+        await loadExtraccionData();
+        await loadBajasEstadoOptions();
+        bajasSelectedItemIds = new Set((Array.isArray(bajasBienesTemp) ? bajasBienesTemp : []).map(r => Number(r.id)).filter(Boolean));
+        setBajasStep(1);
+        refreshSelection();
+        modal.show();
+    });
+
+    btnBuscar?.addEventListener("click", refreshSelection);
+    document.getElementById("bajas-buscar")?.addEventListener("input", refreshSelection);
+
+    btnPrev?.addEventListener("click", () => setBajasStep(1));
+    btnNext?.addEventListener("click", () => {
+        if (!bajasSelectedItemIds.size) {
+            notify("Seleccione al menos un bien.", true);
+            return;
+        }
+        bajasDraftBienes = (Array.isArray(inventoryDataCache) ? inventoryDataCache : [])
+            .filter(item => bajasSelectedItemIds.has(Number(item.id)))
+            .map(item => ({...item, estado: item.estado || "MALO", justificacion: item.justificacion || ""}));
+        renderBajasEditionTable();
+        setBajasStep(2);
+    });
+
+    btnConfirm?.addEventListener("click", () => {
+        bajasBienesTemp = bajasDraftBienes.map(row => ({...row}));
+        updateBajasSummary();
+        modal.hide();
+        document.dispatchEvent(new CustomEvent("informe:tablaExtraida"));
+    });
+}

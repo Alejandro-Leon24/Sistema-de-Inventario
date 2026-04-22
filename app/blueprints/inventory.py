@@ -1343,17 +1343,6 @@ def api_delete_inventario(item_id):
     return jsonify({"success": True})
 
 
-@inventory_bp.post("/api/inventario/vaciar-temporal")
-def api_clear_inventario_temporal():
-    payload = request.get_json(silent=True) or {}
-    confirm_text = str(payload.get("confirm_text") or "").strip().upper()
-    if confirm_text != "VACIAR TODO":
-        return jsonify({"error": "Confirmación inválida. Debes enviar 'VACIAR TODO'."}), 400
-
-    result = clear_inventory_items(reset_sequence=True)
-    return jsonify({"success": True, "deleted": result["deleted"]})
-
-
 @inventory_bp.post("/api/inventario/pegar")
 def api_paste_inventario():
     payload = request.get_json(silent=True) or {}

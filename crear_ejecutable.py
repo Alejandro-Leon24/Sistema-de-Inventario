@@ -29,6 +29,7 @@ def crear_app():
         ("app/static", "app/static"),
         ("app/templates", "app/templates"),
         ("database/schema.sql", "database"), # Necesario para inicializar DBs nuevas
+        ("plantillas", "plantillas_default"), # Copia de respaldo interna
     ]
 
     cmd = [
@@ -38,6 +39,9 @@ def crear_app():
         "--windowed",
         "--name", "SistemaInventario",
         "--clean",
+        "--collect-all", "flask",
+        "--collect-all", "openpyxl",
+        "--collect-all", "docxtpl",
     ]
 
     for src, dest in data_folders:

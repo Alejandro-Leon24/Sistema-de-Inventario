@@ -206,13 +206,21 @@ def get_next_numero_acta(year, tipo_acta=None):
     db = get_db()
     target_year = int(year)
     tipo_key = _normalize_tipo_acta(tipo_acta)
+    
+    # 1. Buscar el máximo en el historial real
     max_historial = get_max_numero_acta_for_year(target_year, tipo_acta=tipo_key)
+    
+    # 2. Buscar en la tabla de secuencias (reserva)
     seq_row = db.execute(
         "SELECT ultimo_numero FROM secuencia_actas_tipo WHERE tipo_acta = ? AND anio = ?",
         (tipo_key, target_year),
     ).fetchone()
     max_sequence = int(seq_row["ultimo_numero"] or 0) if seq_row else 0
+    
+    # El siguiente es el máximo de ambos + 1
     next_value = max(max_historial, max_sequence) + 1
+    
+    # Formatear como 001-2026, 002-2026, etc.
     return f"{next_value:03d}-{target_year}"
 
 
@@ -324,6 +332,38 @@ def get_historial_actas(tipo_acta=None):
     else:
         rows = db.execute(f"SELECT * FROM historial_actas {order_sql}").fetchall()
     return [_normalize_historial_row_paths(dict(row)) for row in rows]
+
+
+def get_historial_acta_by_id(acta_id):
+    import json
+    db = get_db()
+    row = db.execute("SELECT * FROM historial_actas WHERE id = ?", (int(acta_id),)).fetchone()
+    if not row:
+        return None
+    
+    acta = _normalize_historial_row_paths(dict(row))
+    
+    # Validar existencia de bienes en el inventario actual
+    try:
+        datos = json.loads(acta["datos_json"] or "{}")
+        tabla = datos.get("tabla", [])
+        if isinstance(tabla, list) and tabla:
+            # Obtener todos los IDs de bienes en el inventario actual
+            inventory_ids = {
+                r["id"] for r in db.execute("SELECT id FROM inventario_items").fetchall()
+            }
+            # Marcar bienes eliminados
+            for item in tabla:
+                item_id = item.get("id")
+                if item_id and item_id not in inventory_ids:
+                    item["eliminado"] = True
+            
+            acta["datos_json"] = json.dumps(datos, ensure_ascii=False)
+    except Exception:
+        # Si falla el parseo, devolvemos el acta tal cual
+        pass
+        
+    return acta
 
 
 def count_historial_by_template_snapshot(plantilla_snapshot_path):

@@ -234,7 +234,6 @@ async function initInventoryPage() {
 		filtroOrder: document.getElementById("filtro-order"),
 		filtroSearch: document.getElementById("filtro-search"),
 		exportExcelBtn: document.getElementById("btn-exportar-excel"),
-		clearInventoryBtn: document.getElementById("btn-vaciar-inventario-temporal"),
 		toggleDensityBtn: document.getElementById("btn-toggle-density"),
 		gridWrapper: document.getElementById("inventory-grid-wrapper"),
 		table: document.getElementById("tabla-inventario"),
@@ -1261,31 +1260,6 @@ async function initInventoryPage() {
 			});
 		}
 		await loadItems();
-	}
-
-	async function clearInventoryForTesting() {
-		const confirmed = window.confirm("Esto borrará TODOS los bienes del inventario para pruebas. ¿Deseas continuar?");
-		if (!confirmed) return;
-
-		const confirmText = window.prompt("Escribe exactamente: VACIAR TODO", "");
-		if (String(confirmText || "").trim().toUpperCase() !== "VACIAR TODO") {
-			notify("Operación cancelada: confirmación incorrecta.", true);
-			return;
-		}
-
-		try {
-			const result = await api.send("/api/inventario/vaciar-temporal", "POST", { confirm_text: "VACIAR TODO" });
-			state.selectedRowId = null;
-			await loadItems();
-			notify(`Inventario vaciado para pruebas. Registros eliminados: ${Number(result.deleted || 0)}.`);
-		} catch (error) {
-			const raw = String(error?.payload?.raw || "");
-			if (raw.startsWith("<!DOCTYPE") || raw.startsWith("<html")) {
-				notify("El servidor devolvió HTML en lugar de JSON. Reinicia la app y vuelve a intentar el vaciado.", true);
-				return;
-			}
-			notify(error.message, true);
-		}
 	}
 
 	function resetAddItemForm() {

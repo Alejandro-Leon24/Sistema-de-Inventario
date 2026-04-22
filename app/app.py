@@ -1,6 +1,8 @@
 import os
 import sys
+import time
 from pathlib import Path
+from threading import Timer, Thread
 
 # Manejo de rutas para entorno empaquetado (PyInstaller)
 if getattr(sys, 'frozen', False):
@@ -17,7 +19,20 @@ if str(BASE_DIR) in sys.path:
     sys.path.remove(str(BASE_DIR))
 sys.path.insert(0, str(BASE_DIR))
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request
+
+last_heartbeat = time.time()
+
+def shutdown_server():
+    print("No se detectó actividad del navegador. Cerrando el servidor...")
+    os._exit(0)
+
+def heartbeat_monitor():
+    while True:
+        time.sleep(5)
+        # Si han pasado más de 12 segundos sin heartbeat, cerramos
+        if time.time() - last_heartbeat > 12:
+            shutdown_server()
 
 def create_app() -> Flask:
     # Configuramos Flask para buscar templates y static en BUNDLE_DIR (interno al exe)
@@ -42,6 +57,13 @@ def create_app() -> Flask:
         from blueprints import register_blueprints
     
     register_blueprints(app)
+
+    # Endpoint para el Heartbeat
+    @app.route("/api/heartbeat", methods=["POST"])
+    def heartbeat():
+        global last_heartbeat
+        last_heartbeat = time.time()
+        return "", 204
 
     # Keep legacy endpoint names used by templates after blueprint split.
     endpoint_aliases = {
@@ -77,10 +99,10 @@ def open_browser():
     webbrowser.open_new("http://127.0.0.1:5000")
 
 if __name__ == "__main__":
-    # Si la app está empaquetada, abrimos el navegador automáticamente
+    # Iniciar monitor de heartbeat solo si está congelado (ejecutable)
     if getattr(sys, 'frozen', False):
+        Thread(target=heartbeat_monitor, daemon=True).start()
         Timer(1.5, open_browser).start()
         app.run(host="0.0.0.0", port=5000, debug=False, threaded=True, use_reloader=False)
     else:
         app.run(host="0.0.0.0", port=5000, debug=True, threaded=True, use_reloader=False)
-

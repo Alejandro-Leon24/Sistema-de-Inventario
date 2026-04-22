@@ -690,6 +690,15 @@ def api_traspaso_exportar():
     return send_file(out, as_attachment=True, download_name="traspasos.xlsx", mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+@documents_bp.route("/api/historial/<int:acta_id>", methods=["GET"])
+def api_get_historial_by_id(acta_id):
+    from database.historial_repository import get_historial_acta_by_id
+    acta = get_historial_acta_by_id(acta_id)
+    if not acta:
+        return jsonify({"success": False, "error": "Acta no encontrada"}), 404
+    return jsonify({"success": True, "data": acta})
+
+
 @documents_bp.route("/api/historial/<int:acta_id>", methods=["DELETE"])
 def api_delete_historial(acta_id):
     deleted = delete_historial_acta(acta_id)

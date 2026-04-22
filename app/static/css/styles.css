@@ -553,6 +553,24 @@ body.inventory-column-dragging * {
     border-bottom: 0;
 }
 
+#preview-column {
+    height: 80vh;
+}
+
+@media (min-width: 992px) {
+    #preview-column {
+        width: 30vw !important;
+    }
+}
+
+@media (max-width: 991px) {
+    #preview-column {
+        width: 100% !important;
+        height: 60vh;
+        margin-top: 1rem;
+    }
+}
+
 #modalRecepcionBienes .form-label.small {
     font-size: 0.72rem;
     margin-bottom: 0.2rem;

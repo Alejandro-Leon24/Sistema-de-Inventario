@@ -39,6 +39,12 @@
 			state.items.forEach((item, index) => {
 				const tr = document.createElement("tr");
 				tr.dataset.id = item.id;
+				
+				const isEliminado = !!item.eliminado;
+				if (isEliminado) {
+					tr.classList.add("table-danger-subtle");
+				}
+
 				columns.forEach((column) => {
 					const td = document.createElement("td");
 					td.dataset.field = column.field;
@@ -51,7 +57,12 @@
 						displayValue = formatValue(column.field, item[column.field]);
 					}
 
-					td.textContent = displayValue;
+					if (column.field === "descripcion" && isEliminado) {
+						td.innerHTML = `${escapeHtmlText(displayValue)} <span class="badge bg-danger ms-1">Eliminado</span>`;
+					} else {
+						td.textContent = displayValue;
+					}
+					
 					td.title = String(displayValue || "");
 					td.classList.add("inventory-cell");
 					if ((column.field === "cod_inventario" || column.field === "cod_esbye") && isNoCodeValue(displayValue)) {
